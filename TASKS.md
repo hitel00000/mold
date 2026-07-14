@@ -1,0 +1,157 @@
+# TASKS
+
+## Milestone 0. 철학 고정
+
+* [ ] 프로젝트 이름 결정
+* [ ] 핵심 철학(Manifesto) 작성
+* [ ] Non Goals 작성
+* [ ] MVP 범위 정의
+
+---
+
+## Milestone 1. Resource
+
+목표: Resource 하나를 메모리에서 표현할 수 있다.
+
+* [ ] Resource Schema 설계
+* [ ] Primitive Type 정의
+* [ ] Relation 정의
+* [ ] Resource Loader 구현
+* [ ] Resource Registry 구현
+
+완료 기준
+
+* YAML 하나를 읽으면 Resource 목록이 생성된다.
+
+---
+
+## Milestone 2. Storage
+
+목표: Resource를 실제 데이터베이스에 저장할 수 있다.
+
+* [ ] Storage Interface 정의
+* [ ] SQLite Adapter 구현
+* [ ] Schema → CREATE TABLE 생성
+* [ ] Migration 전략 결정
+* [ ] CRUD 구현
+
+완료 기준
+
+* Resource 하나만으로 CRUD가 동작한다.
+
+---
+
+## Milestone 3. Transport
+
+목표: REST API를 자동 생성한다.
+
+* [ ] HTTP Router
+* [ ] List
+* [ ] Detail
+* [ ] Create
+* [ ] Update
+* [ ] Delete
+* [ ] Pagination
+
+완료 기준
+
+* 새로운 Resource를 추가하면 API가 자동으로 생긴다.
+
+---
+
+## Milestone 4. Default View
+
+목표: 관리 화면이 자동으로 생성된다.
+
+* [ ] List View
+* [ ] Detail View
+* [ ] Create Form
+* [ ] Edit Form
+* [ ] Navigation
+
+완료 기준
+
+* 브라우저에서 CRUD가 가능하다.
+
+---
+
+## Milestone 5. Identity
+
+목표: 온라인 서비스의 최소 조건을 만족한다.
+
+* [ ] User Resource
+* [ ] Session
+* [ ] Authentication
+* [ ] Authorization
+* [ ] Resource별 Permission
+
+완료 기준
+
+* 로그인 후 권한에 따라 Resource 접근이 제어된다.
+
+---
+
+## Milestone 6. AI Workflow
+
+목표: 사람이 Resource만 작성한다.
+
+* [ ] Resource 작성 가이드
+* [ ] AI용 프로젝트 규칙(AGENTS.md)
+* [ ] AI가 Resource 추가
+* [ ] Runtime 자동 반영
+* [ ] View 재생성
+
+완료 기준
+
+* AI가 Resource만 수정해도 서비스가 확장된다.
+
+---
+
+# 검증 프로젝트
+
+## Blog
+
+* User
+* Post
+* Comment
+
+---
+
+## Todo
+
+* User
+* Project
+* Task
+
+---
+
+## CRM
+
+* Customer
+* Contact
+* Company
+
+---
+
+## 성공 기준
+
+다음 Resource 하나를 작성한다.
+
+```yaml
+resource: Post
+
+fields:
+  title: string
+  body: markdown
+```
+
+그리고 아무 코드도 작성하지 않고 다음이 자동으로 생성된다.
+
+* Storage
+* CRUD
+* REST API
+* Default View
+* Authentication 연동
+* Authorization 연동
+
+여기까지가 MVP이다.
