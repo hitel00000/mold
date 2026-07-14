@@ -2,10 +2,10 @@
 
 ## Milestone 0. 철학 고정
 
-* [ ] 프로젝트 이름 결정
-* [ ] 핵심 철학(Manifesto) 작성
-* [ ] Non Goals 작성
-* [ ] MVP 범위 정의
+* [x] 프로젝트 이름 결정
+* [x] 핵심 철학(Manifesto) 작성
+* [x] Non Goals 작성
+* [x] MVP 범위 정의
 
 ---
 
