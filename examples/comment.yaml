@@ -1,7 +1,8 @@
-resource: Comment
+resource:
+  name: Comment
 
 fields:
-  body:
+  - name: body
     type: text
 
 relations:

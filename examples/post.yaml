@@ -1,10 +1,10 @@
-resource: Post
+resource:
+  name: Post
 
 fields:
-  title:
+  - name: title
     type: string
-
-  body:
+  - name: body
     type: markdown
 
 relations:

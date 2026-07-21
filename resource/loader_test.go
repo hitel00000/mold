@@ -52,3 +52,28 @@ func TestLoadFromFile_Post(t *testing.T) {
 		t.Errorf("expected body type 'markdown', got '%s'", body.Type)
 	}
 }
+
+func TestLoad_RejectsNonCanonicalSyntax(t *testing.T) {
+	shortFormResource := []byte(`
+resource: Post
+fields:
+  - name: title
+    type: string
+`)
+	_, err := resource.Load(shortFormResource)
+	if err == nil {
+		t.Errorf("expected error when resource is a scalar string instead of mapping, got nil")
+	}
+
+	shortFormFields := []byte(`
+resource:
+  name: Post
+fields:
+  title:
+    type: string
+`)
+	_, err = resource.Load(shortFormFields)
+	if err == nil {
+		t.Errorf("expected error when fields is a map instead of sequence, got nil")
+	}
+}

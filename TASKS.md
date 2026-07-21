@@ -138,11 +138,14 @@
 다음 Resource 하나를 작성한다.
 
 ```yaml
-resource: Post
+resource:
+  name: Post
 
 fields:
-  title: string
-  body: markdown
+  - name: title
+    type: string
+  - name: body
+    type: markdown
 ```
 
 그리고 아무 코드도 작성하지 않고 다음이 자동으로 생성된다.

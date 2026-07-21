@@ -137,13 +137,14 @@ Mold는 다음을 목표로 하지 않는다.
 다음 Resource 하나를 작성한다.
 
 ```yaml
-resource: Post
+resource:
+  name: Post
 
 fields:
-  title:
+  - name: title
     type: string
 
-  body:
+  - name: body
     type: markdown
 ```
 
@@ -211,13 +212,14 @@ mold/
 다음 Resource를 작성한다.
 
 ```yaml
-resource: Post
+resource:
+  name: Post
 
 fields:
-  title:
+  - name: title
     type: string
 
-  body:
+  - name: body
     type: markdown
 ```
 

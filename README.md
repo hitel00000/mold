@@ -56,13 +56,14 @@ Mold는 이 공통 구조를 자동화한다.
 ## 예제
 
 ```yaml
-resource: Post
+resource:
+  name: Post
 
 fields:
-  title:
+  - name: title
     type: string
 
-  body:
+  - name: body
     type: markdown
 ```
 

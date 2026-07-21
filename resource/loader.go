@@ -18,7 +18,7 @@ func LoadFromFile(path string) (*Resource, error) {
 	return Load(data)
 }
 
-// Load parses raw YAML byte data into a Resource IR.
+// Load parses raw YAML byte data into a Resource IR using canonical YAML syntax.
 func Load(data []byte) (*Resource, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
@@ -46,39 +46,45 @@ func Load(data []byte) (*Resource, error) {
 
 		switch keyNode.Value {
 		case "resource":
-			if valNode.Kind == yaml.ScalarNode {
-				r.Name = valNode.Value
-			} else if valNode.Kind == yaml.MappingNode {
-				for j := 0; j < len(valNode.Content); j += 2 {
-					rkNode := valNode.Content[j]
-					rvNode := valNode.Content[j+1]
-					switch rkNode.Value {
-					case "name":
-						r.Name = rvNode.Value
-					case "table":
-						r.Table = rvNode.Value
-					case "schema_version":
-						var v int
-						if err := rvNode.Decode(&v); err == nil {
-							r.SchemaVersion = v
-						}
-					case "timestamps":
-						var v bool
-						if err := rvNode.Decode(&v); err == nil {
-							r.Timestamps = v
-						}
-					case "soft_delete":
-						var v bool
-						if err := rvNode.Decode(&v); err == nil {
-							r.SoftDelete = v
-						}
+			if valNode.Kind != yaml.MappingNode {
+				return nil, fmt.Errorf("resource node must be a mapping with name attribute")
+			}
+			for j := 0; j < len(valNode.Content); j += 2 {
+				rkNode := valNode.Content[j]
+				rvNode := valNode.Content[j+1]
+				switch rkNode.Value {
+				case "name":
+					r.Name = rvNode.Value
+				case "table":
+					r.Table = rvNode.Value
+				case "schema_version":
+					var v int
+					if err := rvNode.Decode(&v); err == nil {
+						r.SchemaVersion = v
+					}
+				case "timestamps":
+					var v bool
+					if err := rvNode.Decode(&v); err == nil {
+						r.Timestamps = v
+					}
+				case "soft_delete":
+					var v bool
+					if err := rvNode.Decode(&v); err == nil {
+						r.SoftDelete = v
 					}
 				}
 			}
 		case "fields":
-			fields, err := parseFields(valNode)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse fields: %w", err)
+			if valNode.Kind != yaml.SequenceNode {
+				return nil, fmt.Errorf("fields node must be a sequence of field mappings")
+			}
+			var fields []Field
+			for _, item := range valNode.Content {
+				var f Field
+				if err := item.Decode(&f); err != nil {
+					return nil, fmt.Errorf("failed to decode field: %w", err)
+				}
+				fields = append(fields, f)
 			}
 			r.Fields = fields
 		case "relations":
@@ -106,46 +112,6 @@ func Load(data []byte) (*Resource, error) {
 	}
 
 	return r, nil
-}
-
-func parseFields(node *yaml.Node) ([]Field, error) {
-	var fields []Field
-
-	switch node.Kind {
-	case yaml.SequenceNode:
-		for _, item := range node.Content {
-			var f Field
-			if err := item.Decode(&f); err != nil {
-				return nil, err
-			}
-			fields = append(fields, f)
-		}
-	case yaml.MappingNode:
-		for i := 0; i < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valNode := node.Content[i+1]
-
-			fieldName := keyNode.Value
-			var f Field
-			f.Name = fieldName
-
-			if valNode.Kind == yaml.ScalarNode {
-				f.Type = FieldType(valNode.Value)
-			} else if valNode.Kind == yaml.MappingNode {
-				if err := valNode.Decode(&f); err != nil {
-					return nil, err
-				}
-				f.Name = fieldName
-			} else {
-				return nil, fmt.Errorf("invalid field specification for %s", fieldName)
-			}
-			fields = append(fields, f)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported fields YAML node kind")
-	}
-
-	return fields, nil
 }
 
 var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
