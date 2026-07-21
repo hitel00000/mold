@@ -6,3 +6,10 @@ fields:
 
   body:
     type: markdown
+
+relations:
+  - name: comments
+    kind: has_many
+    target: Comment
+    foreign_key: post_id
+    on_delete: restrict

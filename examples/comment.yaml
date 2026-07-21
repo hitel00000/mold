@@ -1,0 +1,11 @@
+resource: Comment
+
+fields:
+  body:
+    type: text
+
+relations:
+  - name: post
+    kind: belongs_to
+    target: Post
+    foreign_key: post_id
