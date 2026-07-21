@@ -8,7 +8,7 @@ import (
 )
 
 // ValidateRecord verifies that input record data satisfies type safety and all constraints defined in the Resource IR.
-// If isUpdate is true, missing required fields are skipped since partial updates are allowed.
+// Primary key 'id' is strictly rejected in both Create and Update payloads to prevent PK mutation.
 func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	if r == nil {
 		return fmt.Errorf("resource is nil")
@@ -38,15 +38,18 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	validFields["updated_at"] = true
 	validFields["deleted_at"] = true
 
-	// 2. Reject unknown fields, deprecated fields, and explicit PK 'id' on Create
+	// 2. Reject unknown fields, deprecated fields, and explicit PK 'id' in both Create and Update
 	for k := range record {
-		if k == "id" && !isUpdate {
-			return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in record writes", r.Name)
+		if k == "id" {
+			if !isUpdate {
+				return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in create payload", r.Name)
+			}
+			return fmt.Errorf("resource '%s': primary key 'id' cannot be included in update payload; pass it as the target id parameter instead", r.Name)
 		}
 		if deprecatedFields[k] {
 			return fmt.Errorf("resource '%s': field '%s' is deprecated and cannot be written", r.Name, k)
 		}
-		if !validFields[k] && k != "id" {
+		if !validFields[k] {
 			return fmt.Errorf("resource '%s': unknown field '%s'", r.Name, k)
 		}
 	}
@@ -94,8 +97,6 @@ func validateFieldType(resName string, f Field, val any) error {
 			return fmt.Errorf("resource '%s': field '%s' expects %s, got %s", resName, f.Name, f.Type, typeNameOf(val))
 		}
 	case TypeInt:
-		// JSON unmarshaling naturally represents numbers as float64.
-		// Integer values without decimals (e.g. 10.0) are allowed, while numbers with fractional components (e.g. 10.5) are rejected.
 		switch v := val.(type) {
 		case int, int64, int32:
 			// valid integer
@@ -111,7 +112,6 @@ func validateFieldType(resName string, f Field, val any) error {
 			return fmt.Errorf("resource '%s': field '%s' expects int, got %s", resName, f.Name, typeNameOf(val))
 		}
 	case TypeFloat:
-		// Integers are accepted for float fields as integers represent a valid subset of numeric values.
 		switch val.(type) {
 		case float64, float32, int, int64, int32:
 			// valid numeric

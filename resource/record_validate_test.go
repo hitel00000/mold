@@ -22,6 +22,12 @@ func TestValidateRecord_UnknownDeprecatedAndPKFields(t *testing.T) {
 		t.Errorf("expected error when providing explicit PK 'id' on Create, got nil")
 	}
 
+	// 1-b. Reject explicit PK 'id' on Update
+	err = resource.ValidateRecord(res, map[string]any{"title": "Test Title", "id": 1}, true)
+	if err == nil {
+		t.Errorf("expected error when providing explicit PK 'id' on Update, got nil")
+	}
+
 	// 2. Reject unknown field
 	err = resource.ValidateRecord(res, map[string]any{"title": "Test Title", "titel": "typo"}, false)
 	if err == nil {
