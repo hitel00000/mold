@@ -39,6 +39,8 @@
 
 * Resource 하나만으로 CRUD가 동작한다.
 
+* 회고: [Milestone 2 회고](docs/retrospectives/milestone-2.md)
+
 ---
 
 ## Milestone 3. Transport
