@@ -29,11 +29,11 @@
 
 목표: Resource를 실제 데이터베이스에 저장할 수 있다.
 
-* [ ] Storage Interface 정의
-* [ ] SQLite Adapter 구현
-* [ ] Schema → CREATE TABLE 생성
-* [ ] Migration 전략 결정
-* [ ] CRUD 구현
+* [x] Storage Interface 정의
+* [x] SQLite Adapter 구현
+* [x] Schema → CREATE TABLE 생성
+* [x] Migration 전략 결정
+* [x] CRUD 구현
 
 완료 기준
 
