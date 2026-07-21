@@ -6,6 +6,41 @@ import (
 	"github.com/hitel00000/mold/resource"
 )
 
+func TestValidateRecord_UnknownDeprecatedAndPKFields(t *testing.T) {
+	depSince := 2
+	res := &resource.Resource{
+		Name: "Post",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "legacy_slug", Type: resource.TypeString, Deprecated: true, DeprecatedSince: &depSince},
+		},
+	}
+
+	// 1. Reject explicit PK 'id' on Create
+	err := resource.ValidateRecord(res, map[string]any{"title": "Test Title", "id": 1}, false)
+	if err == nil {
+		t.Errorf("expected error when providing explicit PK 'id' on Create, got nil")
+	}
+
+	// 2. Reject unknown field
+	err = resource.ValidateRecord(res, map[string]any{"title": "Test Title", "titel": "typo"}, false)
+	if err == nil {
+		t.Errorf("expected error for unknown field 'titel', got nil")
+	}
+
+	// 3. Reject deprecated field write
+	err = resource.ValidateRecord(res, map[string]any{"title": "Test Title", "legacy_slug": "old-slug"}, false)
+	if err == nil {
+		t.Errorf("expected error for writing deprecated field 'legacy_slug', got nil")
+	}
+
+	// 4. Valid record write
+	err = resource.ValidateRecord(res, map[string]any{"title": "Test Title"}, false)
+	if err != nil {
+		t.Errorf("unexpected error for valid record: %v", err)
+	}
+}
+
 func TestValidateRecord_FieldTypeMismatch(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",

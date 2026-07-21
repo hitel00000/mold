@@ -17,10 +17,49 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		record = make(map[string]any)
 	}
 
+	// 1. Build sets of valid and deprecated fields
+	validFields := make(map[string]bool)
+	deprecatedFields := make(map[string]bool)
+
 	for _, f := range r.Fields {
+		if f.Deprecated {
+			deprecatedFields[f.Name] = true
+		} else {
+			validFields[f.Name] = true
+		}
+	}
+	for _, rel := range r.Relations {
+		if rel.Kind == KindBelongsTo && rel.ForeignKey != "" {
+			validFields[rel.ForeignKey] = true
+		}
+	}
+	// System columns that may be set automatically or in query results
+	validFields["created_at"] = true
+	validFields["updated_at"] = true
+	validFields["deleted_at"] = true
+
+	// 2. Reject unknown fields, deprecated fields, and explicit PK 'id' on Create
+	for k := range record {
+		if k == "id" && !isUpdate {
+			return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in record writes", r.Name)
+		}
+		if deprecatedFields[k] {
+			return fmt.Errorf("resource '%s': field '%s' is deprecated and cannot be written", r.Name, k)
+		}
+		if !validFields[k] && k != "id" {
+			return fmt.Errorf("resource '%s': unknown field '%s'", r.Name, k)
+		}
+	}
+
+	// 3. Field level checks for fields in Resource IR
+	for _, f := range r.Fields {
+		if f.Deprecated {
+			continue
+		}
+
 		val, exists := record[f.Name]
 
-		// 1. Required check for non-nullable fields without default values (only during Create)
+		// Required check for non-nullable fields without default values (only during Create)
 		if !isUpdate && !f.Nullable && f.Default == nil {
 			if !exists || val == nil {
 				return fmt.Errorf("resource '%s': field '%s' is required", r.Name, f.Name)
@@ -28,19 +67,18 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		}
 
 		if !exists || val == nil {
-			// If explicitly updating a non-nullable field with nil
 			if isUpdate && exists && val == nil && !f.Nullable {
 				return fmt.Errorf("resource '%s': field '%s' cannot be null", r.Name, f.Name)
 			}
 			continue
 		}
 
-		// 2. Field Type Validation
+		// Field Type Validation
 		if err := validateFieldType(r.Name, f, val); err != nil {
 			return err
 		}
 
-		// 3. Constraints Validation
+		// Constraints Validation
 		if err := validateFieldConstraints(r.Name, f, val); err != nil {
 			return err
 		}
