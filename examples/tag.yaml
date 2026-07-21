@@ -1,0 +1,7 @@
+resource:
+  name: Tag
+  soft_delete: false
+
+fields:
+  - name: name
+    type: string
