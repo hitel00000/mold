@@ -37,14 +37,13 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 			colDef += fmt.Sprintf(" DEFAULT %s", formatDefaultValue(f.Default))
 		}
 
-		if f.Constraints.Unique {
+		// Column-level UNIQUE constraint only if soft_delete is false.
+		// If soft_delete is true, a partial unique index (WHERE deleted_at IS NULL) is generated instead.
+		if f.Constraints.Unique && !res.SoftDelete {
 			colDef += " UNIQUE"
 		}
 
 		// Field-level CHECK constraints for enum, min, max
-		// Note: Constraints such as pattern, min_length, and max_length are skipped
-		// at the SQLite DDL level due to dialect limitations/complexity, and are
-		// enforced at the application level via resource.Validate.
 		if f.Type == resource.TypeEnum && len(f.Constraints.Values) > 0 {
 			var vals []string
 			for _, v := range f.Constraints.Values {
@@ -97,6 +96,26 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (%s);`, res.Table, strings.Join(allDefs, ", "))
 }
 
+// GenerateIndexesSQL generates index DDLs for a Resource, such as partial unique indexes for soft-deletable resources.
+func GenerateIndexesSQL(res *resource.Resource) []string {
+	var indexes []string
+
+	if !res.SoftDelete {
+		return indexes
+	}
+
+	for _, f := range res.Fields {
+		if f.Constraints.Unique {
+			idxName := fmt.Sprintf("idx_%s_%s_unique", res.Table, f.Name)
+			idxSQL := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"("%s") WHERE "deleted_at" IS NULL;`,
+				idxName, res.Table, f.Name)
+			indexes = append(indexes, idxSQL)
+		}
+	}
+
+	return indexes
+}
+
 func mapToSQLiteType(t resource.FieldType) string {
 	switch t {
 	case resource.TypeInt, resource.TypeBool:
@@ -104,7 +123,6 @@ func mapToSQLiteType(t resource.FieldType) string {
 	case resource.TypeFloat:
 		return "REAL"
 	default:
-		// string, text, markdown, datetime, enum, email, url
 		return "TEXT"
 	}
 }

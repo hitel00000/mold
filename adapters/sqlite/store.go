@@ -79,8 +79,6 @@ func (s *Store) EnsureSchema(ctx context.Context, res *resource.Resource) error 
 	}
 
 	// 3. Destructive migration: DROP existing table if version is different
-	// Note: Destructive migration is an intended MVP constraint.
-	// If real user data preservation is required, this will be replaced with a diff-based migration strategy.
 	dropSQL := fmt.Sprintf(`DROP TABLE IF EXISTS "%s";`, res.Table)
 	if _, err := s.db.ExecContext(ctx, dropSQL); err != nil {
 		return fmt.Errorf("failed to drop table %s for destructive migration: %w", res.Table, err)
@@ -92,7 +90,15 @@ func (s *Store) EnsureSchema(ctx context.Context, res *resource.Resource) error 
 		return fmt.Errorf("failed to create table %s: %w", res.Table, err)
 	}
 
-	// 5. Update meta table
+	// 5. CREATE INDEXES (e.g. partial unique indexes for soft-deleted tables)
+	indexes := GenerateIndexesSQL(res)
+	for _, idxSQL := range indexes {
+		if _, err := s.db.ExecContext(ctx, idxSQL); err != nil {
+			return fmt.Errorf("failed to create index for table %s: %w", res.Table, err)
+		}
+	}
+
+	// 6. Update meta table
 	upsertMetaSQL := fmt.Sprintf(`INSERT INTO "%s" ("resource_name", "version", "updated_at") VALUES (?, ?, DATETIME('now'))
 		ON CONFLICT("resource_name") DO UPDATE SET "version" = excluded."version", "updated_at" = excluded."updated_at";`, metaTableName)
 	if _, err := s.db.ExecContext(ctx, upsertMetaSQL, res.Name, res.SchemaVersion); err != nil {
