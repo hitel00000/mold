@@ -120,3 +120,65 @@ func TestPartialUniqueIndex_WithSoftDelete(t *testing.T) {
 		t.Errorf("expected Create with same username after soft-delete to succeed, got error: %v", err)
 	}
 }
+
+func TestEnsureSchema_VerifyPartialUniqueIndexInSqliteMaster(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:mem_verify_idx?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewStore(db)
+
+	res := &resource.Resource{
+		Name:          "Account",
+		Table:         "accounts",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{
+				Name:     "email",
+				Type:     resource.TypeEmail,
+				Nullable: false,
+				Constraints: resource.Constraints{
+					Unique: true,
+				},
+			},
+		},
+	}
+
+	if err := store.EnsureSchema(ctx, res); err != nil {
+		t.Fatalf("EnsureSchema failed: %v", err)
+	}
+
+	// Query sqlite_master to verify index creation and sql definition
+	var indexName, indexSQL string
+	err = db.QueryRow(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'accounts' AND name LIKE '%unique%'`).Scan(&indexName, &indexSQL)
+	if err != nil {
+		t.Fatalf("failed to find partial unique index in sqlite_master: %v", err)
+	}
+
+	expectedIdxName := "idx_accounts_email_unique"
+	if indexName != expectedIdxName {
+		t.Errorf("expected index name '%s', got '%s'", expectedIdxName, indexName)
+	}
+
+	if !strings.Contains(indexSQL, `WHERE "deleted_at" IS NULL`) {
+		t.Errorf("expected index SQL to contain 'WHERE \"deleted_at\" IS NULL', got: %s", indexSQL)
+	}
+
+	// Verify destructive migration recreates the index properly
+	res.SchemaVersion = 2
+	if err := store.EnsureSchema(ctx, res); err != nil {
+		t.Fatalf("EnsureSchema version 2 failed: %v", err)
+	}
+
+	err = db.QueryRow(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'accounts' AND name LIKE '%unique%'`).Scan(&indexName, &indexSQL)
+	if err != nil {
+		t.Fatalf("failed to find partial unique index in sqlite_master after migration: %v", err)
+	}
+	if indexName != expectedIdxName {
+		t.Errorf("expected index name '%s' after migration, got '%s'", expectedIdxName, indexName)
+	}
+}
