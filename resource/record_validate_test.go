@@ -6,6 +6,61 @@ import (
 	"github.com/hitel00000/mold/resource"
 )
 
+func TestValidateRecord_FieldTypeMismatch(t *testing.T) {
+	res := &resource.Resource{
+		Name: "Post",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: true},
+			{Name: "view_count", Type: resource.TypeInt, Nullable: true},
+			{Name: "rating", Type: resource.TypeFloat, Nullable: true},
+			{Name: "is_published", Type: resource.TypeBool, Nullable: true},
+			{Name: "published_at", Type: resource.TypeDateTime, Nullable: true},
+		},
+	}
+
+	// 1. String expects string, got int
+	err := resource.ValidateRecord(res, map[string]any{"title": 123}, false)
+	if err == nil {
+		t.Errorf("expected error for string field getting int, got nil")
+	}
+
+	// 2. Int expects int, got string
+	err = resource.ValidateRecord(res, map[string]any{"view_count": "100"}, false)
+	if err == nil {
+		t.Errorf("expected error for int field getting string, got nil")
+	}
+
+	// 3. Int with decimal float should be rejected
+	err = resource.ValidateRecord(res, map[string]any{"view_count": 10.5}, false)
+	if err == nil {
+		t.Errorf("expected error for int field getting float with decimal 10.5, got nil")
+	}
+
+	// 4. Int with integer float (e.g. 10.0) should be accepted
+	err = resource.ValidateRecord(res, map[string]any{"view_count": 10.0}, false)
+	if err != nil {
+		t.Errorf("unexpected error for int field getting 10.0: %v", err)
+	}
+
+	// 5. Float accepts int or float
+	err = resource.ValidateRecord(res, map[string]any{"rating": 5}, false)
+	if err != nil {
+		t.Errorf("unexpected error for float field getting int 5: %v", err)
+	}
+
+	// 6. Bool expects bool, got int
+	err = resource.ValidateRecord(res, map[string]any{"is_published": 1}, false)
+	if err == nil {
+		t.Errorf("expected error for bool field getting int 1, got nil")
+	}
+
+	// 7. DateTime invalid format
+	err = resource.ValidateRecord(res, map[string]any{"published_at": "invalid-date"}, false)
+	if err == nil {
+		t.Errorf("expected error for invalid datetime format, got nil")
+	}
+}
+
 func TestValidateRecord_RequiredFieldMissing(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",

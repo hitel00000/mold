@@ -3,10 +3,11 @@ package resource
 import (
 	"fmt"
 	"regexp"
+	"time"
 	"unicode/utf8"
 )
 
-// ValidateRecord verifies that input record data satisfies all constraints defined in the Resource IR.
+// ValidateRecord verifies that input record data satisfies type safety and all constraints defined in the Resource IR.
 // If isUpdate is true, missing required fields are skipped since partial updates are allowed.
 func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	if r == nil {
@@ -34,43 +35,69 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 			continue
 		}
 
-		// 2. Validate string constraints (min_length, max_length, pattern)
-		if strVal, isString := val.(string); isString {
-			runeCount := utf8.RuneCountInString(strVal)
-
-			if f.Constraints.MinLength != nil && runeCount < *f.Constraints.MinLength {
-				return fmt.Errorf("resource '%s': field '%s' length %d is less than min_length %d", r.Name, f.Name, runeCount, *f.Constraints.MinLength)
-			}
-			if f.Constraints.MaxLength != nil && runeCount > *f.Constraints.MaxLength {
-				return fmt.Errorf("resource '%s': field '%s' length %d is greater than max_length %d", r.Name, f.Name, runeCount, *f.Constraints.MaxLength)
-			}
-			if f.Constraints.Pattern != "" {
-				matched, err := regexp.MatchString(f.Constraints.Pattern, strVal)
-				if err != nil {
-					return fmt.Errorf("resource '%s': field '%s' invalid regex pattern '%s': %w", r.Name, f.Name, f.Constraints.Pattern, err)
-				}
-				if !matched {
-					return fmt.Errorf("resource '%s': field '%s' value '%s' does not match pattern '%s'", r.Name, f.Name, strVal, f.Constraints.Pattern)
-				}
-			}
+		// 2. Field Type Validation
+		if err := validateFieldType(r.Name, f, val); err != nil {
+			return err
 		}
 
-		// 3. Validate numeric min / max constraints
-		if numVal, isNum := toFloat64(val); isNum {
-			if f.Constraints.Min != nil && numVal < *f.Constraints.Min {
-				return fmt.Errorf("resource '%s': field '%s' value %g is less than min %g", r.Name, f.Name, numVal, *f.Constraints.Min)
-			}
-			if f.Constraints.Max != nil && numVal > *f.Constraints.Max {
-				return fmt.Errorf("resource '%s': field '%s' value %g is greater than max %g", r.Name, f.Name, numVal, *f.Constraints.Max)
-			}
+		// 3. Constraints Validation
+		if err := validateFieldConstraints(r.Name, f, val); err != nil {
+			return err
 		}
+	}
 
-		// 4. Validate Enum values
-		if f.Type == TypeEnum && len(f.Constraints.Values) > 0 {
-			strVal, ok := val.(string)
-			if !ok {
-				return fmt.Errorf("resource '%s': field '%s' enum value must be a string", r.Name, f.Name)
+	return nil
+}
+
+func validateFieldType(resName string, f Field, val any) error {
+	switch f.Type {
+	case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL:
+		if _, ok := val.(string); !ok {
+			return fmt.Errorf("resource '%s': field '%s' expects %s, got %s", resName, f.Name, f.Type, typeNameOf(val))
+		}
+	case TypeInt:
+		// JSON unmarshaling naturally represents numbers as float64.
+		// Integer values without decimals (e.g. 10.0) are allowed, while numbers with fractional components (e.g. 10.5) are rejected.
+		switch v := val.(type) {
+		case int, int64, int32:
+			// valid integer
+		case float64:
+			if v != float64(int64(v)) {
+				return fmt.Errorf("resource '%s': field '%s' expects int, got float with decimal (%g)", resName, f.Name, v)
 			}
+		case float32:
+			if float64(v) != float64(int64(v)) {
+				return fmt.Errorf("resource '%s': field '%s' expects int, got float with decimal (%g)", resName, f.Name, v)
+			}
+		default:
+			return fmt.Errorf("resource '%s': field '%s' expects int, got %s", resName, f.Name, typeNameOf(val))
+		}
+	case TypeFloat:
+		// Integers are accepted for float fields as integers represent a valid subset of numeric values.
+		switch val.(type) {
+		case float64, float32, int, int64, int32:
+			// valid numeric
+		default:
+			return fmt.Errorf("resource '%s': field '%s' expects float, got %s", resName, f.Name, typeNameOf(val))
+		}
+	case TypeBool:
+		if _, ok := val.(bool); !ok {
+			return fmt.Errorf("resource '%s': field '%s' expects bool, got %s", resName, f.Name, typeNameOf(val))
+		}
+	case TypeDateTime:
+		strVal, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("resource '%s': field '%s' expects datetime (ISO8601 string), got %s", resName, f.Name, typeNameOf(val))
+		}
+		if !isValidDateTime(strVal) {
+			return fmt.Errorf("resource '%s': field '%s' value '%s' is not a valid ISO8601 datetime", resName, f.Name, strVal)
+		}
+	case TypeEnum:
+		strVal, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("resource '%s': field '%s' expects string enum, got %s", resName, f.Name, typeNameOf(val))
+		}
+		if len(f.Constraints.Values) > 0 {
 			valid := false
 			for _, allowed := range f.Constraints.Values {
 				if strVal == allowed {
@@ -79,12 +106,68 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 				}
 			}
 			if !valid {
-				return fmt.Errorf("resource '%s': field '%s' value '%s' is not in allowed enum values %v", r.Name, f.Name, strVal, f.Constraints.Values)
+				return fmt.Errorf("resource '%s': field '%s' value '%s' is not in allowed enum values %v", resName, f.Name, strVal, f.Constraints.Values)
 			}
 		}
 	}
 
 	return nil
+}
+
+func validateFieldConstraints(resName string, f Field, val any) error {
+	if strVal, isString := val.(string); isString {
+		runeCount := utf8.RuneCountInString(strVal)
+
+		if f.Constraints.MinLength != nil && runeCount < *f.Constraints.MinLength {
+			return fmt.Errorf("resource '%s': field '%s' length %d is less than min_length %d", resName, f.Name, runeCount, *f.Constraints.MinLength)
+		}
+		if f.Constraints.MaxLength != nil && runeCount > *f.Constraints.MaxLength {
+			return fmt.Errorf("resource '%s': field '%s' length %d is greater than max_length %d", resName, f.Name, runeCount, *f.Constraints.MaxLength)
+		}
+		if f.Constraints.Pattern != "" {
+			matched, err := regexp.MatchString(f.Constraints.Pattern, strVal)
+			if err != nil {
+				return fmt.Errorf("resource '%s': field '%s' invalid regex pattern '%s': %w", resName, f.Name, f.Constraints.Pattern, err)
+			}
+			if !matched {
+				return fmt.Errorf("resource '%s': field '%s' value '%s' does not match pattern '%s'", resName, f.Name, strVal, f.Constraints.Pattern)
+			}
+		}
+	}
+
+	if numVal, isNum := toFloat64(val); isNum {
+		if f.Constraints.Min != nil && numVal < *f.Constraints.Min {
+			return fmt.Errorf("resource '%s': field '%s' value %g is less than min %g", resName, f.Name, numVal, *f.Constraints.Min)
+		}
+		if f.Constraints.Max != nil && numVal > *f.Constraints.Max {
+			return fmt.Errorf("resource '%s': field '%s' value %g is greater than max %g", resName, f.Name, numVal, *f.Constraints.Max)
+		}
+	}
+
+	return nil
+}
+
+func typeNameOf(val any) string {
+	if val == nil {
+		return "nil"
+	}
+	return fmt.Sprintf("%T", val)
+}
+
+func isValidDateTime(s string) bool {
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, fmtStr := range formats {
+		if _, err := time.Parse(fmtStr, s); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func toFloat64(val any) (float64, bool) {
