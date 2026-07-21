@@ -96,3 +96,58 @@ func TestCRUD_Operations(t *testing.T) {
 		t.Errorf("expected empty list after SoftDelete, got %d items", len(listAfterDelete))
 	}
 }
+
+func TestCRUD_ValidationRejection(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:mem_crud_val?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewStore(db)
+
+	minLen := 3
+	res := &resource.Resource{
+		Name:  "Article",
+		Table: "articles",
+		Fields: []resource.Field{
+			{
+				Name:     "title",
+				Type:     resource.TypeString,
+				Nullable: false,
+				Constraints: resource.Constraints{
+					MinLength: &minLen,
+				},
+			},
+		},
+	}
+
+	if err := store.EnsureSchema(ctx, res); err != nil {
+		t.Fatalf("EnsureSchema failed: %v", err)
+	}
+
+	// 1. Reject missing required field
+	_, err = store.Create(ctx, res, storage.Record{})
+	if err == nil {
+		t.Errorf("expected error for missing required title field, got nil")
+	}
+
+	// 2. Reject min_length constraint violation on Create
+	_, err = store.Create(ctx, res, storage.Record{"title": "ab"})
+	if err == nil {
+		t.Errorf("expected error for min_length violation on create, got nil")
+	}
+
+	// Valid Create
+	record, err := store.Create(ctx, res, storage.Record{"title": "Valid Title"})
+	if err != nil {
+		t.Fatalf("valid Create failed: %v", err)
+	}
+
+	// 3. Reject min_length constraint violation on Update
+	_, err = store.Update(ctx, res, record["id"], storage.Record{"title": "x"})
+	if err == nil {
+		t.Errorf("expected error for min_length violation on update, got nil")
+	}
+}

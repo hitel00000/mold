@@ -17,6 +17,10 @@ func (s *Store) Create(ctx context.Context, res *resource.Resource, record stora
 		record = make(storage.Record)
 	}
 
+	if err := resource.ValidateRecord(res, record, false); err != nil {
+		return nil, fmt.Errorf("record validation failed: %w", err)
+	}
+
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	if res.Timestamps {
 		if _, exists := record["created_at"]; !exists {
@@ -121,6 +125,10 @@ func (s *Store) List(ctx context.Context, res *resource.Resource, query storage.
 func (s *Store) Update(ctx context.Context, res *resource.Resource, id any, record storage.Record) (storage.Record, error) {
 	if len(record) == 0 {
 		return s.Get(ctx, res, id)
+	}
+
+	if err := resource.ValidateRecord(res, record, true); err != nil {
+		return nil, fmt.Errorf("record validation failed: %w", err)
 	}
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
