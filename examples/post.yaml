@@ -1,0 +1,8 @@
+resource: Post
+
+fields:
+  title:
+    type: string
+
+  body:
+    type: markdown
