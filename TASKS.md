@@ -13,11 +13,11 @@
 
 목표: Resource 하나를 메모리에서 표현할 수 있다.
 
-* [ ] Resource Schema 설계
-* [ ] Primitive Type 정의
-* [ ] Relation 정의
-* [ ] Resource Loader 구현
-* [ ] Resource Registry 구현
+* [x] Resource Schema 설계
+* [x] Primitive Type 정의
+* [x] Relation 정의
+* [x] Resource Loader 구현
+* [x] Resource Registry 구현
 
 완료 기준
 
