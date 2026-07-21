@@ -76,6 +76,15 @@ fields:
 
 > markdown/email/url처럼 "저장 타입은 같지만 검증·렌더링 방식이 다른" semantic type을 별도로 두는 이유: Resource 정의만 보고 View/Validation이 자동으로 달라져야 한다는 핵심 철학과 직결됨.
 
+### Type별 허용 Constraints
+
+| Primitive Type 그룹 | 허용되는 Constraints 키 | 비고 / 필수 여부 |
+|----------------------|--------------------------|------------------|
+| `string`, `text`, `markdown`, `email`, `url` | `min_length`, `max_length`, `pattern`, `unique` | 문자열 길이나 정규식 검증 |
+| `int`, `float` | `min`, `max`, `unique` | 수치 범위 검증 |
+| `enum` | `values` (필수), `unique` | `values` 미지정 시 검증 에러 |
+| `bool`, `datetime` | `unique` | |
+
 ### Field-level 공통 속성
 
 * `name`, `type`: 필수
@@ -152,8 +161,16 @@ Authorization: (세션 쿠키, role: admin 필요)
 
 ---
 
-## 7. 아직 열려있는 질문
+## 7. 결정된 설계 사항
 
-* [ ] `constraints` 스키마를 type별로 어디까지 강제할지 (지금은 느슨하게 열어둠)
-* [ ] View 쪽 semantic type(markdown 등) 렌더링 힌트를 IR에 포함할지, View 레이어가 type만 보고 자체 판단할지
-* [ ] schema_version이 Resource 단위인지 필드 단위인지 (지금 초안은 Resource 단위 — 더 단순하지만 필드 하나만 바뀌어도 버전 전체가 올라감)
+* [x] **Type별 Constraints 스키마 강제 규칙**  
+  **결정**: Primitive Type 그룹별로 허용되는 constraint 키를 [validate.go](file:///C:/Users/jeongwoong/dev/mold/resource/validate.go)에 엄격하게 구현 및 명시함.  
+  **근거**: 부적절한 제약조건(예: `string`에 `min/max`, `int`에 `min_length`)을 부팅/로드 검증 단계에서 명확한 에러로 차단하여 오염된 설정이 하위 레이어(Storage/View)로 전파되는 것을 예방함.
+
+* [x] **View 렌더링 힌트의 IR 포함 여부**  
+  **결정**: IR에는 View 렌더링 힌트를 포함하지 않으며, View 레이어가 `FieldType`만 보고 자체적으로 판단함.  
+  **근거**: IR의 역할을 Resource 정의의 단일 소스 오브 트루스로 한정하고, IR 및 런타임 추상화의 단순함을 유지하기 위함.
+
+* [x] **`schema_version` 관리 단위**  
+  **결정**: `schema_version`은 Resource 단위로 관리함.  
+  **근거**: Resource 파싱, 검증, 로드가 단일 파일(Resource) 단위로 원자적(Atomic) 처리되므로, 필드 단위 관리는 불필요한 추상화 복잡도를 가중시킴 (마세라티 원칙 적용).
