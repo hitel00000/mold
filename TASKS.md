@@ -47,17 +47,19 @@
 
 목표: REST API를 자동 생성한다.
 
-* [ ] HTTP Router
-* [ ] List
-* [ ] Detail
-* [ ] Create
-* [ ] Update
-* [ ] Delete
-* [ ] Pagination
+* [x] HTTP Router
+* [x] List
+* [x] Detail
+* [x] Create
+* [x] Update
+* [x] Delete
+* [x] Pagination
 
 완료 기준
 
 * 새로운 Resource를 추가하면 API가 자동으로 생긴다.
+
+* 회고: [Milestone 3 회고](docs/retrospectives/milestone-3.md)
 
 ---
 
