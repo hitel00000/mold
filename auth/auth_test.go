@@ -2,7 +2,6 @@ package auth_test
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"github.com/hitel00000/mold/adapters/sqlite"
 	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
-	"github.com/hitel00000/mold/storage"
 	"github.com/hitel00000/mold/transport"
 	"github.com/hitel00000/mold/view"
 	_ "modernc.org/sqlite"
