@@ -443,6 +443,11 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 
 	client := ts.Client()
 
+	adminSess, err := sm.CreateSession(ctx, "admin0", "admin0", "admin")
+	if err != nil {
+		t.Fatalf("failed to create admin session: %v", err)
+	}
+
 	// 1. Submit short password ("12345" < min_length 6) -> 400 Bad Request
 	shortPayload := map[string]any{
 		"username": "shortpass",
@@ -450,7 +455,10 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 		"role":     "user",
 	}
 	b1, _ := json.Marshal(shortPayload)
-	resp1, _ := client.Post(ts.URL+"/api/users", "application/json", bytes.NewBuffer(b1))
+	req1, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/users", bytes.NewBuffer(b1))
+	req1.Header.Set("Content-Type", "application.json")
+	req1.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
+	resp1, _ := client.Do(req1)
 	if resp1.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for short password validation, got %d", resp1.StatusCode)
 	}
@@ -463,7 +471,10 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 		"role":     "user",
 	}
 	b2, _ := json.Marshal(longPayload)
-	resp2, _ := client.Post(ts.URL+"/api/users", "application/json", bytes.NewBuffer(b2))
+	req2, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/users", bytes.NewBuffer(b2))
+	req2.Header.Set("Content-Type", "application.json")
+	req2.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
+	resp2, _ := client.Do(req2)
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for >72 byte password, got %d", resp2.StatusCode)
 	}
@@ -475,7 +486,10 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 		"role":     "user",
 	}
 	b3, _ := json.Marshal(validPayload)
-	resp3, err := client.Post(ts.URL+"/api/users", "application/json", bytes.NewBuffer(b3))
+	req3, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/users", bytes.NewBuffer(b3))
+	req3.Header.Set("Content-Type", "application.json")
+	req3.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
+	resp3, err := client.Do(req3)
 	if err != nil || resp3.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created for valid user creation, got %d", resp3.StatusCode)
 	}
