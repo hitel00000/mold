@@ -2,6 +2,7 @@ package resource
 
 import (
 	"fmt"
+	"strings"
 )
 
 var validFieldTypes = map[FieldType]bool{
@@ -89,11 +90,40 @@ func Validate(r *Resource) error {
 		}
 	}
 
+	// Validate Auth & Permissions
+	if r.Auth != nil {
+		if r.Auth.OwnershipField != "" {
+			if !fieldNames[r.Auth.OwnershipField] && r.Auth.OwnershipField != "id" {
+				return fmt.Errorf("resource '%s': auth ownership_field '%s' does not exist in fields", r.Name, r.Auth.OwnershipField)
+			}
+		}
+
+		permSpecs := map[string]string{
+			"create": r.Auth.Permissions.Create,
+			"read":   r.Auth.Permissions.Read,
+			"update": r.Auth.Permissions.Update,
+			"delete": r.Auth.Permissions.Delete,
+		}
+
+		for act, spec := range permSpecs {
+			if spec == "" {
+				continue
+			}
+			if spec != "public" && spec != "authenticated" && spec != "owner" && !strings.HasPrefix(spec, "role:") {
+				return fmt.Errorf("resource '%s': auth permissions '%s' has invalid permission spec '%s'", r.Name, act, spec)
+			}
+		}
+	}
+
 	return nil
 }
 
 func validateConstraints(resName string, f Field) error {
 	c := f.Constraints
+
+	if f.Type == TypePassword && c.Unique {
+		return fmt.Errorf("resource '%s': field '%s' of type password cannot have unique constraint", resName, f.Name)
+	}
 
 	if c.MinLength != nil || c.MaxLength != nil {
 		switch f.Type {
