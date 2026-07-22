@@ -1,0 +1,32 @@
+resource:
+  name: User
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: email
+    type: email
+    nullable: false
+    constraints:
+      unique: true
+  - name: password
+    type: password
+    nullable: false
+    constraints:
+      min_length: 8
+  - name: name
+    type: string
+    nullable: false
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    constraints:
+      values: ["admin", "user"]
+
+auth:
+  permissions:
+    create: public
+    read: authenticated
+    update: owner
+    delete: role:admin

@@ -1,0 +1,43 @@
+resource:
+  name: Task
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: title
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+      max_length: 200
+  - name: status
+    type: enum
+    nullable: false
+    default: "todo"
+    constraints:
+      values: ["todo", "in_progress", "done"]
+  - name: project_id
+    type: int
+    nullable: false
+  - name: assignee_id
+    type: int
+    nullable: true
+
+relations:
+  - name: project
+    kind: belongs_to
+    target: Project
+    foreign_key: project_id
+    on_delete: restrict
+  - name: assignee
+    kind: belongs_to
+    target: User
+    foreign_key: assignee_id
+
+auth:
+  ownership_field: assignee_id
+  permissions:
+    create: authenticated
+    read: authenticated
+    update: owner
+    delete: owner

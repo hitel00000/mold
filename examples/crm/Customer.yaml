@@ -1,0 +1,32 @@
+resource:
+  name: Customer
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+  - name: status
+    type: enum
+    nullable: false
+    default: "lead"
+    constraints:
+      values: ["lead", "active", "churned"]
+  - name: company_id
+    type: int
+    nullable: false
+
+relations:
+  - name: company
+    kind: belongs_to
+    target: Company
+    foreign_key: company_id
+    on_delete: restrict
+
+auth:
+  permissions:
+    create: authenticated
+    read: authenticated
+    update: authenticated
+    delete: role:admin

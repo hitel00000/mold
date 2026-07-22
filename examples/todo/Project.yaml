@@ -1,0 +1,37 @@
+resource:
+  name: Project
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+      max_length: 100
+  - name: description
+    type: text
+    nullable: true
+  - name: owner_id
+    type: int
+    nullable: false
+
+relations:
+  - name: tasks
+    kind: has_many
+    target: Task
+    foreign_key: project_id
+    on_delete: soft_cascade
+  - name: owner
+    kind: belongs_to
+    target: User
+    foreign_key: owner_id
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner

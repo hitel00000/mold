@@ -1,0 +1,37 @@
+resource:
+  name: Post
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: title
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+      max_length: 200
+  - name: body
+    type: markdown
+    nullable: false
+  - name: author_id
+    type: int
+    nullable: false
+
+relations:
+  - name: comments
+    kind: has_many
+    target: Comment
+    foreign_key: post_id
+    on_delete: soft_cascade
+  - name: author
+    kind: belongs_to
+    target: User
+    foreign_key: author_id
+
+auth:
+  ownership_field: author_id
+  permissions:
+    create: authenticated
+    read: public
+    update: owner
+    delete: owner

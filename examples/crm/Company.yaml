@@ -1,0 +1,37 @@
+resource:
+  name: Company
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+      unique: true
+  - name: website
+    type: url
+    nullable: true
+  - name: industry
+    type: string
+    nullable: true
+
+relations:
+  - name: contacts
+    kind: has_many
+    target: Contact
+    foreign_key: company_id
+    on_delete: soft_cascade
+  - name: customers
+    kind: has_many
+    target: Customer
+    foreign_key: company_id
+    on_delete: soft_cascade
+
+auth:
+  permissions:
+    create: authenticated
+    read: authenticated
+    update: role:admin
+    delete: role:admin
