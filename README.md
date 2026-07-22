@@ -1,86 +1,53 @@
 # Mold
 
-> Resource 하나로 온라인 서비스의 기본 구조를 실행하는 Opinionated Runtime
-
-## 소개
-
-Mold는 AI와 함께 온라인 서비스를 빠르게 개발하기 위한 Runtime이다.
-
-개발자는 Resource만 정의한다.
-
-Mold는 Resource를 기반으로 다음을 자동으로 제공한다.
-
-* Database Schema
-* CRUD API
-* Validation
-* Authentication / Authorization
-* 기본 HTML View
-
-개발자는 생성된 기본 View를 자유롭게 수정하거나 완전히 교체할 수 있다.
+> Resource 정의 하나로 온라인 서비스의 기본 구조를 완벽하게 자동 실행하는 Opinionated Runtime
 
 ---
 
-## 철학
+## 1. 소개 (What is Mold?)
 
-온라인 서비스는 생각보다 공통점이 많다.
+Mold는 **Resource 정의(YAML) 하나로 온라인 서비스의 기본 구조를 자동 생성 및 실행**하는 백엔드 런타임 컴파일러입니다.
 
-대부분의 서비스는 다음 구조를 가진다.
+개발자가 Resource를 작성하면 Mold는 다음을 자동으로 제공합니다.
 
-```text
-Resource
-    ↓
-Storage
-    ↓
-Transport
-    ↓
-View
-```
-
-Mold는 이 공통 구조를 자동화한다.
-
-반복적인 Backend 코드를 작성하는 대신, 개발자는 비즈니스와 사용자 경험에 집중한다.
+* **Database Schema** (SQLite DDL & Automatic Soft-delete)
+* **CRUD REST API** (`/api/{table}` & Pagination)
+* **Strict Validation** (Primitive & Semantic Constraints)
+* **Authentication / Authorization** (Session Cookie & 3-Tier ACL Guard)
+* **Default HTML View** (List/Detail & Form SSR Engine)
 
 ---
 
-## 특징
+## 2. 빠른 예시 (Quick Example)
 
-* Resource First
-* Opinionated by Default
-* Deterministic Backend
-* Flexible Frontend
-* AI Friendly
-* Adapter Based Storage
-
----
-
-## 예제
+아래의 `Post.yaml` 하나만 작성하면, 백엔드 코드 수정 0줄로 모든 CRUD API, 데이터베이스 테이블, HTML 관리 UI가 즉시 생성되어 동작합니다.
 
 ```yaml
 resource:
   name: Post
+  timestamps: true
+  soft_delete: true
 
 fields:
   - name: title
     type: string
+    nullable: false
+    constraints:
+      min_length: 1
 
   - name: body
     type: markdown
+    nullable: false
 ```
-
-위 Resource 하나만 정의하면
-
-* CRUD API
-* Database
-* 기본 HTML 화면
-
-이 자동으로 생성된다.
 
 ---
 
-## 목표
+## 3. 핵심 문서 안내 (Repository Navigation)
 
-Mold는 모든 문제를 해결하려는 Framework가 아니다.
+Mold는 문서를 최소한으로 유지하며, 각 문서의 역할이 엄격하게 분리되어 있습니다.
 
-대부분의 온라인 서비스를 가장 빠르게 시작하기 위한 Runtime을 목표로 한다.
-
-복잡한 문제는 실제로 필요해졌을 때 해결한다.
+* **[docs/philosophy.md](docs/philosophy.md)**: Mold가 존재하는 이유, 비전, 그리고 오랫동안 변하지 않을 핵심 철학 및 원칙
+* **[TASKS.md](TASKS.md)**: 현재 진행 중인 상태, 검증해야 할 가설(Hypotheses), 및 Post-MVP 개발 백로그
+* **[AGENTS.md](AGENTS.md)**: AI 에이전트와 사람이 함께 일할 때 준수해야 할 작업 규약
+* **[docs/ir-spec.md](docs/ir-spec.md)**: Resource IR의 강타입 구조체 명세 및 검증 규칙
+* **[docs/resource-guide.md](docs/resource-guide.md)**: Resource YAML 작성 가이드 및 Good/Bad 패턴 대조표
