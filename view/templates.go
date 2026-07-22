@@ -339,7 +339,7 @@ const formTemplate = `
 {{ end }}
 `
 
-func compileTemplates() (*template.Template, error) {
+func compileTemplates() (listTmpl, detailTmpl, loginTmpl, formTmpl *template.Template, err error) {
 	funcMap := template.FuncMap{
 		"renderMarkdown": func(val any) template.HTML {
 			if str, ok := val.(string); ok {
@@ -355,28 +355,38 @@ func compileTemplates() (*template.Template, error) {
 		},
 	}
 
-	tmpl := template.New("baseLayout").Funcs(funcMap)
-	tmpl, err := tmpl.Parse(baseLayout)
+	base := template.New("baseLayout").Funcs(funcMap)
+	base, err = base.Parse(baseLayout)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
-	tmpl, err = tmpl.Parse(listTemplate)
+
+	clone := func(tpl string) (*template.Template, error) {
+		t, err := base.Clone()
+		if err != nil {
+			return nil, err
+		}
+		return t.Parse(tpl)
+	}
+
+	listTmpl, err = clone(listTemplate)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
-	tmpl, err = tmpl.Parse(detailTemplate)
+	detailTmpl, err = clone(detailTemplate)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
-	tmpl, err = tmpl.Parse(loginTemplate)
+	loginTmpl, err = clone(loginTemplate)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
-	tmpl, err = tmpl.Parse(formTemplate)
+	formTmpl, err = clone(formTemplate)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
 	}
-	return tmpl, nil
+
+	return listTmpl, detailTmpl, loginTmpl, formTmpl, nil
 }
 
 func toString(v any) string {

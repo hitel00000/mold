@@ -73,6 +73,7 @@ func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpd
 			w.Kind = WidgetTextarea
 		case resource.TypeMarkdown:
 			w.Kind = WidgetTextarea
+			w.Type = "markdown"
 			w.Description = "Markdown supported"
 		case resource.TypeInt:
 			w.Kind = WidgetInput

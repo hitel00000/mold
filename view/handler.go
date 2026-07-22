@@ -15,18 +15,24 @@ import (
 )
 
 type ViewHandler struct {
-	router *transport.Router
-	tmpl   *template.Template
+	router     *transport.Router
+	listTmpl   *template.Template
+	detailTmpl *template.Template
+	loginTmpl  *template.Template
+	formTmpl   *template.Template
 }
 
 func NewViewHandler(router *transport.Router) (*ViewHandler, error) {
-	tmpl, err := compileTemplates()
+	listTmpl, detailTmpl, loginTmpl, formTmpl, err := compileTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile view templates: %w", err)
 	}
 	return &ViewHandler{
-		router: router,
-		tmpl:   tmpl,
+		router:     router,
+		listTmpl:   listTmpl,
+		detailTmpl: detailTmpl,
+		loginTmpl:  loginTmpl,
+		formTmpl:   formTmpl,
 	}, nil
 }
 
@@ -213,7 +219,7 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 		CanCreate:    auth.Can(sess, res, auth.ActionCreate, nil),
 	}
 
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+	_ = vh.listTmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, sess *auth.Session) {
@@ -242,7 +248,7 @@ func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, re
 		Session:      sess,
 	}
 
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+	_ = vh.detailTmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Resource, navItems []NavItem, table string, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail, sess *auth.Session) {
@@ -260,7 +266,7 @@ func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Res
 	}
 
 	var buf bytes.Buffer
-	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+	if err := vh.formTmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
 		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
@@ -330,7 +336,7 @@ func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, 
 	}
 
 	var buf bytes.Buffer
-	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+	if err := vh.formTmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
 		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
@@ -380,7 +386,7 @@ func (vh *ViewHandler) renderErrorPage(w http.ResponseWriter, statusCode int, me
 		ErrorMessage: message,
 		Session:      sess,
 	}
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+	_ = vh.listTmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) renderLogin(w http.ResponseWriter, req *http.Request, navItems []NavItem, sess *auth.Session, errMsg string) {
@@ -394,7 +400,7 @@ func (vh *ViewHandler) renderLogin(w http.ResponseWriter, req *http.Request, nav
 	if errMsg != "" {
 		w.WriteHeader(http.StatusBadRequest)
 	}
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+	_ = vh.loginTmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) handleLoginSubmit(w http.ResponseWriter, req *http.Request, navItems []NavItem) {
@@ -421,7 +427,9 @@ func (vh *ViewHandler) handleLoginSubmit(w http.ResponseWriter, req *http.Reques
 
 	var matchedUser storage.Record
 	for _, rec := range records {
-		if fmt.Sprintf("%v", rec["username"]) == username {
+		uVal := fmt.Sprintf("%v", rec["username"])
+		eVal := fmt.Sprintf("%v", rec["email"])
+		if uVal == username || eVal == username {
 			matchedUser = rec
 			break
 		}
