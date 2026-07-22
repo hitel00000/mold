@@ -17,8 +17,9 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		record = make(map[string]any)
 	}
 
-	// 1. Build sets of valid and deprecated fields
+	// 1. Build sets of valid, system, and deprecated fields based on IR flags
 	validFields := make(map[string]bool)
+	systemFields := make(map[string]bool)
 	deprecatedFields := make(map[string]bool)
 
 	for _, f := range r.Fields {
@@ -33,18 +34,26 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 			validFields[rel.ForeignKey] = true
 		}
 	}
-	// System columns that may be set automatically or in query results
-	validFields["created_at"] = true
-	validFields["updated_at"] = true
-	validFields["deleted_at"] = true
 
-	// 2. Reject unknown fields, deprecated fields, and explicit PK 'id' in both Create and Update
+	// System columns dynamically determined by IR settings
+	if r.Timestamps {
+		systemFields["created_at"] = true
+		systemFields["updated_at"] = true
+	}
+	if r.SoftDelete {
+		systemFields["deleted_at"] = true
+	}
+
+	// 2. Validate input keys: PK 'id', system columns, deprecated fields, and unknown fields
 	for k := range record {
 		if k == "id" {
 			if !isUpdate {
 				return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in create payload", r.Name)
 			}
 			return fmt.Errorf("resource '%s': primary key 'id' cannot be included in update payload; pass it as the target id parameter instead", r.Name)
+		}
+		if systemFields[k] {
+			return fmt.Errorf("resource '%s': system column '%s' cannot be explicitly provided in write payload", r.Name, k)
 		}
 		if deprecatedFields[k] {
 			return fmt.Errorf("resource '%s': field '%s' is deprecated and cannot be written", r.Name, k)

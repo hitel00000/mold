@@ -47,6 +47,46 @@ func TestValidateRecord_UnknownDeprecatedAndPKFields(t *testing.T) {
 	}
 }
 
+func TestValidateRecord_SystemColumnRejection(t *testing.T) {
+	// Resource with Timestamps & SoftDelete true
+	resWithSys := &resource.Resource{
+		Name:       "Post",
+		Timestamps: true,
+		SoftDelete: true,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	// 1. Reject created_at as system column
+	err := resource.ValidateRecord(resWithSys, map[string]any{"title": "T", "created_at": "2026-01-01T00:00:00Z"}, false)
+	if err == nil || err.Error() != "resource 'Post': system column 'created_at' cannot be explicitly provided in write payload" {
+		t.Errorf("expected system column error for created_at, got: %v", err)
+	}
+
+	// 2. Reject deleted_at as system column
+	err = resource.ValidateRecord(resWithSys, map[string]any{"title": "T", "deleted_at": "2026-01-01T00:00:00Z"}, false)
+	if err == nil || err.Error() != "resource 'Post': system column 'deleted_at' cannot be explicitly provided in write payload" {
+		t.Errorf("expected system column error for deleted_at, got: %v", err)
+	}
+
+	// Resource without Timestamps & SoftDelete (false)
+	resWithoutSys := &resource.Resource{
+		Name:       "PostNoSys",
+		Timestamps: false,
+		SoftDelete: false,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	// 3. Reject deleted_at as unknown field when SoftDelete is false
+	err = resource.ValidateRecord(resWithoutSys, map[string]any{"title": "T", "deleted_at": "2026-01-01T00:00:00Z"}, false)
+	if err == nil || err.Error() != "resource 'PostNoSys': unknown field 'deleted_at'" {
+		t.Errorf("expected unknown field error for deleted_at when SoftDelete is false, got: %v", err)
+	}
+}
+
 func TestValidateRecord_FieldTypeMismatch(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",
