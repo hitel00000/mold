@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
@@ -20,6 +21,12 @@ func (s *Store) Create(ctx context.Context, res *resource.Resource, record stora
 	if err := resource.ValidateRecord(res, record, false); err != nil {
 		return nil, fmt.Errorf("record validation failed: %w", err)
 	}
+
+	processedRecord, err := auth.ProcessPasswordFields(res, record)
+	if err != nil {
+		return nil, fmt.Errorf("password processing failed: %w", err)
+	}
+	record = processedRecord
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	if res.Timestamps {
@@ -130,6 +137,12 @@ func (s *Store) Update(ctx context.Context, res *resource.Resource, id any, reco
 	if err := resource.ValidateRecord(res, record, true); err != nil {
 		return nil, fmt.Errorf("record validation failed: %w", err)
 	}
+
+	processedRecord, err := auth.ProcessPasswordFields(res, record)
+	if err != nil {
+		return nil, fmt.Errorf("password processing failed: %w", err)
+	}
+	record = processedRecord
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	if res.Timestamps {

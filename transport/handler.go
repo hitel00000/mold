@@ -182,18 +182,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
-	if err := resource.ValidateRecord(res, input, false); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
-		return
-	}
-
-	processedInput, err := auth.ProcessPasswordFields(res, input)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
-		return
-	}
-
-	created, err := store.Create(req.Context(), res, processedInput)
+	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
@@ -233,18 +222,7 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 		return
 	}
 
-	if err := resource.ValidateRecord(res, input, true); err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
-		return
-	}
-
-	processedInput, err := auth.ProcessPasswordFields(res, input)
-	if err != nil {
-		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
-		return
-	}
-
-	updated, err := store.Update(req.Context(), res, id, processedInput)
+	updated, err := store.Update(req.Context(), res, id, input)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)

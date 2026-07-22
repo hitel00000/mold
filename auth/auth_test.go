@@ -138,27 +138,51 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 		t.Fatalf("failed to create admin session: %v", err)
 	}
 
-	// Matrix tests
-	t.Run("Public Resource - Anonymous Access", func(t *testing.T) {
+	// Matrix tests across all 5 endpoints (List, Detail, Create, Update, Delete)
+	t.Run("Public Resource - Anonymous Access across all operations", func(t *testing.T) {
+		// List
 		resp, _ := http.Get(ts.URL + "/api/public_docs")
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200 OK for public list, got %d", resp.StatusCode)
 		}
-	})
-
-	t.Run("Authenticated Resource - Unauthenticated -> 401 Unauthorized", func(t *testing.T) {
-		resp, _ := http.Get(ts.URL + "/api/auth_docs")
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Errorf("expected 401 Unauthorized, got %d", resp.StatusCode)
+		// Create
+		cBody, _ := json.Marshal(map[string]any{"title": "Public Doc 1"})
+		respC, _ := http.Post(ts.URL+"/api/public_docs", "application/json", bytes.NewBuffer(cBody))
+		if respC.StatusCode != http.StatusCreated {
+			t.Errorf("expected 201 Created for public create, got %d", respC.StatusCode)
 		}
 	})
 
-	t.Run("Authenticated Resource - Authenticated User -> 200 OK", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/auth_docs", nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
-		resp, err := ts.Client().Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200 OK for authenticated user, got %d", resp.StatusCode)
+	t.Run("Authenticated Resource - Unauthenticated -> 401 Unauthorized across all operations", func(t *testing.T) {
+		// List
+		respL, _ := http.Get(ts.URL + "/api/auth_docs")
+		if respL.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated list, got %d", respL.StatusCode)
+		}
+		// Create
+		cBody, _ := json.Marshal(map[string]any{"title": "Auth Doc 1"})
+		respC, _ := http.Post(ts.URL+"/api/auth_docs", "application/json", bytes.NewBuffer(cBody))
+		if respC.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated create, got %d", respC.StatusCode)
+		}
+	})
+
+	t.Run("Authenticated Resource - Authenticated User -> 200 OK across operations", func(t *testing.T) {
+		// List
+		reqL, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/auth_docs", nil)
+		reqL.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respL, _ := ts.Client().Do(reqL)
+		if respL.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 for authenticated list, got %d", respL.StatusCode)
+		}
+		// Create
+		cBody, _ := json.Marshal(map[string]any{"title": "Auth Doc 1"})
+		reqC, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth_docs", bytes.NewBuffer(cBody))
+		reqC.Header.Set("Content-Type", "application/json")
+		reqC.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respC, _ := ts.Client().Do(reqC)
+		if respC.StatusCode != http.StatusCreated {
+			t.Errorf("expected 201 for authenticated create, got %d", respC.StatusCode)
 		}
 	})
 
@@ -169,66 +193,156 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 	}
 	docID := rec1["id"]
 
-	t.Run("Owner Resource - Unauthenticated -> 401 Unauthorized", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Errorf("expected 401 Unauthorized for unauthenticated detail, got %d", resp.StatusCode)
+	t.Run("Owner Resource - Unauthenticated -> 401 Unauthorized across all operations", func(t *testing.T) {
+		// Detail
+		reqD, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		respD, _ := ts.Client().Do(reqD)
+		if respD.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated detail, got %d", respD.StatusCode)
+		}
+		// Update
+		uBody, _ := json.Marshal(map[string]any{"title": "Hacked Title"})
+		reqU, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), bytes.NewBuffer(uBody))
+		reqU.Header.Set("Content-Type", "application/json")
+		respU, _ := ts.Client().Do(reqU)
+		if respU.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated update, got %d", respU.StatusCode)
+		}
+		// Delete
+		reqDel, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		respDel, _ := ts.Client().Do(reqDel)
+		if respDel.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 for unauthenticated delete, got %d", respDel.StatusCode)
 		}
 	})
 
-	t.Run("Owner Resource - Owner User1 -> 200 OK", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200 OK for owner user1, got %d", resp.StatusCode)
+	t.Run("Owner Resource - Owner User1 -> 200 OK across Read/Update/Delete", func(t *testing.T) {
+		// Detail
+		reqD, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		reqD.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respD, _ := ts.Client().Do(reqD)
+		if respD.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 OK for owner user1 detail, got %d", respD.StatusCode)
+		}
+		// Update
+		uBody, _ := json.Marshal(map[string]any{"title": "User1 Updated Title"})
+		reqU, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), bytes.NewBuffer(uBody))
+		reqU.Header.Set("Content-Type", "application/json")
+		reqU.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respU, _ := ts.Client().Do(reqU)
+		if respU.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 OK for owner user1 update, got %d", respU.StatusCode)
 		}
 	})
 
-	t.Run("Owner Resource - Non-Owner User2 -> 403 Forbidden", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("expected 403 Forbidden for non-owner user2, got %d", resp.StatusCode)
+	t.Run("Owner Resource - Non-Owner User2 -> 403 Forbidden across Read/Update/Delete", func(t *testing.T) {
+		// Detail
+		reqD, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		reqD.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respD, _ := ts.Client().Do(reqD)
+		if respD.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for non-owner user2 detail, got %d", respD.StatusCode)
+		}
+		// Update
+		uBody, _ := json.Marshal(map[string]any{"title": "Hacked Title User2"})
+		reqU, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), bytes.NewBuffer(uBody))
+		reqU.Header.Set("Content-Type", "application/json")
+		reqU.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respU, _ := ts.Client().Do(reqU)
+		if respU.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for non-owner user2 update, got %d", respU.StatusCode)
+		}
+		// Delete
+		reqDel, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		reqDel.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respDel, _ := ts.Client().Do(reqDel)
+		if respDel.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for non-owner user2 delete, got %d", respDel.StatusCode)
 		}
 	})
 
-	t.Run("Owner Resource - Non-existent ID -> 404 Not Found before 403", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/owner_docs/9999", nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusNotFound {
-			t.Errorf("expected 404 Not Found for non-existent record, got %d", resp.StatusCode)
+	t.Run("Owner Resource - Non-existent ID -> 404 Not Found before 403 on Update/Delete", func(t *testing.T) {
+		// Update non-existent
+		uBody, _ := json.Marshal(map[string]any{"title": "NonExistent"})
+		reqU, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/owner_docs/9999", bytes.NewBuffer(uBody))
+		reqU.Header.Set("Content-Type", "application.json")
+		reqU.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respU, _ := ts.Client().Do(reqU)
+		if respU.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 Not Found for non-existent record update, got %d", respU.StatusCode)
+		}
+		// Delete non-existent
+		reqDel, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/owner_docs/9999", nil)
+		reqDel.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respDel, _ := ts.Client().Do(reqDel)
+		if respDel.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 Not Found for non-existent record delete, got %d", respDel.StatusCode)
 		}
 	})
 
-	t.Run("Owner Resource - Soft-deleted record -> 404 Not Found before 403", func(t *testing.T) {
+	t.Run("Owner Resource - Soft-deleted record -> 404 Not Found before 403 on Read/Update/Delete", func(t *testing.T) {
 		_ = store.SoftDelete(ctx, ownerRes, docID)
-		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusNotFound {
-			t.Errorf("expected 404 Not Found for soft-deleted record, got %d", resp.StatusCode)
+
+		// Detail
+		reqD, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		reqD.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respD, _ := ts.Client().Do(reqD)
+		if respD.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 Not Found for soft-deleted record detail, got %d", respD.StatusCode)
+		}
+		// Update
+		uBody, _ := json.Marshal(map[string]any{"title": "Deleted Record Update"})
+		reqU, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), bytes.NewBuffer(uBody))
+		reqU.Header.Set("Content-Type", "application/json")
+		reqU.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respU, _ := ts.Client().Do(reqU)
+		if respU.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 Not Found for soft-deleted record update, got %d", respU.StatusCode)
+		}
+		// Delete
+		reqDel, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/owner_docs/%v", ts.URL, docID), nil)
+		reqDel.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user2Sess.ID})
+		respDel, _ := ts.Client().Do(reqDel)
+		if respDel.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404 Not Found for soft-deleted record delete, got %d", respDel.StatusCode)
 		}
 	})
 
-	t.Run("Role Admin Resource - User -> 403 Forbidden", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/admin_docs", nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusForbidden {
-			t.Errorf("expected 403 Forbidden for non-admin user, got %d", resp.StatusCode)
+	t.Run("Role Admin Resource - User -> 403 Forbidden across Create/Read/Update/Delete", func(t *testing.T) {
+		// List
+		reqL, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/admin_docs", nil)
+		reqL.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respL, _ := ts.Client().Do(reqL)
+		if respL.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for non-admin user list, got %d", respL.StatusCode)
+		}
+		// Create
+		cBody, _ := json.Marshal(map[string]any{"title": "Admin Only"})
+		reqC, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/admin_docs", bytes.NewBuffer(cBody))
+		reqC.Header.Set("Content-Type", "application/json")
+		reqC.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: user1Sess.ID})
+		respC, _ := ts.Client().Do(reqC)
+		if respC.StatusCode != http.StatusForbidden {
+			t.Errorf("expected 403 Forbidden for non-admin user create, got %d", respC.StatusCode)
 		}
 	})
 
-	t.Run("Role Admin Resource - Admin -> 200 OK", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/admin_docs", nil)
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
-		resp, _ := ts.Client().Do(req)
-		if resp.StatusCode != http.StatusOK {
-			t.Errorf("expected 200 OK for admin user, got %d", resp.StatusCode)
+	t.Run("Role Admin Resource - Admin -> 200/201 OK across List/Create", func(t *testing.T) {
+		// Create
+		cBody, _ := json.Marshal(map[string]any{"title": "Admin Created Doc"})
+		reqC, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/admin_docs", bytes.NewBuffer(cBody))
+		reqC.Header.Set("Content-Type", "application/json")
+		reqC.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
+		respC, _ := ts.Client().Do(reqC)
+		if respC.StatusCode != http.StatusCreated {
+			t.Errorf("expected 201 Created for admin create, got %d", respC.StatusCode)
+		}
+		// List
+		reqL, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/admin_docs", nil)
+		reqL.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: adminSess.ID})
+		respL, _ := ts.Client().Do(reqL)
+		if respL.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 OK for admin list, got %d", respL.StatusCode)
 		}
 	})
 }

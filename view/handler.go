@@ -292,19 +292,7 @@ func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	if err := resource.ValidateRecord(res, payload, false); err != nil {
-		errMsg, errDetails := formatValidationError(err)
-		vh.renderCreateForm(w, res, navItems, table, payload, errMsg, errDetails, sess)
-		return
-	}
-
-	processedPayload, err := auth.ProcessPasswordFields(res, payload)
-	if err != nil {
-		vh.renderCreateForm(w, res, navItems, table, payload, err.Error(), nil, sess)
-		return
-	}
-
-	created, err := store.Create(req.Context(), res, processedPayload)
+	created, err := store.Create(req.Context(), res, payload)
 	if err != nil {
 		errMsg, errDetails := formatValidationError(err)
 		vh.renderCreateForm(w, res, navItems, table, payload, errMsg, errDetails, sess)
@@ -374,13 +362,7 @@ func (vh *ViewHandler) handleEditSubmit(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	processedPayload, err := auth.ProcessPasswordFields(res, payload)
-	if err != nil {
-		vh.renderEditForm(w, req, res, store, navItems, table, id, payload, err.Error(), nil, sess)
-		return
-	}
-
-	_, err = store.Update(req.Context(), res, id, processedPayload)
+	_, err = store.Update(req.Context(), res, id, payload)
 	if err != nil {
 		errMsg, errDetails := formatValidationError(err)
 		vh.renderEditForm(w, req, res, store, navItems, table, id, payload, errMsg, errDetails, sess)
