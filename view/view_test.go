@@ -296,6 +296,78 @@ func TestView_FormValidationErrorHandling_E2E(t *testing.T) {
 	}
 }
 
+func TestFormValue_ReflectedXSS_AutoEscaping(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_reflected_xss.db")
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	minLen := 100
+	postRes := &resource.Resource{
+		Name:          "Post",
+		Table:         "posts",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{
+				Name:     "title",
+				Type:     resource.TypeString,
+				Nullable: false,
+				Constraints: resource.Constraints{
+					MinLength: &minLen,
+				},
+			},
+		},
+	}
+
+	ctx := t.Context()
+	if err := store.EnsureSchema(ctx, postRes); err != nil {
+		t.Fatalf("failed to ensure schema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(postRes, store)
+
+	router := transport.NewRouter(reg)
+	vh, err := view.NewViewHandler(router)
+	if err != nil {
+		t.Fatalf("failed to create view handler: %v", err)
+	}
+
+	ts := httptest.NewServer(vh)
+	defer ts.Close()
+
+	// Submit reflected XSS payload in title field
+	xssPayload := `"><script>alert('reflected-xss')</script>`
+	formValues := url.Values{}
+	formValues.Set("title", xssPayload)
+
+	resp, err := ts.Client().PostForm(ts.URL+"/view/posts/create", formValues)
+	if err != nil {
+		t.Fatalf("failed to submit form: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response: %v", err)
+	}
+	htmlOutput := string(bodyBytes)
+
+	// Verify raw <script> tag is NOT present unescaped in HTML
+	if strings.Contains(htmlOutput, "<script>alert('reflected-xss')</script>") {
+		t.Errorf("SECURITY RISK: Reflected XSS payload found unescaped in HTML output!")
+	}
+
+	// Verify contextual auto-escaping is applied (e.g. &#34; or &quot;)
+	if !strings.Contains(htmlOutput, "&#34;&gt;&lt;script&gt;") && !strings.Contains(htmlOutput, "&quot;&gt;&lt;script&gt;") {
+		t.Errorf("expected value attribute to contain auto-escaped XSS payload, got: %s", htmlOutput)
+	}
+}
+
 func toStringVal(v any) string {
 	if v == nil {
 		return ""
