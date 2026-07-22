@@ -30,7 +30,7 @@ Milestone 6은 Mold MVP의 마지막 마일스톤으로, 백엔드 Go 코드를 
 
 ## 3. MVP 전체 종합 회고 (Milestone 1 ~ Milestone 6)
 
-### (1) 통틀어 가장 많이 반복되었던 4대 문제 패턴
+### (1) 통틀어 가장 많이 반복되었던 5대 문제 패턴
 
 | 구분 | 문제 패턴 내용 | 원인 분석 | 런타임 해결 방안 |
 | :--- | :--- | :--- | :--- |
@@ -38,6 +38,7 @@ Milestone 6은 Mold MVP의 마지막 마일스톤으로, 백엔드 Go 코드를 
 | **2) 타입 검증 순서** | 제약조건(Constraints) 체크를 타입(Type Check) 체크보다 먼저 수행 | `map[string]any` 동적 타입 맵의 Silent Failure 특성 | 경계 지점에서 `validateFieldType`을 최우선 순위로 강제 |
 | **3) 조건부 로직 누락** | Create/Update, SoftDelete, Authority 가드가 특정 엔드포인트에서 누락 | 단일 함수 단위 구현 사고의 한계 | CRUD 5개 엔드포인트 전체에 영향받는 가드 목록 전수 체크리스트화 |
 | **4) IR 속성 조합 케이스** | `soft_delete` + `unique`, `permissions` + `ownership_field` + `password` | 단일 속성 단위 사고로 인한 조합 엣지 케이스 간섭 | Partial Unique Index 및 `auth.Can`/`Evaluate` 단일 통합 엔진 구축 |
+| **5) 다중 Resource View 템플릿 오염** | 단일 Resource 테스트에서는 숨어있다가 다중 Resource 통합 E2E에서 드러난 템플릿 오버라이딩 | 단일 `tmpl` 트리에 `define "content"`가 중복 파싱되어 마지막 템플릿이 전체를 덮어씀 | `baseLayout.Clone()`으로 뷰 타입별(`list`, `detail`, `login`, `form`) 독립 템플릿 트리 격리 |
 
 ---
 
