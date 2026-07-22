@@ -21,11 +21,11 @@
 
 ## 현재 상태 (2026-07-22 기준)
 
-**완료된 마일스톤**: Milestone 0(철학 고정), Milestone 1(Resource IR), Milestone 2(Storage/SQLite Adapter), Milestone 3(Transport/REST API)
+**완료된 마일스톤**: Milestone 0(철학 고정), Milestone 1(Resource IR), Milestone 2(Storage/SQLite Adapter), Milestone 3(Transport/REST API), Milestone 4(Default View/HTML CRUD)
 
-**진행 중인 마일스톤**: 없음 (Milestone 3 종료 후 휴지 상태)
+**진행 중인 마일스톤**: 없음 (Milestone 4 종료 후 휴지 상태)
 
-**다음 시작점**: Milestone 4 — Default View (자동 관리 화면)
+**다음 시작점**: Milestone 5 — Identity (User Resource, Session, Auth, Permission)
 
 ---
 
@@ -38,21 +38,23 @@
 - **Transport**: HTTPS 고정, Storage: SQLite 고정 (다른 Adapter는 나중에 필요해지면 추가)
 - **아키텍처**: Backend는 "런타임 컴파일러" 방식 — 부팅/reload 시점에 YAML → 검증 → IR(강타입 struct)로 한 번 컴파일하고, 이후 모든 레이어는 이 IR만 참조. 요청마다 재파싱하지 않음
 - **REST API 라우팅**: 단일 Wildcard 동적 라우터(`/api/{table}`, `/api/{table}/{id}`)와 `atomic.Pointer[Registry]` 기반 스냅샷 스왑 구조 적용
+- **Default View 렌더링**: Go 표준 `html/template` 기반 서버사이드 렌더링 (SSR) + Vanilla CSS/JS. 외부 빌드 도구 없음.
+- **Markdown Sanitization**: `bluemonday.UGCPolicy()` 기반 저장형 XSS 방어.
 - **Pagination**: limit/offset 방식 (기본 limit=20, max=100)
 - **Migration**: destructive만 구현 (diff 기반 마이그레이션은 아직 안 만듦 — 실제 필요해지면 추가)
 - **삭제 정책**: append-only + soft_delete 기본값. 실제 DELETE 대신 `deleted_at` 마킹
 - **YAML 문법**: 정식 배열 형태 하나만 지원 (`fields: - name: ... type: ...`). 축약 형태는 명시적으로 거부됨
-- **Auth 방향**: 세션 쿠키 기반으로 갈 예정 (아직 미구현, Milestone 5). 현재 API는 무인증 상태.
+- **Auth 방향**: 세션 쿠키 기반으로 갈 예정 (Milestone 5)
 - **reload 트리거**: 파일 워처 대신 명시적 API (`POST /_mold/reload`, admin 세션 필요) — 결정성 확보 목적
 - **프로젝트 포지셔닝**: 복잡한 프로덕션 서비스가 아니라, 빠른 프로토타이핑/작은 프로덕트용 도구
 
 ---
 
-## 다음 할 일: Milestone 4 (Default View)
+## 다음 할 일: Milestone 5 (Identity)
 
-착수 전에 `docs/retrospectives/milestone-3.md`의 "알려진 제약 및 다음 마일스톤 적용 체크리스트" 항목들을 먼저 훑어볼 것.
+착수 전에 `docs/retrospectives/milestone-4.md`의 "알려진 제약 및 다음 마일스톤 적용 체크리스트" 항목들을 먼저 훑어볼 것.
 
-Milestone 4 범위 (TASKS.md 기준): List View, Detail View, Create Form, Edit Form, Navigation. 완료 기준은 "브라우저에서 CRUD가 가능하다".
+Milestone 5 범위 (TASKS.md 기준): User Resource, Session, Authentication, Authorization, Resource별 Permission. 완료 기준은 "로그인 후 권한에 따라 Resource 접근이 제어된다".
 
 ---
 
@@ -66,4 +68,5 @@ Milestone 4 범위 (TASKS.md 기준): List View, Detail View, Create Form, Edit 
 
 - 2026-07-21: 최초 작성, Milestone 2 완료 시점 기준으로 작성
 - 2026-07-22: Milestone 3 (Transport) 완료 반영 및 Milestone 4 (Default View) 전달사항 업데이트
+- 2026-07-22: Milestone 4 (Default View) 완료 반영 및 Milestone 5 (Identity) 전달사항 업데이트
 

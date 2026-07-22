@@ -67,15 +67,17 @@
 
 목표: 관리 화면이 자동으로 생성된다.
 
-* [ ] List View
-* [ ] Detail View
-* [ ] Create Form
-* [ ] Edit Form
-* [ ] Navigation
+* [x] List View
+* [x] Detail View
+* [x] Create Form
+* [x] Edit Form
+* [x] Navigation
 
 완료 기준
 
 * 브라우저에서 CRUD가 가능하다.
+
+* 회고: [Milestone 4 회고](docs/retrospectives/milestone-4.md)
 
 ---
 
