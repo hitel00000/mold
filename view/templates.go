@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"strings"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
@@ -35,6 +36,8 @@ type PageData struct {
 	ErrorDetails []FieldErrorDetail
 	IsEdit       bool
 	FlashMessage string
+	Session      *auth.Session
+	CanCreate    bool
 }
 
 type FieldErrorDetail struct {
@@ -67,7 +70,7 @@ const baseLayout = `
         body { background-color: var(--bg-primary); color: var(--text-primary); min-height: 100vh; display: flex; flex-direction: column; }
         header { background-color: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; }
         .logo { font-size: 1.25rem; font-weight: 700; color: var(--accent); text-decoration: none; display: flex; align-items: center; gap: 0.5rem; }
-        nav { display: flex; gap: 0.5rem; }
+        nav { display: flex; gap: 0.5rem; align-items: center; }
         nav a { color: var(--text-muted); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius); transition: all 0.2s; font-size: 0.95rem; }
         nav a:hover, nav a.active { color: var(--text-primary); background-color: var(--bg-card); }
         main { flex: 1; max-width: 1200px; width: 100%; margin: 2rem auto; padding: 0 1.5rem; }
@@ -86,7 +89,7 @@ const baseLayout = `
         tr:hover { background-color: rgba(255, 255, 255, 0.02); }
         .form-group { margin-bottom: 1.25rem; }
         label { display: block; font-size: 0.9rem; font-weight: 500; color: var(--text-primary); margin-bottom: 0.4rem; }
-        input[type="text"], input[type="number"], input[type="email"], input[type="url"], input[type="datetime-local"], textarea, select {
+        input[type="text"], input[type="password"], input[type="number"], input[type="email"], input[type="url"], input[type="datetime-local"], textarea, select {
             width: 100%; padding: 0.65rem 0.85rem; background-color: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); font-size: 0.95rem;
         }
         input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
@@ -107,6 +110,16 @@ const baseLayout = `
         <nav>
             {{ range .NavItems }}
                 <a href="/view/{{ .Table }}" class="{{ if .Active }}active{{ end }}">{{ .Name }}</a>
+            {{ end }}
+            {{ if .Session }}
+                <span style="color: var(--text-muted); margin-left: 1rem; font-size: 0.9rem;">
+                    👤 <strong>{{ .Session.Username }}</strong> ({{ .Session.Role }})
+                </span>
+                <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
+                    <button type="submit" class="btn btn-secondary btn-sm">Logout</button>
+                </form>
+            {{ else }}
+                <a href="/login" class="btn btn-sm" style="margin-left: 1rem;">Login</a>
             {{ end }}
         </nav>
     </header>
@@ -140,7 +153,9 @@ const listTemplate = `
         <h2>{{ .Resource.Name }} List</h2>
         <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.2rem;">Total {{ .Total }} records</p>
     </div>
-    <a href="/view/{{ .CurrentTable }}/create" class="btn">+ Create {{ .Resource.Name }}</a>
+    {{ if .CanCreate }}
+        <a href="/view/{{ .CurrentTable }}/create" class="btn">+ Create {{ .Resource.Name }}</a>
+    {{ end }}
 </div>
 
 <div class="card" style="padding: 0; overflow: hidden;">
@@ -162,11 +177,17 @@ const listTemplate = `
                         <td>{{ index $record .Name }}</td>
                     {{ end }}
                     <td style="text-align: right;">
-                        <a href="/view/{{ $.CurrentTable }}/{{ index $record "id" }}" class="btn btn-secondary btn-sm">View</a>
-                        <a href="/view/{{ $.CurrentTable }}/{{ index $record "id" }}/edit" class="btn btn-secondary btn-sm">Edit</a>
-                        <form action="/view/{{ $.CurrentTable }}/{{ index $record "id" }}/delete" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this {{ $.Resource.Name }}?');">
-                            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                        </form>
+                        {{ if canAccess $.Session $.Resource "read" $record }}
+                            <a href="/view/{{ $.CurrentTable }}/{{ index $record "id" }}" class="btn btn-secondary btn-sm">View</a>
+                        {{ end }}
+                        {{ if canAccess $.Session $.Resource "update" $record }}
+                            <a href="/view/{{ $.CurrentTable }}/{{ index $record "id" }}/edit" class="btn btn-secondary btn-sm">Edit</a>
+                        {{ end }}
+                        {{ if canAccess $.Session $.Resource "delete" $record }}
+                            <form action="/view/{{ $.CurrentTable }}/{{ index $record "id" }}/delete" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this {{ $.Resource.Name }}?');">
+                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                            </form>
+                        {{ end }}
                     </td>
                 </tr>
             {{ else }}
@@ -200,10 +221,14 @@ const detailTemplate = `
     <h2>{{ .Resource.Name }} #{{ index .Record "id" }}</h2>
     <div style="display: flex; gap: 0.5rem;">
         <a href="/view/{{ .CurrentTable }}" class="btn btn-secondary">Back to List</a>
-        <a href="/view/{{ .CurrentTable }}/{{ index .Record "id" }}/edit" class="btn">Edit</a>
-        <form action="/view/{{ .CurrentTable }}/{{ index .Record "id" }}/delete" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this {{ .Resource.Name }}?');">
-            <button type="submit" class="btn btn-danger">Delete</button>
-        </form>
+        {{ if canAccess .Session .Resource "update" .Record }}
+            <a href="/view/{{ .CurrentTable }}/{{ index .Record "id" }}/edit" class="btn">Edit</a>
+        {{ end }}
+        {{ if canAccess .Session .Resource "delete" .Record }}
+            <form action="/view/{{ .CurrentTable }}/{{ index .Record "id" }}/delete" method="POST" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this {{ .Resource.Name }}?');">
+                <button type="submit" class="btn btn-danger">Delete</button>
+            </form>
+        {{ end }}
     </div>
 </div>
 
@@ -234,6 +259,29 @@ const detailTemplate = `
             {{ end }}
         </div>
     {{ end }}
+</div>
+{{ end }}
+`
+
+const loginTemplate = `
+{{ define "content" }}
+<div style="max-width: 450px; margin: 3rem auto;">
+    <div class="card">
+        <h2 style="margin-bottom: 1.5rem; text-align: center;">Sign In to Mold</h2>
+        <form action="/login" method="POST">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus placeholder="Enter your username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required placeholder="Enter your password">
+            </div>
+            <div style="margin-top: 1.5rem;">
+                <button type="submit" class="btn" style="width: 100%;">Sign In</button>
+            </div>
+        </form>
+    </div>
 </div>
 {{ end }}
 `
@@ -302,6 +350,9 @@ func compileTemplates() (*template.Template, error) {
 		"eq": func(a, b any) bool {
 			return strings.EqualFold(toString(a), toString(b))
 		},
+		"canAccess": func(sess *auth.Session, res *resource.Resource, actionStr string, rec storage.Record) bool {
+			return auth.Can(sess, res, auth.ActionType(actionStr), rec)
+		},
 	}
 
 	tmpl := template.New("baseLayout").Funcs(funcMap)
@@ -314,6 +365,10 @@ func compileTemplates() (*template.Template, error) {
 		return nil, err
 	}
 	tmpl, err = tmpl.Parse(detailTemplate)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err = tmpl.Parse(loginTemplate)
 	if err != nil {
 		return nil, err
 	}

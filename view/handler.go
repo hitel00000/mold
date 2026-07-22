@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 	"github.com/hitel00000/mold/transport"
@@ -33,15 +34,35 @@ func (vh *ViewHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := strings.TrimPrefix(req.URL.Path, "/")
 	parts := strings.Split(path, "/")
 
+	sess := vh.extractSession(req)
 	reg := vh.router.CurrentRegistry()
 	navItems := buildNavItems(reg, "")
+
+	// Handle /login and /logout
+	if req.URL.Path == "/login" {
+		if req.Method == http.MethodGet {
+			vh.renderLogin(w, req, navItems, sess, "")
+		} else if req.Method == http.MethodPost {
+			vh.handleLoginSubmit(w, req, navItems)
+		}
+		return
+	}
+
+	if req.URL.Path == "/logout" {
+		if sess != nil && vh.router.SessionManager() != nil {
+			_ = vh.router.SessionManager().DeleteSession(req.Context(), sess.ID)
+		}
+		auth.ClearSessionCookie(w)
+		http.Redirect(w, req, "/login?flash=Logged+out+successfully", http.StatusSeeOther)
+		return
+	}
 
 	if len(parts) == 0 || parts[0] == "" || parts[0] == "view" && len(parts) == 1 {
 		if len(navItems) > 0 {
 			http.Redirect(w, req, "/view/"+navItems[0].Table, http.StatusSeeOther)
 			return
 		}
-		vh.renderErrorPage(w, http.StatusNotFound, "No resources registered", nil)
+		vh.renderErrorPage(w, http.StatusNotFound, "No resources registered", nil, sess)
 		return
 	}
 
@@ -53,7 +74,7 @@ func (vh *ViewHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	table := parts[1]
 	entry, exists := reg.Lookup(table)
 	if !exists {
-		vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Resource table '%s' not found", table), buildNavItems(reg, ""))
+		vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Resource table '%s' not found", table), buildNavItems(reg, ""), sess)
 		return
 	}
 
@@ -72,20 +93,35 @@ func (vh *ViewHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if action == "create" {
+		status, allowed, err := auth.Evaluate(sess, res, auth.ActionCreate, nil, nil)
+		if !allowed {
+			vh.renderErrorPage(w, status, err.Error(), navItems, sess)
+			return
+		}
 		if req.Method == http.MethodGet {
-			vh.renderCreateForm(w, res, navItems, table, nil, "", nil)
+			vh.renderCreateForm(w, res, navItems, table, nil, "", nil, sess)
 		} else if req.Method == http.MethodPost {
-			vh.handleCreateSubmit(w, req, res, store, navItems, table)
+			vh.handleCreateSubmit(w, req, res, store, navItems, table, sess)
 		}
 		return
 	}
 
 	if action != "" && subAction == "edit" {
 		idVal := parseID(action)
+		rec, err := store.Get(req.Context(), res, idVal)
+		if err != nil {
+			vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", idVal), navItems, sess)
+			return
+		}
+		status, allowed, err := auth.Evaluate(sess, res, auth.ActionUpdate, rec, nil)
+		if !allowed {
+			vh.renderErrorPage(w, status, err.Error(), navItems, sess)
+			return
+		}
 		if req.Method == http.MethodGet {
-			vh.renderEditForm(w, req, res, store, navItems, table, idVal, nil, "", nil)
+			vh.renderEditForm(w, req, res, store, navItems, table, idVal, nil, "", nil, sess)
 		} else if req.Method == http.MethodPost {
-			vh.handleEditSubmit(w, req, res, store, navItems, table, idVal)
+			vh.handleEditSubmit(w, req, res, store, navItems, table, idVal, sess)
 		}
 		return
 	}
@@ -93,6 +129,16 @@ func (vh *ViewHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if action != "" && subAction == "delete" {
 		if req.Method == http.MethodPost {
 			idVal := parseID(action)
+			rec, err := store.Get(req.Context(), res, idVal)
+			if err != nil {
+				vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", idVal), navItems, sess)
+				return
+			}
+			status, allowed, err := auth.Evaluate(sess, res, auth.ActionDelete, rec, nil)
+			if !allowed {
+				vh.renderErrorPage(w, status, err.Error(), navItems, sess)
+				return
+			}
 			_ = store.SoftDelete(req.Context(), res, idVal)
 			http.Redirect(w, req, fmt.Sprintf("/view/%s?flash=Record+#%v+deleted+successfully", table, idVal), http.StatusSeeOther)
 			return
@@ -101,14 +147,20 @@ func (vh *ViewHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if action != "" {
 		idVal := parseID(action)
-		vh.renderDetail(w, req, res, store, navItems, table, idVal)
+		vh.renderDetail(w, req, res, store, navItems, table, idVal, sess)
 		return
 	}
 
-	vh.renderList(w, req, res, store, navItems, table)
+	vh.renderList(w, req, res, store, navItems, table, sess)
 }
 
-func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string) {
+func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, sess *auth.Session) {
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionRead, nil, nil)
+	if !allowed {
+		vh.renderErrorPage(w, status, err.Error(), navItems, sess)
+		return
+	}
+
 	page := 1
 	perPage := 20
 	if pStr := req.URL.Query().Get("page"); pStr != "" {
@@ -121,7 +173,7 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 
 	records, err := store.List(req.Context(), res, storage.Query{Limit: perPage, Offset: offset})
 	if err != nil {
-		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems)
+		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
 
@@ -157,15 +209,23 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 		PrevPage:     page - 1,
 		NextPage:     page + 1,
 		FlashMessage: flashMessage,
+		Session:      sess,
+		CanCreate:    auth.Can(sess, res, auth.ActionCreate, nil),
 	}
 
 	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
-func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any) {
+func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, sess *auth.Session) {
 	rec, err := store.Get(req.Context(), res, id)
 	if err != nil {
-		vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", id), navItems)
+		vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", id), navItems, sess)
+		return
+	}
+
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionRead, rec, nil)
+	if !allowed {
+		vh.renderErrorPage(w, status, authErr.Error(), navItems, sess)
 		return
 	}
 
@@ -179,12 +239,13 @@ func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, re
 		Resource:     res,
 		Record:       sanitized,
 		Widgets:      widgets,
+		Session:      sess,
 	}
 
 	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
-func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Resource, navItems []NavItem, table string, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail) {
+func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Resource, navItems []NavItem, table string, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail, sess *auth.Session) {
 	widgets := BuildFormFields(res, formValues, false)
 	data := PageData{
 		Title:        "Create " + res.Name,
@@ -195,11 +256,12 @@ func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Res
 		IsEdit:       false,
 		ErrorMessage: errMsg,
 		ErrorDetails: errDetails,
+		Session:      sess,
 	}
 
 	var buf bytes.Buffer
 	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
-		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems)
+		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
 
@@ -211,17 +273,35 @@ func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Res
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string) {
+func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, sess *auth.Session) {
 	if err := req.ParseForm(); err != nil {
-		vh.renderCreateForm(w, res, navItems, table, nil, "Failed to parse form input", nil)
+		vh.renderCreateForm(w, res, navItems, table, nil, "Failed to parse form input", nil, sess)
 		return
 	}
 
 	payload := parseFormPayload(req, res)
-	created, err := store.Create(req.Context(), res, payload)
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionCreate, nil, payload)
+	if !allowed {
+		vh.renderErrorPage(w, status, authErr.Error(), navItems, sess)
+		return
+	}
+
+	if sess != nil && res.Auth != nil && res.Auth.OwnershipField != "" {
+		if _, exists := payload[res.Auth.OwnershipField]; !exists {
+			payload[res.Auth.OwnershipField] = sess.UserID
+		}
+	}
+
+	processedPayload, err := auth.ProcessPasswordFields(res, payload)
+	if err != nil {
+		vh.renderCreateForm(w, res, navItems, table, payload, err.Error(), nil, sess)
+		return
+	}
+
+	created, err := store.Create(req.Context(), res, processedPayload)
 	if err != nil {
 		errMsg, errDetails := formatValidationError(err)
-		vh.renderCreateForm(w, res, navItems, table, payload, errMsg, errDetails)
+		vh.renderCreateForm(w, res, navItems, table, payload, errMsg, errDetails, sess)
 		return
 	}
 
@@ -229,11 +309,11 @@ func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Reque
 	http.Redirect(w, req, fmt.Sprintf("/view/%s/%v?flash=%s+#%v+created+successfully", table, createdID, res.Name, createdID), http.StatusSeeOther)
 }
 
-func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail) {
+func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail, sess *auth.Session) {
 	if formValues == nil {
 		existingRec, err := store.Get(req.Context(), res, id)
 		if err != nil {
-			vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", id), navItems)
+			vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", id), navItems, sess)
 			return
 		}
 		formValues = existingRec
@@ -252,11 +332,12 @@ func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, 
 		IsEdit:       true,
 		ErrorMessage: errMsg,
 		ErrorDetails: errDetails,
+		Session:      sess,
 	}
 
 	var buf bytes.Buffer
 	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
-		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems)
+		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
 
@@ -268,31 +349,140 @@ func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, 
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (vh *ViewHandler) handleEditSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any) {
+func (vh *ViewHandler) handleEditSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, sess *auth.Session) {
 	if err := req.ParseForm(); err != nil {
-		vh.renderEditForm(w, req, res, store, navItems, table, id, nil, "Failed to parse form input", nil)
+		vh.renderEditForm(w, req, res, store, navItems, table, id, nil, "Failed to parse form input", nil, sess)
 		return
 	}
 
 	payload := parseFormPayload(req, res)
-	_, err := store.Update(req.Context(), res, id, payload)
+	rec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		vh.renderErrorPage(w, http.StatusNotFound, fmt.Sprintf("Record #%v not found", id), navItems, sess)
+		return
+	}
+
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionUpdate, rec, payload)
+	if !allowed {
+		vh.renderErrorPage(w, status, authErr.Error(), navItems, sess)
+		return
+	}
+
+	processedPayload, err := auth.ProcessPasswordFields(res, payload)
+	if err != nil {
+		vh.renderEditForm(w, req, res, store, navItems, table, id, payload, err.Error(), nil, sess)
+		return
+	}
+
+	_, err = store.Update(req.Context(), res, id, processedPayload)
 	if err != nil {
 		errMsg, errDetails := formatValidationError(err)
-		vh.renderEditForm(w, req, res, store, navItems, table, id, payload, errMsg, errDetails)
+		vh.renderEditForm(w, req, res, store, navItems, table, id, payload, errMsg, errDetails, sess)
 		return
 	}
 
 	http.Redirect(w, req, fmt.Sprintf("/view/%s/%v?flash=%s+#%v+updated+successfully", table, id, res.Name, id), http.StatusSeeOther)
 }
 
-func (vh *ViewHandler) renderErrorPage(w http.ResponseWriter, statusCode int, message string, navItems []NavItem) {
+func (vh *ViewHandler) renderErrorPage(w http.ResponseWriter, statusCode int, message string, navItems []NavItem, sess *auth.Session) {
 	w.WriteHeader(statusCode)
 	data := PageData{
 		Title:        "Error",
 		NavItems:     navItems,
 		ErrorMessage: message,
+		Session:      sess,
 	}
 	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+}
+
+func (vh *ViewHandler) renderLogin(w http.ResponseWriter, req *http.Request, navItems []NavItem, sess *auth.Session, errMsg string) {
+	data := PageData{
+		Title:        "Login",
+		NavItems:     navItems,
+		ErrorMessage: errMsg,
+		FlashMessage: req.URL.Query().Get("flash"),
+		Session:      sess,
+	}
+	if errMsg != "" {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+}
+
+func (vh *ViewHandler) handleLoginSubmit(w http.ResponseWriter, req *http.Request, navItems []NavItem) {
+	if err := req.ParseForm(); err != nil {
+		vh.renderLogin(w, req, navItems, nil, "Failed to parse login input")
+		return
+	}
+
+	username := req.FormValue("username")
+	password := req.FormValue("password")
+
+	reg := vh.router.CurrentRegistry()
+	userEntry, exists := reg.Lookup("users")
+	if !exists {
+		vh.renderLogin(w, req, navItems, nil, "User authentication system not configured")
+		return
+	}
+
+	records, err := userEntry.Store.List(req.Context(), userEntry.Resource, storage.Query{})
+	if err != nil {
+		vh.renderLogin(w, req, navItems, nil, "Authentication lookup failed")
+		return
+	}
+
+	var matchedUser storage.Record
+	for _, rec := range records {
+		if fmt.Sprintf("%v", rec["username"]) == username {
+			matchedUser = rec
+			break
+		}
+	}
+
+	if matchedUser == nil {
+		vh.renderLogin(w, req, navItems, nil, "Invalid username or password")
+		return
+	}
+
+	storedHash := fmt.Sprintf("%v", matchedUser["password"])
+	if !auth.CheckPasswordHash(password, storedHash) {
+		vh.renderLogin(w, req, navItems, nil, "Invalid username or password")
+		return
+	}
+
+	roleStr := "user"
+	if r, ok := matchedUser["role"].(string); ok && r != "" {
+		roleStr = r
+	}
+
+	if vh.router.SessionManager() == nil {
+		vh.renderLogin(w, req, navItems, nil, "Session manager not configured")
+		return
+	}
+
+	sess, err := vh.router.SessionManager().CreateSession(req.Context(), matchedUser["id"], username, roleStr)
+	if err != nil {
+		vh.renderLogin(w, req, navItems, nil, "Failed to create session")
+		return
+	}
+
+	auth.SetSessionCookie(w, sess.ID)
+	http.Redirect(w, req, "/view?flash=Welcome+back+"+username+"!", http.StatusSeeOther)
+}
+
+func (vh *ViewHandler) extractSession(req *http.Request) *auth.Session {
+	if vh.router == nil || vh.router.SessionManager() == nil {
+		return nil
+	}
+	cookie, err := req.Cookie(auth.SessionCookieName)
+	if err != nil || cookie == nil || cookie.Value == "" {
+		return nil
+	}
+	sess, err := vh.router.SessionManager().GetSession(req.Context(), cookie.Value)
+	if err != nil {
+		return nil
+	}
+	return sess
 }
 
 func buildNavItems(reg *transport.Registry, currentTable string) []NavItem {
