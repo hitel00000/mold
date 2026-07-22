@@ -103,15 +103,17 @@
 
 목표: 사람이 Resource만 작성한다.
 
-* [ ] Resource 작성 가이드
-* [ ] AI용 프로젝트 규칙(AGENTS.md)
-* [ ] AI가 Resource 추가
-* [ ] Runtime 자동 반영
-* [ ] View 재생성
+* [x] Resource 작성 가이드 ([resource-guide.md](docs/resource-guide.md))
+* [x] AI용 프로젝트 규칙 (AGENTS.md)
+* [x] AI가 Resource 추가 (`examples/` 및 pure YAML reload 워크플로우)
+* [x] Runtime 자동 반영 (`POST /_mold/reload` 원자적 반영 및 오류 시 보존)
+* [x] View 재생성 (`atomic.Pointer[Registry]` 스왑 기반 View 재생성)
 
 완료 기준
 
 * AI가 Resource만 수정해도 서비스가 확장된다.
+
+* 회고: [Milestone 6 회고](docs/retrospectives/milestone-6.md)
 
 ---
 
@@ -119,25 +121,25 @@
 
 ## Blog
 
-* User
-* Post
-* Comment
+* [x] User
+* [x] Post
+* [x] Comment
 
 ---
 
 ## Todo
 
-* User
-* Project
-* Task
+* [x] User
+* [x] Project
+* [x] Task
 
 ---
 
 ## CRM
 
-* Customer
-* Contact
-* Company
+* [x] Customer
+* [x] Contact
+* [x] Company
 
 ---
 
