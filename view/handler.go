@@ -292,6 +292,12 @@ func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
+	if err := resource.ValidateRecord(res, payload, false); err != nil {
+		errMsg, errDetails := formatValidationError(err)
+		vh.renderCreateForm(w, res, navItems, table, payload, errMsg, errDetails, sess)
+		return
+	}
+
 	processedPayload, err := auth.ProcessPasswordFields(res, payload)
 	if err != nil {
 		vh.renderCreateForm(w, res, navItems, table, payload, err.Error(), nil, sess)

@@ -182,6 +182,11 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
+	if err := resource.ValidateRecord(res, input, false); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
+		return
+	}
+
 	processedInput, err := auth.ProcessPasswordFields(res, input)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
@@ -225,6 +230,11 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 	status, allowed, err := auth.Evaluate(sess, res, auth.ActionUpdate, rec, input)
 	if !allowed {
 		rt.writeAuthError(w, status, err)
+		return
+	}
+
+	if err := resource.ValidateRecord(res, input, true); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
 		return
 	}
 

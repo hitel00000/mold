@@ -524,7 +524,13 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 	formVals.Set("username", "validpass")
 	formVals.Set("password", "securepassword123")
 
-	loginResp, err := tsView.Client().PostForm(tsView.URL+"/login", formVals)
+	clientView := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	loginResp, err := clientView.PostForm(tsView.URL+"/login", formVals)
 	if err != nil {
 		t.Fatalf("failed to submit login form: %v", err)
 	}
