@@ -14,6 +14,7 @@ const (
 	TypeEnum     FieldType = "enum"
 	TypeEmail    FieldType = "email"
 	TypeURL      FieldType = "url"
+	TypePassword FieldType = "password"
 )
 
 // Constraints defines validation and configuration constraints for a field.

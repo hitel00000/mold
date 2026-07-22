@@ -105,6 +105,14 @@ func validateFieldType(resName string, f Field, val any) error {
 		if _, ok := val.(string); !ok {
 			return fmt.Errorf("resource '%s': field '%s' expects %s, got %s", resName, f.Name, f.Type, typeNameOf(val))
 		}
+	case TypePassword:
+		strVal, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("resource '%s': field '%s' expects password string, got %s", resName, f.Name, typeNameOf(val))
+		}
+		if len([]byte(strVal)) > 72 {
+			return fmt.Errorf("resource '%s': password field '%s' value exceeds maximum allowed bcrypt length of 72 bytes", resName, f.Name)
+		}
 	case TypeInt:
 		switch v := val.(type) {
 		case int, int64, int32:

@@ -15,6 +15,7 @@ var validFieldTypes = map[FieldType]bool{
 	TypeEnum:     true,
 	TypeEmail:    true,
 	TypeURL:      true,
+	TypePassword: true,
 }
 
 var validRelationKinds = map[RelationKind]bool{
@@ -96,7 +97,7 @@ func validateConstraints(resName string, f Field) error {
 
 	if c.MinLength != nil || c.MaxLength != nil {
 		switch f.Type {
-		case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL:
+		case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL, TypePassword:
 			// allowed
 		default:
 			return fmt.Errorf("resource '%s': field '%s' constraint min_length/max_length is invalid for type '%s'", resName, f.Name, f.Type)
@@ -122,7 +123,7 @@ func validateConstraints(resName string, f Field) error {
 
 	if c.Pattern != "" {
 		switch f.Type {
-		case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL:
+		case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL, TypePassword:
 			// allowed
 		default:
 			return fmt.Errorf("resource '%s': field '%s' constraint pattern is invalid for type '%s'", resName, f.Name, f.Type)

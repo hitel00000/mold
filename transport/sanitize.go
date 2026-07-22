@@ -15,7 +15,7 @@ func SanitizeRecord(res *resource.Resource, rec storage.Record) storage.Record {
 	deprecatedFields := make(map[string]bool)
 
 	for _, f := range res.Fields {
-		if f.Deprecated {
+		if f.Deprecated || f.Type == resource.TypePassword {
 			deprecatedFields[f.Name] = true
 		}
 	}
