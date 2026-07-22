@@ -1,0 +1,17 @@
+# Build and binary artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.zip
+*.tar.gz
+
+# Database and log files
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Antigravity & OS files
+.DS_Store
+Thumbs.db

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/hitel00000/mold/resource"
@@ -28,7 +29,15 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // Open connects to a SQLite database by DSN and returns a Store.
+// It automatically ensures _pragma=foreign_keys(1) is set on connection DSN if not already specified.
 func Open(dsn string) (*Store, error) {
+	if !strings.Contains(dsn, "_pragma=foreign_keys") && !strings.Contains(dsn, "_foreign_keys") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&_pragma=foreign_keys(1)"
+		} else {
+			dsn += "?_pragma=foreign_keys(1)"
+		}
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
