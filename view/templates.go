@@ -248,6 +248,7 @@ const formTemplate = `
 <div class="card">
     <form action="{{ if .IsEdit }}/view/{{ .CurrentTable }}/{{ index .Record "id" }}/edit{{ else }}/view/{{ .CurrentTable }}/create{{ end }}" method="POST">
         {{ range .Widgets }}
+            {{ $widgetName := .Name }}
             <div class="form-group">
                 <label for="{{ .Name }}">{{ .Label }} {{ if .Required }}<span style="color: var(--danger);">*</span>{{ end }}</label>
                 {{ $val := .Value }}
@@ -269,6 +270,14 @@ const formTemplate = `
 
                 {{ if .Description }}
                     <div class="field-desc">{{ .Description }}</div>
+                {{ end }}
+
+                {{ range $.ErrorDetails }}
+                    {{ if eq .Field $widgetName }}
+                        <div style="color: var(--danger); font-size: 0.85rem; margin-top: 0.35rem; font-weight: 500;">
+                            <strong>Field Error:</strong> {{ .Message }}
+                        </div>
+                    {{ end }}
                 {{ end }}
             </div>
         {{ end }}
@@ -295,7 +304,7 @@ func compileTemplates() (*template.Template, error) {
 		},
 	}
 
-	tmpl := template.New("base").Funcs(funcMap)
+	tmpl := template.New("baseLayout").Funcs(funcMap)
 	tmpl, err := tmpl.Parse(baseLayout)
 	if err != nil {
 		return nil, err

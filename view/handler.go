@@ -1,6 +1,7 @@
 package view
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -195,7 +196,19 @@ func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Res
 		ErrorMessage: errMsg,
 		ErrorDetails: errDetails,
 	}
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+
+	var buf bytes.Buffer
+	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems)
+		return
+	}
+
+	if errMsg != "" {
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string) {
@@ -240,7 +253,19 @@ func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, 
 		ErrorMessage: errMsg,
 		ErrorDetails: errDetails,
 	}
-	_ = vh.tmpl.ExecuteTemplate(w, "baseLayout", data)
+
+	var buf bytes.Buffer
+	if err := vh.tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems)
+		return
+	}
+
+	if errMsg != "" {
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (vh *ViewHandler) handleEditSubmit(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any) {
@@ -335,7 +360,32 @@ func formatValidationError(err error) (string, []FieldErrorDetail) {
 	if err == nil {
 		return "", nil
 	}
-	return err.Error(), nil
+
+	errStr := err.Error()
+
+	// 1. Foreign Key Constraint Error
+	if strings.Contains(errStr, "FOREIGN KEY constraint failed") {
+		return "Referenced foreign key target record does not exist", []FieldErrorDetail{
+			{Field: "foreign_key", Message: "referenced target record does not exist in target resource"},
+		}
+	}
+
+	// 2. Field Level Validation Error parsing (e.g. "resource 'Post': field 'title' length 2 is less than min_length 3")
+	if strings.Contains(errStr, "field '") {
+		parts := strings.Split(errStr, "field '")
+		if len(parts) >= 2 {
+			subParts := strings.SplitN(parts[1], "' ", 2)
+			if len(subParts) == 2 {
+				fieldName := subParts[0]
+				msg := subParts[1]
+				return fmt.Sprintf("Validation failed for field '%s'", fieldName), []FieldErrorDetail{
+					{Field: fieldName, Message: msg},
+				}
+			}
+		}
+	}
+
+	return errStr, nil
 }
 
 func parseID(s string) any {
