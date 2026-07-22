@@ -164,7 +164,7 @@ Authorization: (세션 쿠키, role: admin 필요)
 ## 7. 결정된 설계 사항
 
 * [x] **Type별 Constraints 스키마 강제 규칙**  
-  **결정**: Primitive Type 그룹별로 허용되는 constraint 키를 [validate.go](file:///C:/Users/jeongwoong/dev/mold/resource/validate.go)에 엄격하게 구현 및 명시함.  
+  **결정**: Primitive Type 그룹별로 허용되는 constraint 키를 [validate.go](../resource/validate.go)에 엄격하게 구현 및 명시함.  
   **근거**: 부적절한 제약조건(예: `string`에 `min/max`, `int`에 `min_length`)을 부팅/로드 검증 단계에서 명확한 에러로 차단하여 오염된 설정이 하위 레이어(Storage/View)로 전파되는 것을 예방함.
 
 * [x] **View 렌더링 힌트의 IR 포함 여부**  
