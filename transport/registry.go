@@ -41,6 +41,18 @@ func (r *Registry) Lookup(table string) (ResourceEntry, bool) {
 	return entry, exists
 }
 
+// Entries returns a copy of all registered table entries for iteration.
+func (r *Registry) Entries() map[string]ResourceEntry {
+	if r == nil {
+		return nil
+	}
+	copyMap := make(map[string]ResourceEntry)
+	for k, v := range r.entries {
+		copyMap[k] = v
+	}
+	return copyMap
+}
+
 // Router maintains an atomic pointer to the current Registry snapshot.
 type Router struct {
 	registryPointer atomic.Pointer[Registry]
