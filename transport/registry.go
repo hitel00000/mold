@@ -1,8 +1,10 @@
 package transport
 
 import (
+	"sync"
 	"sync/atomic"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
@@ -57,16 +59,22 @@ func (r *Registry) Entries() map[string]ResourceEntry {
 type Router struct {
 	registryPointer atomic.Pointer[Registry]
 	reloadFn        func() (*Registry, error)
+	sessionMgr      *auth.SessionManager
 }
 
-// NewRouter initializes a Router with an initial Registry snapshot.
-func NewRouter(initialRegistry *Registry) *Router {
+// NewRouter creates a new Router with the initial Registry.
+func NewRouter(initial *Registry) *Router {
 	r := &Router{}
-	if initialRegistry == nil {
-		initialRegistry = NewRegistry()
-	}
-	r.registryPointer.Store(initialRegistry)
+	r.SwapRegistry(initial)
 	return r
+}
+
+func (rt *Router) SetSessionManager(sm *auth.SessionManager) {
+	rt.sessionMgr = sm
+}
+
+func (rt *Router) SessionManager() *auth.SessionManager {
+	return rt.sessionMgr
 }
 
 // SwapRegistry atomically replaces the active Registry snapshot.

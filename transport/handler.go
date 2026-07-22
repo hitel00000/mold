@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
@@ -40,6 +41,12 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	table := pathParts[1]
+	// Block internal system tables starting with _mold_
+	if strings.HasPrefix(table, "_mold_") {
+		WriteError(w, http.StatusNotFound, "NOT_FOUND", "endpoint not found", nil)
+		return
+	}
+
 	var idStr string
 	if len(pathParts) >= 3 {
 		idStr = pathParts[2]
@@ -54,13 +61,14 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	res := entry.Resource
 	store := entry.Store
+	sess := rt.extractSession(req)
 
 	if idStr == "" {
 		switch req.Method {
 		case http.MethodGet:
-			rt.handleList(w, req, res, store)
+			rt.handleList(w, req, res, store, sess)
 		case http.MethodPost:
-			rt.handleCreate(w, req, res, store)
+			rt.handleCreate(w, req, res, store, sess)
 		default:
 			WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("method %s not allowed on collection endpoint", req.Method), nil)
 		}
@@ -68,18 +76,24 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		idVal := parseID(idStr)
 		switch req.Method {
 		case http.MethodGet:
-			rt.handleDetail(w, req, res, store, idVal)
+			rt.handleDetail(w, req, res, store, idVal, sess)
 		case http.MethodPut, http.MethodPatch:
-			rt.handleUpdate(w, req, res, store, idVal)
+			rt.handleUpdate(w, req, res, store, idVal, sess)
 		case http.MethodDelete:
-			rt.handleDelete(w, req, res, store, idVal)
+			rt.handleDelete(w, req, res, store, idVal, sess)
 		default:
 			WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("method %s not allowed on detail endpoint", req.Method), nil)
 		}
 	}
 }
 
-func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store) {
+func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, sess *auth.Session) {
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionRead, nil, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, err)
+		return
+	}
+
 	limit := DefaultLimit
 	offset := 0
 
@@ -124,7 +138,7 @@ func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *reso
 	WriteListSuccess(w, http.StatusOK, sanitized, totalCount, limit, offset)
 }
 
-func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any) {
+func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, sess *auth.Session) {
 	rec, err := store.Get(req.Context(), res, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -135,11 +149,17 @@ func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *re
 		return
 	}
 
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionRead, rec, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, err)
+		return
+	}
+
 	sanitized := SanitizeRecord(res, rec)
 	WriteSuccess(w, http.StatusOK, sanitized)
 }
 
-func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store) {
+func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, sess *auth.Session) {
 	var input map[string]any
 	if err := json.NewDecoder(req.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", fmt.Sprintf("invalid JSON payload: %v", err), nil)
@@ -149,7 +169,26 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		input = make(map[string]any)
 	}
 
-	created, err := store.Create(req.Context(), res, input)
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionCreate, nil, input)
+	if !allowed {
+		rt.writeAuthError(w, status, err)
+		return
+	}
+
+	// Auto-assign ownership_field if session exists and field is present in IR
+	if sess != nil && res.Auth != nil && res.Auth.OwnershipField != "" {
+		if _, exists := input[res.Auth.OwnershipField]; !exists {
+			input[res.Auth.OwnershipField] = sess.UserID
+		}
+	}
+
+	processedInput, err := auth.ProcessPasswordFields(res, input)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
+		return
+	}
+
+	created, err := store.Create(req.Context(), res, processedInput)
 	if err != nil {
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
@@ -163,7 +202,17 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 	WriteSuccess(w, http.StatusCreated, sanitized)
 }
 
-func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any) {
+func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, sess *auth.Session) {
+	rec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", fmt.Sprintf("failed to fetch record: %v", err), nil)
+		return
+	}
+
 	var input map[string]any
 	if err := json.NewDecoder(req.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		WriteError(w, http.StatusBadRequest, "INVALID_JSON", fmt.Sprintf("invalid JSON payload: %v", err), nil)
@@ -173,7 +222,19 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 		input = make(map[string]any)
 	}
 
-	updated, err := store.Update(req.Context(), res, id, input)
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionUpdate, rec, input)
+	if !allowed {
+		rt.writeAuthError(w, status, err)
+		return
+	}
+
+	processedInput, err := auth.ProcessPasswordFields(res, input)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
+		return
+	}
+
+	updated, err := store.Update(req.Context(), res, id, processedInput)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)
@@ -191,8 +252,24 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 	WriteSuccess(w, http.StatusOK, sanitized)
 }
 
-func (rt *Router) handleDelete(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any) {
-	err := store.SoftDelete(req.Context(), res, id)
+func (rt *Router) handleDelete(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, sess *auth.Session) {
+	rec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", fmt.Sprintf("failed to fetch record for deletion: %v", err), nil)
+		return
+	}
+
+	status, allowed, err := auth.Evaluate(sess, res, auth.ActionDelete, rec, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, err)
+		return
+	}
+
+	err = store.SoftDelete(req.Context(), res, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)
@@ -239,4 +316,32 @@ func isFKConstraintError(err error) bool {
 	}
 	errStr := err.Error()
 	return strings.Contains(errStr, "FOREIGN KEY constraint failed")
+}
+
+func (rt *Router) extractSession(req *http.Request) *auth.Session {
+	if rt.sessionMgr == nil {
+		return nil
+	}
+	cookie, err := req.Cookie(auth.SessionCookieName)
+	if err != nil || cookie == nil || cookie.Value == "" {
+		return nil
+	}
+	sess, err := rt.sessionMgr.GetSession(req.Context(), cookie.Value)
+	if err != nil {
+		return nil
+	}
+	return sess
+}
+
+func (rt *Router) writeAuthError(w http.ResponseWriter, status int, err error) {
+	if err == nil {
+		err = auth.ErrForbidden
+	}
+	code := "FORBIDDEN"
+	if status == http.StatusUnauthorized {
+		code = "UNAUTHORIZED"
+	} else if status == http.StatusNotFound {
+		code = "NOT_FOUND"
+	}
+	WriteError(w, status, code, err.Error(), nil)
 }
