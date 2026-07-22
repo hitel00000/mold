@@ -85,15 +85,17 @@
 
 목표: 온라인 서비스의 최소 조건을 만족한다.
 
-* [ ] User Resource
-* [ ] Session
-* [ ] Authentication
-* [ ] Authorization
-* [ ] Resource별 Permission
+* [x] User Resource
+* [x] Session
+* [x] Authentication
+* [x] Authorization
+* [x] Resource별 Permission
 
 완료 기준
 
 * 로그인 후 권한에 따라 Resource 접근이 제어된다.
+
+* 회고: [Milestone 5 회고](docs/retrospectives/milestone-5.md)
 
 ---
 

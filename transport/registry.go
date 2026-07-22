@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"github.com/hitel00000/mold/auth"

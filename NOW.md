@@ -21,11 +21,11 @@
 
 ## 현재 상태 (2026-07-22 기준)
 
-**완료된 마일스톤**: Milestone 0(철학 고정), Milestone 1(Resource IR), Milestone 2(Storage/SQLite Adapter), Milestone 3(Transport/REST API), Milestone 4(Default View/HTML CRUD)
+**완료된 마일스톤**: Milestone 0(철학 고정), Milestone 1(Resource IR), Milestone 2(Storage/SQLite Adapter), Milestone 3(Transport/REST API), Milestone 4(Default View/HTML CRUD), Milestone 5(Identity/Auth & Session & Permissions)
 
-**진행 중인 마일스톤**: 없음 (Milestone 4 종료 후 휴지 상태)
+**진행 중인 마일스톤**: 없음 (Milestone 5 종료 후 휴지 상태)
 
-**다음 시작점**: Milestone 5 — Identity (User Resource, Session, Auth, Permission)
+**다음 시작점**: Milestone 6 — AI Workflow (Resource 작성 가이드, AGENTS.md 자동화, 런타임 자동 반영)
 
 ---
 
@@ -40,27 +40,29 @@
 - **REST API 라우팅**: 단일 Wildcard 동적 라우터(`/api/{table}`, `/api/{table}/{id}`)와 `atomic.Pointer[Registry]` 기반 스냅샷 스왑 구조 적용
 - **Default View 렌더링**: Go 표준 `html/template` 기반 서버사이드 렌더링 (SSR) + Vanilla CSS/JS. 외부 빌드 도구 없음.
 - **Markdown Sanitization**: `bluemonday.UGCPolicy()` 기반 저장형 XSS 방어.
+- **Session & Security**: SQLite `_mold_sessions` 테이블 기반 세션 쿠키 (`HttpOnly; Secure; SameSite=Lax`), bcrypt 비밀번호 해싱 및 `password` semantic type 자동 은폐.
+- **Permission Engine**: `auth.Can` 및 `auth.Evaluate` 공통 엔진으로 Transport/View 단일 통제. 401(자격 증명 미달) -> 404(존재/soft-delete 미달) -> 403(권한/소유권 미달) 3단계 가딩 적용.
+- **Role Escalation Protection**: 일반 사용자 write payload에서 `role` 필드 수정 시 403 거부 (admin 유저만 예외 허용).
 - **Pagination**: limit/offset 방식 (기본 limit=20, max=100)
 - **Migration**: destructive만 구현 (diff 기반 마이그레이션은 아직 안 만듦 — 실제 필요해지면 추가)
 - **삭제 정책**: append-only + soft_delete 기본값. 실제 DELETE 대신 `deleted_at` 마킹
 - **YAML 문법**: 정식 배열 형태 하나만 지원 (`fields: - name: ... type: ...`). 축약 형태는 명시적으로 거부됨
-- **Auth 방향**: 세션 쿠키 기반으로 갈 예정 (Milestone 5)
 - **reload 트리거**: 파일 워처 대신 명시적 API (`POST /_mold/reload`, admin 세션 필요) — 결정성 확보 목적
 - **프로젝트 포지셔닝**: 복잡한 프로덕션 서비스가 아니라, 빠른 프로토타이핑/작은 프로덕트용 도구
 
 ---
 
-## 다음 할 일: Milestone 5 (Identity)
+## 다음 할 일: Milestone 6 (AI Workflow)
 
-착수 전에 `docs/retrospectives/milestone-4.md`의 "알려진 제약 및 다음 마일스톤 적용 체크리스트" 항목들을 먼저 훑어볼 것.
+착수 전에 `docs/retrospectives/milestone-5.md`의 내용을 먼저 훑어볼 것.
 
-Milestone 5 범위 (TASKS.md 기준): User Resource, Session, Authentication, Authorization, Resource별 Permission. 완료 기준은 "로그인 후 권한에 따라 Resource 접근이 제어된다".
+Milestone 6 범위 (TASKS.md 기준): Resource 작성 가이드, AGENTS.md 자동화 규칙, AI가 Resource 추가 후 Runtime 및 View 자동 반영 검증.
 
 ---
 
 ## 열려있는 질문 / 아직 미해결
 
-- 없음 (Milestone 3까지 나온 질문은 전부 정리됨)
+- 없음
 
 ---
 
@@ -69,4 +71,5 @@ Milestone 5 범위 (TASKS.md 기준): User Resource, Session, Authentication, Au
 - 2026-07-21: 최초 작성, Milestone 2 완료 시점 기준으로 작성
 - 2026-07-22: Milestone 3 (Transport) 완료 반영 및 Milestone 4 (Default View) 전달사항 업데이트
 - 2026-07-22: Milestone 4 (Default View) 완료 반영 및 Milestone 5 (Identity) 전달사항 업데이트
+- 2026-07-22: Milestone 5 (Identity) 완료 반영 및 Milestone 6 (AI Workflow) 전달사항 업데이트
 
