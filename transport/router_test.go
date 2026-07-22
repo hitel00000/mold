@@ -235,3 +235,74 @@ func TestTransport_E2E(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+func TestTransport_PaginationTotalCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_pagination.db")
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	postRes := &resource.Resource{
+		Name:          "Post",
+		Table:         "posts",
+		SchemaVersion: 1,
+		Timestamps:    true,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	ctx := t.Context()
+	if err := store.EnsureSchema(ctx, postRes); err != nil {
+		t.Fatalf("failed to ensure schema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(postRes, store)
+	router := transport.NewRouter(reg)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Insert 25 posts
+	for i := 1; i <= 25; i++ {
+		_, err := store.Create(ctx, postRes, map[string]any{"title": "Post"})
+		if err != nil {
+			t.Fatalf("failed to insert post %d: %v", i, err)
+		}
+	}
+
+	// Query with limit=10
+	resp, err := ts.Client().Get(ts.URL + "/api/posts?limit=10")
+	if err != nil {
+		t.Fatalf("failed to request list: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var listResp transport.ListSuccessEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		t.Fatalf("failed to decode list response: %v", err)
+	}
+
+	items, ok := listResp.Data.([]any)
+	if !ok {
+		t.Fatalf("expected data to be []any, got %T", listResp.Data)
+	}
+
+	if len(items) != 10 {
+		t.Errorf("expected 10 items in page, got %d", len(items))
+	}
+
+	if listResp.Meta.Total != 25 {
+		t.Errorf("expected meta.total to be 25, got %d", listResp.Meta.Total)
+	}
+
+	if listResp.Meta.Limit != 10 {
+		t.Errorf("expected meta.limit to be 10, got %d", listResp.Meta.Limit)
+	}
+}
