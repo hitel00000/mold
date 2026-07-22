@@ -13,9 +13,11 @@
 
 1. `AGENTS.md` — 프로젝트 철학, 하지 않는 것, 설계 원칙
 2. `docs/ir-spec.md` — Resource IR의 유일한 스펙 (구조체, 검증 규칙, 결정된 설계 사항)
-3. `TASKS.md` — 마일스톤별 체크리스트
-4. `docs/retrospectives/` 안의 가장 최근 회고 문서
-5. 이 문서(NOW.md)의 "다음 할 일" 섹션
+3. `docs/resource-guide.md` — Resource YAML 작성 스펙 및 Good/Bad 패턴 가이드
+4. `TASKS.md` — 마일스톤별 체크리스트
+5. `docs/retrospectives/` 안의 가장 최근 회고 문서
+6. 이 문서(NOW.md)의 "다음 할 일" 섹션
+
 
 ---
 

@@ -202,6 +202,8 @@ AI는 항상 다음 원칙을 따른다.
    한다고 판단되면, 코드를 먼저 짜지 말고 먼저 질문한다. 이 둘은
    Storage/Transport/View가 전부 참조하는 단일 계약이므로 임의로
    바꾸면 드리프트가 생긴다.
+10. Resource YAML을 신규 작성하거나 수정할 때는 반드시 [resource-guide.md](file:///C:/Users/jeongwoong/dev/mold/docs/resource-guide.md)의 스펙 및 Good/Bad 패턴을 대조·점검하여 오류 없는 리소스 정의를 보장한다.
+
 
 ---
 
