@@ -167,17 +167,74 @@ func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *re
 }
 
 func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, sess *auth.Session) {
-	var input map[string]any
-	if err := json.NewDecoder(req.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
-		WriteError(w, http.StatusBadRequest, "INVALID_JSON", fmt.Sprintf("invalid JSON payload: %v", err), nil)
-		return
+	input := make(map[string]any)
+	var uploadedKeys []string
+
+	if strings.HasPrefix(req.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := req.ParseMultipartForm(32 << 20); err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART_FORM", err.Error(), nil)
+			return
+		}
+
+		if jsonStr := req.FormValue("data"); jsonStr != "" {
+			_ = json.Unmarshal([]byte(jsonStr), &input)
+		}
+
+		if req.MultipartForm != nil {
+			for k, vals := range req.MultipartForm.Value {
+				if k != "data" && len(vals) > 0 {
+					input[k] = coerceFormValue(res, k, vals[0])
+				}
+			}
+		}
+
+		// Handle file uploads for blob fields if BlobStore is configured
+		if rt.blobStore != nil && req.MultipartForm != nil && len(req.MultipartForm.File) > 0 {
+			for _, f := range res.Fields {
+				if f.Type == resource.TypeBlob {
+					files := req.MultipartForm.File[f.Name]
+					if len(files) == 0 && f.Name != "file" {
+						files = req.MultipartForm.File["file"]
+					}
+					if len(files) > 0 {
+						header := files[0]
+						file, err := header.Open()
+						if err == nil {
+							contentType := header.Header.Get("Content-Type")
+							if contentType == "" {
+								contentType = "application/octet-stream"
+							}
+							ext := ""
+							if parts := strings.Split(contentType, "/"); len(parts) == 2 {
+								ext = "." + parts[1]
+							}
+							blobKey := fmt.Sprintf("blobs/%s/new/%s_%d%s", res.Table, f.Name, time.Now().UnixNano(), ext)
+							if err := rt.blobStore.Put(req.Context(), blobKey, file, header.Size, contentType); err == nil {
+								input[f.Name] = blobKey
+								uploadedKeys = append(uploadedKeys, blobKey)
+							}
+							file.Close()
+						}
+					}
+				}
+			}
+		}
+	} else {
+		if err := json.NewDecoder(req.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			WriteError(w, http.StatusBadRequest, "INVALID_JSON", fmt.Sprintf("invalid JSON payload: %v", err), nil)
+			return
+		}
 	}
+
 	if input == nil {
 		input = make(map[string]any)
 	}
 
 	status, allowed, err := auth.Evaluate(sess, res, auth.ActionCreate, nil, input)
 	if !allowed {
+		for _, k := range uploadedKeys {
+			_ = rt.blobStore.Delete(req.Context(), k)
+		}
 		rt.writeAuthError(w, status, err)
 		return
 	}
@@ -191,6 +248,9 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
+		for _, k := range uploadedKeys {
+			_ = rt.blobStore.Delete(req.Context(), k)
+		}
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
@@ -201,6 +261,36 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 	sanitized := SanitizeRecord(res, created)
 	WriteSuccess(w, http.StatusCreated, sanitized)
+}
+
+func coerceFormValue(res *resource.Resource, fieldName string, valStr string) any {
+	for _, f := range res.Fields {
+		if f.Name == fieldName {
+			switch f.Type {
+			case resource.TypeInt:
+				if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
+					return i
+				}
+			case resource.TypeFloat:
+				if fl, err := strconv.ParseFloat(valStr, 64); err == nil {
+					return fl
+				}
+			case resource.TypeBool:
+				if b, err := strconv.ParseBool(valStr); err == nil {
+					return b
+				}
+			}
+			break
+		}
+	}
+	for _, rel := range res.Relations {
+		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey == fieldName {
+			if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
+				return i
+			}
+		}
+	}
+	return valStr
 }
 
 func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, sess *auth.Session) {
