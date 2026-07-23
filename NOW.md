@@ -44,5 +44,5 @@
 
 ## 다음 할 일 (Post-MVP)
 
-1. `Phase 1 / Task 1.1`부터 순서대로 시작: `drink-log` 외부 프로젝트에서 Mold 패키지 임포트 및 마찰 제거
+1. `Phase 1 / Task 1.2` 시작: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API CRUD / 권한 가드 서빙 실측 검증
 2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
