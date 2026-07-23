@@ -62,21 +62,36 @@
     - **보일러플레이트 마찰 반증 데이터**: Resource 개수가 1개(`Post`)에서 3개(`Post`, `User`, `Drink`)로 늘어나더라도 `resource.LoadAll` 동적 탐색 덕분에 `main.go` 조립 보일러플레이트(~50줄)는 0줄 증가($O(1)$ 상수 유지)함 (Task 1.1 마찰 #2가 리소스 증가에 비례하여 악화되지 않는다는 반증).
     - **새로 관찰된 파편화 데이터 포인트**: 외부 프로젝트(`drink-log`)에서 에러 응답 디코딩을 위해 `transport.ErrorEnvelope` 구조체를 직접 임포트해서 사용하고 있음. 이는 Task 1.1 마찰 #1(단일 entrypoint 부재)과 동일한 계열의 파편화 데이터 포인트임.
     - **가설 1(외부 모듈 제품성) 판정 상태**: 조기 확정짓지 않고 Phase 1의 나머지 실험(Task 1.2.5, Task 1.3)까지 마친 뒤 Phase 3에서 종합 판정함.
-- [ ] **Task 1.2.5: [실험] Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증**
+- [x] **Task 1.2.5: [실험] Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증**
   - **배경**: 실제 배포된 사케 앱(`docs/schema.sql`)은 이미지 바이트를 R2에,
     key만 D1에 저장하는 구조다. 현재 IR 스펙(`docs/ir-spec.md`)엔 이 패턴이
     없어서, Mold를 사케 앱 같은 실서비스에 적용하려면 이 갭을 먼저 메워야 한다.
   - **실험 내용**: drink-log에 이미지 필드가 있는 Resource(예: `Drink`가
-    `has_many` `DrinceImage`, `blob` 필드 보유)를 추가하고, `docs/ir-spec.md`
-    5.5절 초안대로 `storage.BlobStore` 인터페이스를 최소 구현(로컬 파일시스템
-    또는 인메모리로 충분)해서 업로드/조회/삭제가 CRUD와 분리된 서브
-    엔드포인트로 동작하는지 확인한다.
+    `has_many` `DrinkImage`, `blob` 필드 보유)를 추가하고, `docs/ir-spec.md`
+    5.5절 초안대로 `storage.BlobStore` 인터페이스를 구현해서 업로드/조회/삭제 및 1-Step 멀티파트 생성을 검증한다.
   - **관찰 항목**: `Store`/`BlobStore` 책임 분리가 실제로 깔끔하게 되는가?
     reload가 blob 필드가 있는 Resource를 스키마 변경 없이 잘 처리하는가?
     권한 가드(`auth.permissions`)가 서브 엔드포인트에도 자연스럽게
     적용되는가, 아니면 별도 규칙이 필요한가?
-  - **완료 조건**: `docs/ir-spec.md` 5.5절의 "미결정 사항"을 모두 확정하고,
-    Phase 4(사케 앱 codegen 대상)에서 바로 참조 가능한 상태로 남긴다.
+  - **완료 조건**: `docs/ir-spec.md` 5.5절의 [미결정 사항 3가지](docs/ir-spec.md#결정된-사항-task-125-확정)(인터페이스 시그니처, key 발급 규칙, 권한 및 롤백 메커니즘)를 모두 확정하여 명시함.
+  - **Task 1.2.5 완료 메모 (설계 확정, 관찰 결론 및 리뷰 회고)**:
+    - **최종 확정된 설계**:
+      - `TypeBlob` FieldType (`resource/ir.go`, `validate.go`).
+      - `storage.BlobStore` 인터페이스 (`storage/store.go` - 관계형 `Store` CRUD와 100% 독립 분리).
+      - `adapters/fsblob` 어댑터 (로컬 파일시스템 저장 + `.meta` Content-Type 메타데이터 파일 동시 관리).
+      - **엔드포인트 및 권한 이원화**: 1-Step 멀티파트 `POST /api/{table}` (`ActionCreate` 1회 원자 평가) + 2-Step overwrite `POST /api/{table}/{id}/upload/{field}` (`ActionUpdate`), 조회 (`ActionRead`), 삭제 (`ActionDelete`).
+      - **원자적 롤백**: `adapters/sqlite.Store` 내 unexported internal helper `HardDeletePhysically` (`DELETE FROM table WHERE id = ?`) 사용 (공개 `storage.Store` 인터페이스 비오염).
+    - **리뷰 사이클에서 밝혀진 4가지 문제점 복기 (Milestone 2 회고 톤)**:
+      1. *Key 발급 규칙 명칭 혼동*: 초안의 "결정적(deterministic)" 용어가 timestamp/UUID 특성과 충돌 ➔ philosophy.md ③과의 원칙적 충돌 방지를 위해 "고유성이 보장되는(collision-free)" 표현으로 정정 (`blobs/{table}/{record_id}/{field}_{ts}{ext}`).
+      2. *Reload 실패 시 스키마 보존 케이스 누락*: reload 실패 시 기존 IR 및 Blob schema 보존 여부 미검증 ➔ reload 실패 시 기존 IR 유지 및 Blob 데이터 손상 없음을 실측 검증하는 테스트 추가.
+      3. *Upload 서브 엔드포인트 권한 모순 및 보안 구멍*: initial upload에 `ActionCreate`, overwrite에 `ActionUpdate` 분기 시 `create: public`인 Resource의 타인 비어있는 필드에 무단 업로드 가능한 권한 우회 구멍(Authorization Bypass) 발견 ➔ 1-step multipart create (`ActionCreate`) + 2-step overwrite (`ActionUpdate`)로 명확히 분리하여 보안 구멍 원천 차단.
+      4. *SoftDelete 롤백의 비원자성 및 조용한 폴백 회귀 위험*: 1-step create 롤백에 `SoftDelete` 사용 시 row가 남아 원자성이 깨지고 retry 시 unique 충돌 발생. 또한 hardDeleter 미지원 어댑터에서 `SoftDelete` 조용한 폴백 시 무결성 회귀 위험 ➔ 내부 전용 hard delete(`DELETE FROM table WHERE id = ?`)로 교체하고, 미지원 어댑터 조용한 폴백을 엄격히 금지하여 `BLOB_STORE_FAILED_RECORD_PRESERVED` 에러로 보존 사실을 명확히 응답.
+      - **핵심 원칙**: *"권한 모델과 원자성 롤백은 새 기능(blob)을 기존 CRUD 패턴에 끼워넣을 때 가장 놓치기 쉬운 지점이다."* (Task 1.3 및 Phase 4 codegen 적용 원칙).
+    - **관찰 항목 3가지 최종 결론**:
+      1. *`Store`/`BlobStore` 책임 분리*: 바이트 스트림과 관계형 CRUD 인터페이스가 완전히 독립되어 레벨 차원의 책임 혼동 없이 깔끔함.
+      2. *Reload 영향성*: Blob Storage에는 스키마 컴파일 대상이 없어 `POST /_mold/reload`와 100% 격리 및 영향성 0건 보장 (reload 실패 시에도 완벽히 보존됨).
+      3. *권한 가드 재사용성*: 서브 엔드포인트에 별도 가드 코드 0줄 신설, 기존 `auth.Evaluate` 엔진 100% 재사용 성공.
+    - **가설 1(외부 모듈 제품성) 판정 상태**: 조기 확정짓지 않고 Task 1.3 (Custom UI)까지 마친 뒤 Phase 3에서 종합 판정함.
 - [ ] **Task 1.3: [실험] `drink-log` 전용 Custom UI (Template Override) 서빙**
   - **실험 내용**: 기본 HTML View 대신 `drink-log` 전용 커스텀 HTML/CSS를 오버라이드해본다.
   - **관찰 항목**: 프론트엔드 이관 및 커스텀 템플릿 바인딩 과정에서 발생하는 마찰 관찰.

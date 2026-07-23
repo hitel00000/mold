@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-23 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1 & Task 1.2 (drink-log 도메인 Resource 정의, CRUD & 권한 가드 서빙 실측 성공)**  
-👉 **Post-MVP Phase 1 진행 중: Task 1.2.5 (Blob Storage R2 갭 분석 및 `blob` type 초안 검증) 착수 준비**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1, Task 1.2, Task 1.2.5 (Blob Storage `blob` type, fsblob 어댑터, 1-step 멀티파트 create 및 hard delete 원자적 롤백 검증)**  
+👉 **Post-MVP Phase 1 진행 중: Task 1.3 (`drink-log` 전용 Custom UI / Template Override 서빙 실험) 진행 준비**
 
 ---
 
@@ -37,5 +37,5 @@
 
 ## 다음 할 일 (Post-MVP)
 
-1. `Phase 1 / Task 1.2.5` 시작: Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증 (`storage.BlobStore` 최소 구현 및 서브 엔드포인트 동작 확인)
+1. `Phase 1 / Task 1.3` 시작: `drink-log` 전용 Custom UI (Template Override) 서빙 실험 (Mold 기본 View 오버라이드 및 커스텀 템플릿 바인딩 과정의 마찰 관찰)
 2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
