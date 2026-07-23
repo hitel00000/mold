@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -259,11 +260,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		for _, pf := range pendingFiles {
 			file, err := pf.header.Open()
 			if err != nil {
-				_ = store.SoftDelete(req.Context(), res, recID)
-				for _, k := range uploadedKeys {
-					_ = rt.blobStore.Delete(req.Context(), k)
-				}
-				WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", fmt.Sprintf("failed to open file '%s', record creation rolled back: %v", pf.fieldName, err), nil)
+				rt.rollbackRecordCreation(w, req, res, store, recID, uploadedKeys, err, fmt.Sprintf("failed to open file '%s'", pf.fieldName))
 				return
 			}
 
@@ -279,11 +276,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 			if err := rt.blobStore.Put(req.Context(), blobKey, file, pf.header.Size, contentType); err != nil {
 				file.Close()
-				_ = store.SoftDelete(req.Context(), res, recID)
-				for _, k := range uploadedKeys {
-					_ = rt.blobStore.Delete(req.Context(), k)
-				}
-				WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", fmt.Sprintf("failed to store blob for '%s', record creation rolled back: %v", pf.fieldName, err), nil)
+				rt.rollbackRecordCreation(w, req, res, store, recID, uploadedKeys, err, fmt.Sprintf("failed to store blob for '%s'", pf.fieldName))
 				return
 			}
 			file.Close()
@@ -294,11 +287,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		// 3. Update created record with generated blob keys
 		updated, err := store.Update(req.Context(), res, recID, blobUpdates)
 		if err != nil {
-			_ = store.SoftDelete(req.Context(), res, recID)
-			for _, k := range uploadedKeys {
-				_ = rt.blobStore.Delete(req.Context(), k)
-			}
-			WriteError(w, http.StatusInternalServerError, "UPDATE_FAILED", fmt.Sprintf("failed to attach blob keys to record, creation rolled back: %v", err), nil)
+			rt.rollbackRecordCreation(w, req, res, store, recID, uploadedKeys, err, "failed to attach blob keys to record")
 			return
 		}
 		created = updated
@@ -306,6 +295,34 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 	sanitized := SanitizeRecord(res, created)
 	WriteSuccess(w, http.StatusCreated, sanitized)
+}
+
+func (rt *Router) rollbackRecordCreation(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, recID any, uploadedKeys []string, originalErr error, step string) {
+	for _, k := range uploadedKeys {
+		if rt.blobStore != nil {
+			_ = rt.blobStore.Delete(req.Context(), k)
+		}
+	}
+
+	type hardDeleter interface {
+		HardDeletePhysically(ctx context.Context, res *resource.Resource, id any) error
+	}
+
+	var rbErr error
+	if hd, ok := store.(hardDeleter); ok {
+		rbErr = hd.HardDeletePhysically(req.Context(), res, recID)
+	} else {
+		rbErr = store.SoftDelete(req.Context(), res, recID)
+	}
+
+	if rbErr != nil {
+		msg := fmt.Sprintf("%s (%v), and physical record rollback failed (%v); record id '%v' remains in database without blob", step, originalErr, rbErr, recID)
+		WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED_RECORD_PRESERVED", msg, nil)
+		return
+	}
+
+	msg := fmt.Sprintf("%s, record creation rolled back: %v", step, originalErr)
+	WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", msg, nil)
 }
 
 func coerceFormValue(res *resource.Resource, fieldName string, valStr string) any {

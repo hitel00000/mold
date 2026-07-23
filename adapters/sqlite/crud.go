@@ -217,6 +217,28 @@ func (s *Store) SoftDelete(ctx context.Context, res *resource.Resource, id any) 
 	return nil
 }
 
+// HardDeletePhysically performs a physical SQL DELETE FROM table WHERE id = ?, completely bypassing soft_delete rules.
+// IMPORTANT: This method is NOT part of Mold's public delete policy (which remains append-only + soft_delete by default).
+// It is strictly an internal creation-transaction rollback helper used to undo incomplete 1-step creation requests.
+func (s *Store) HardDeletePhysically(ctx context.Context, res *resource.Resource, id any) error {
+	if res == nil {
+		return fmt.Errorf("resource is nil")
+	}
+	deleteSQL := fmt.Sprintf(`DELETE FROM "%s" WHERE "id" = ?;`, res.Table)
+	result, err := s.db.ExecContext(ctx, deleteSQL, id)
+	if err != nil {
+		return fmt.Errorf("failed to physically delete record from %s: %w", res.Table, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return storage.ErrNotFound
+	}
+	return nil
+}
+
 func scanRows(rows *sql.Rows) ([]storage.Record, error) {
 	cols, err := rows.Columns()
 	if err != nil {
