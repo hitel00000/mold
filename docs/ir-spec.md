@@ -149,6 +149,64 @@ auth:
 
 ---
 
+## 5.5 Blob Field (초안)
+
+이미지/파일처럼 바이트 크기가 커서 SQLite 컬럼에 직접 넣기 부적절한 데이터를 위한
+semantic type이다. 사케 앱(`docs/schema.sql`의 `sake_images.image_key`)에서 이미
+암묵적으로 쓰이던 패턴 — "실제 바이트는 별도 Blob Storage에, DB에는 key만" — 을
+IR 레벨로 끌어올린 것이다.
+
+```yaml
+fields:
+  - name: image_key
+    type: blob
+    nullable: false
+```
+
+### SQLite 매핑
+
+`blob` 타입은 `int`/`string`처럼 새로운 컬럼 종류를 만들지 않는다. DB 컬럼은
+지금까지와 동일하게 `TEXT`이며, 저장되는 값은 실제 바이트가 아니라 Blob Storage
+어댑터가 발급한 key(또는 URL)다.
+
+| type   | SQLite 매핑 | 비고 |
+|--------|-------------|------|
+| `blob` | TEXT        | 값은 바이트가 아니라 BlobStore key. `constraints`는 미지원 (1차 스코프 제외) |
+
+### Storage 경계
+
+`blob` 필드가 있는 Resource라도 `storage.Store` 인터페이스(CRUD)는 지금과 동일하게
+동작한다. 실제 바이트 업로드/다운로드/삭제는 이 인터페이스를 거치지 않고 별도
+`storage.BlobStore` 인터페이스(가칭 `Put`/`Get`/`Delete`)를 통해서만 이뤄진다.
+
+* `Store`(관계형 record CRUD)와 `BlobStore`(바이트 저장)는 서로 다른 책임이며,
+  하나의 인터페이스로 합치지 않는다 (Milestone 2 회고 "검증 레이어의 책임 범위
+  혼동" 패턴을 Storage 레이어에서 반복하지 않기 위함).
+* 업로드/삭제는 Resource의 기본 CRUD 엔드포인트(`POST/PUT /api/{table}`)가 아니라
+  별도 서브 엔드포인트(예: `POST /api/{table}/{id}/images`)로 분리한다. 사케 앱의
+  `POST /api/sake-records/:id/images` 패턴을 그대로 따른다.
+* `POST /_mold/reload`는 스키마(컬럼, relation)만 원자적으로 교체하며, Blob
+  Storage 쪽 상태를 건드리지 않는다. reload 실패 시 기존 IR이 보존되는 것과
+  별개로, Blob Storage에는 애초에 reload가 손댈 대상이 없다.
+
+### 다중 이미지 표현
+
+레코드당 이미지 여러 장은 새로운 relation kind를 만들지 않고, 기존
+`has_many`/`belongs_to`와 `blob` 타입 필드를 가진 별도 Resource 조합으로
+표현한다 (예: `Post` `has_many` `PostImage`, `PostImage`가 `blob` 필드 보유).
+N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 전까지 도입하지
+않는다 (마세라티 원칙).
+
+### 미결정 사항 (다음 세션에서 확정 필요)
+
+* [ ] Blob Storage 어댑터 인터페이스의 정확한 메서드 시그니처
+* [ ] key 발급 규칙 (UUID vs Resource-scoped path — 사케 앱의
+      `images/{owner_id}/sake/{record_id}/{image_id}.jpg` 패턴 참고 가능)
+* [ ] `auth.permissions`가 blob 업로드/삭제 서브 엔드포인트에도 동일하게
+      적용되는지, 아니면 별도 규칙이 필요한지
+
+---
+
 ## 6. Reload 트리거 (지난 논의 반영)
 
 ```

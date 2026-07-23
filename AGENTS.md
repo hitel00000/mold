@@ -183,6 +183,15 @@ fields:
 * **프로젝트 포지셔닝**: 복잡한 프로덕션 서비스가 아니라, 빠른
   프로토타이핑과 작은 프로덕트를 위한 도구. 이 포지셔닝이 append-only,
   destructive migration 같은 다른 결정들의 근거가 된다
+* **Codegen Target 예외**: `언어: Go` / `Storage: SQLite 고정` 결정은 Mold
+  런타임 자체에 적용되는 것이며, 이미 Cloudflare(Pages Functions/D1/R2)에
+  배포된 서비스(예: 사케 앱)를 다루기 위한 TS+Hono+D1 codegen target
+  (`TASKS.md` Phase 4)은 이 결정을 뒤집는 게 아니라 별도의 산출물이다.
+  Mold의 "런타임 컴파일러"(부팅/reload 시점 IR 컴파일 후 계속 참조하는
+  방식)와 달리, 이 target은 stateless Workers 환경에 맞춰 빌드 타임에
+  IR을 TS 코드로 굽는 정적 codegen으로 동작한다. 이 차이 때문에 IR
+  자체의 Target 독립성(`docs/philosophy.md` ④)은 유지하되, Go 런타임을
+  대체하거나 두 번째 상시 런타임을 만드는 방향으로는 확장하지 않는다.
 
 ---
 

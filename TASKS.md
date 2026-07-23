@@ -50,6 +50,21 @@
   - **실험 내용**: `drink-log`에 `User.yaml`, `Drink.yaml`을 추가하고 REST API 및 권한 가드를 작동시킨다.
   - **관찰 항목**: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 시 발생하는 문제점 관찰.
   - **완료 조건**: 외부 프로젝트에서 기본 CRUD 및 권한 가드가 오류 없이 작동함을 확인한다.
+- [ ] **Task 1.2.5: [실험] Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증**
+  - **배경**: 실제 배포된 사케 앱(`docs/schema.sql`)은 이미지 바이트를 R2에,
+    key만 D1에 저장하는 구조다. 현재 IR 스펙(`docs/ir-spec.md`)엔 이 패턴이
+    없어서, Mold를 사케 앱 같은 실서비스에 적용하려면 이 갭을 먼저 메워야 한다.
+  - **실험 내용**: drink-log에 이미지 필드가 있는 Resource(예: `Drink`가
+    `has_many` `DrinceImage`, `blob` 필드 보유)를 추가하고, `docs/ir-spec.md`
+    5.5절 초안대로 `storage.BlobStore` 인터페이스를 최소 구현(로컬 파일시스템
+    또는 인메모리로 충분)해서 업로드/조회/삭제가 CRUD와 분리된 서브
+    엔드포인트로 동작하는지 확인한다.
+  - **관찰 항목**: `Store`/`BlobStore` 책임 분리가 실제로 깔끔하게 되는가?
+    reload가 blob 필드가 있는 Resource를 스키마 변경 없이 잘 처리하는가?
+    권한 가드(`auth.permissions`)가 서브 엔드포인트에도 자연스럽게
+    적용되는가, 아니면 별도 규칙이 필요한가?
+  - **완료 조건**: `docs/ir-spec.md` 5.5절의 "미결정 사항"을 모두 확정하고,
+    Phase 4(사케 앱 codegen 대상)에서 바로 참조 가능한 상태로 남긴다.
 - [ ] **Task 1.3: [실험] `drink-log` 전용 Custom UI (Template Override) 서빙**
   - **실험 내용**: 기본 HTML View 대신 `drink-log` 전용 커스텀 HTML/CSS를 오버라이드해본다.
   - **관찰 항목**: 프론트엔드 이관 및 커스텀 템플릿 바인딩 과정에서 발생하는 마찰 관찰.
