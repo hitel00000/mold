@@ -92,10 +92,26 @@
       2. *Reload 영향성*: Blob Storage에는 스키마 컴파일 대상이 없어 `POST /_mold/reload`와 100% 격리 및 영향성 0건 보장 (reload 실패 시에도 완벽히 보존됨).
       3. *권한 가드 재사용성*: 서브 엔드포인트에 별도 가드 코드 0줄 신설, 기존 `auth.Evaluate` 엔진 100% 재사용 성공.
     - **가설 1(외부 모듈 제품성) 판정 상태**: 조기 확정짓지 않고 Task 1.3 (Custom UI)까지 마친 뒤 Phase 3에서 종합 판정함.
-- [ ] **Task 1.3: [실험] `drink-log` 전용 Custom UI (Template Override) 서빙**
+- [x] **Task 1.3: [실험] `drink-log` 전용 Custom UI (Template Override) 서빙**
   - **실험 내용**: 기본 HTML View 대신 `drink-log` 전용 커스텀 HTML/CSS를 오버라이드해본다.
   - **관찰 항목**: 프론트엔드 이관 및 커스텀 템플릿 바인딩 과정에서 발생하는 마찰 관찰.
   - **완료 조건**: Mold 기본 View를 깨뜨리지 않고 커스텀 템플릿이 자연스럽게 우선 렌더링됨을 확인한다.
+  - **Task 1.3 완료 메모 (설계 확정, 관찰 결론 및 회고)**:
+    - **최종 확정된 설계**:
+      - `view.TemplateOverrides` 지속적 레지스트리 (`view/overrides.go`): 부팅 시 1회 생성되어 `POST /_mold/reload` 경계를 관통해 `ViewHandler` 간 참조 공유.
+      - `SetCustomTemplateString(table, viewType, tplStr)` 메서드 단일 채택: `createBaseTemplate().Clone()` 기반으로 Mold 기본 템플릿 헬퍼(`canAccess`, `renderMarkdown` 등)를 자동 바인딩하고 Resource 간 템플릿 트리 오염을 100% 차단.
+      - `*template.Template` 오버로드는 사전 파싱 시 Mold 헬퍼 부재 및 템플릿 격리 체계 붕괴 위험으로 의도적 배제 (마세라티 원칙 준수).
+    - **검증 완료 항목**:
+      - Resource 단위 오버라이드 (`Drink` 리소스에 카드형 커스텀 UI 및 별점 배지 렌더링 성공).
+      - 미오버라이드 리소스 무손상 공존 (`User` 리소스는 Mold 기본 HTML View로 깨짐 없이 렌더링됨).
+      - `template.Clone()` 기반 다중 리소스 격리 (Milestone 6 다중 Resource 템플릿 오염 버그 재현 0건).
+      - Reload 관통 유지 (`POST /_mold/reload` 실행 후에도 커스텀 UI 유실 없이 지속 서빙).
+    - **관찰 항목 4가지 결론 및 DX 마찰 파편화 데이터 포인트 발견**:
+      1. *프론트엔드 이관 마찰*: 빌드 도구 없는 SSR 서버사이드 오버라이드로 이관 마찰 0건.
+      2. *PageData 계약 미문서화 (★ 신규 DX 마찰 발견)*: 커스텀 템플릿 바인딩 시 `PageData` 구조체 필드명 및 템플릿 상속 규칙(`{{ define "content" }}`)이 문서화되어 있지 않아, Mold 본체 소스 코드(`view/templates.go`)를 직접 읽어야만 개발이 가능했음. 이는 Task 1.1 마찰 #1(단일 entrypoint 부재) 및 Task 1.2 마찰 #4(`transport.ErrorEnvelope` 직접 참조)와 동일한 계열의 **개발자 경험(DX) 파편화 데이터 포인트**임.
+      3. *다중 Resource 템플릿 격리*: `baseLayout.Clone()` 기반 파싱으로 Resource 간 템플릿 침범 0건 실측.
+      4. *Reload 지속성*: `TemplateOverrides` 참조 공유 아키텍처로 리로드 후 유실 0건 실측.
+    - **가설 1(외부 모듈 제품성) 판정 상태**: Phase 1의 4대 실험(Task 1.1, 1.2, 1.2.5, 1.3)이 모두 완결되었으므로, 다음 세션에서 **Phase 3(Task 3.1) 종합 회고를 통해 수집된 마찰 전체를 모아 최종 판정 예정**.
 
 ### Phase 2: 개발자 경험(DX) 관찰 및 마찰 제거
 

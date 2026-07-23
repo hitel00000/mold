@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-23 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1, Task 1.2, Task 1.2.5 (Blob Storage `blob` type, fsblob 어댑터, 1-step 멀티파트 create 및 hard delete 원자적 롤백 검증)**  
-👉 **Post-MVP Phase 1 진행 중: Task 1.3 (`drink-log` 전용 Custom UI / Template Override 서빙 실험) 진행 준비**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 전체 완료 (Task 1.1 외부 모듈 적용, Task 1.2 Auth/Permissions 실측, Task 1.2.5 Blob Storage `blob` type 및 원자적 롤백, Task 1.3 Custom UI / Template Override 서빙 실측 성공)**  
+👉 **Post-MVP Phase 1 완결: 다음 세션 Phase 1 종합 회고 및 가설 1 최종 판정 세션 진행 예정**
 
 ---
 
@@ -37,5 +37,5 @@
 
 ## 다음 할 일 (Post-MVP)
 
-1. `Phase 1 / Task 1.3` 시작: `drink-log` 전용 Custom UI (Template Override) 서빙 실험 (Mold 기본 View 오버라이드 및 커스텀 템플릿 바인딩 과정의 마찰 관찰)
+1. `Phase 1 종합 회고` 시작: Task 1.1~1.3에서 수집된 마찰 데이터 전체(단일 entrypoint 부재, 보일러플레이트, `ErrorEnvelope` 직접 참조, `PageData` 계약 미문서화 등)를 다각도로 분석하고 `TASKS.md` Phase 3 (Task 3.1) 가설 1 최종 판정 진행
 2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
