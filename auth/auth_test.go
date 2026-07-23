@@ -627,7 +627,7 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 	}
 
 	// 5. Test Login E2E via View Handler
-	vh, err := view.NewViewHandler(router)
+	vh, err := view.NewViewHandler(router, nil)
 	if err != nil {
 		t.Fatalf("failed to create view handler: %v", err)
 	}

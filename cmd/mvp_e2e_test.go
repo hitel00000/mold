@@ -112,7 +112,7 @@ fields:
 		// Initialize router and view handler
 		dummyRouter := transport.NewRouter(transReg)
 		dummyRouter.SetSessionManager(sm)
-		vh, err := view.NewViewHandler(dummyRouter)
+		vh, err := view.NewViewHandler(dummyRouter, nil)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -128,7 +128,7 @@ fields:
 	router := transport.NewRouter(transReg)
 	router.SetSessionManager(sm)
 
-	vh, err = view.NewViewHandler(router)
+	vh, err = view.NewViewHandler(router, nil)
 	if err != nil {
 		t.Fatalf("failed to create view handler: %v", err)
 	}
