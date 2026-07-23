@@ -27,13 +27,6 @@
 
 ---
 
-## 내일의 첫 번째 실험 (First Experiment)
-
-* **Task 1.2**: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API / 권한 가드 서빙 실험
-  * **목적**: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 및 권한 가드가 오류 없이 작동하는지 관찰하고 검증함.
-
----
-
 ## 핵심 원칙 및 확정 결정
 
 - **실험 ➔ 관찰 ➔ 마찰 제거**: 미지의 문제를 사전에 상상해 미리 코드를 짜지 않고, 외부 적용 실험을 통해 발견된 마찰을 기록하고 해결하는 마세라티 원칙 적용.
@@ -44,5 +37,5 @@
 
 ## 다음 할 일 (Post-MVP)
 
-1. `Phase 1 / Task 1.2` 시작: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API CRUD / 권한 가드 서빙 실측 검증
+1. `Phase 1 / Task 1.2` 시작: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API CRUD / 권한 가드 서빙 실측 검증 (목적: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 및 권한 가드가 오류 없이 작동하는지 관찰하고 검증함)
 2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
