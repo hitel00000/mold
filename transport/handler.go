@@ -308,13 +308,14 @@ func (rt *Router) rollbackRecordCreation(w http.ResponseWriter, req *http.Reques
 		HardDeletePhysically(ctx context.Context, res *resource.Resource, id any) error
 	}
 
-	var rbErr error
-	if hd, ok := store.(hardDeleter); ok {
-		rbErr = hd.HardDeletePhysically(req.Context(), res, recID)
-	} else {
-		rbErr = store.SoftDelete(req.Context(), res, recID)
+	hd, ok := store.(hardDeleter)
+	if !ok {
+		msg := fmt.Sprintf("%s (%v), and Store adapter does not support physical hard delete rollback; record id '%v' remains in database without blob", step, originalErr, recID)
+		WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED_RECORD_PRESERVED", msg, nil)
+		return
 	}
 
+	rbErr := hd.HardDeletePhysically(req.Context(), res, recID)
 	if rbErr != nil {
 		msg := fmt.Sprintf("%s (%v), and physical record rollback failed (%v); record id '%v' remains in database without blob", step, originalErr, rbErr, recID)
 		WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED_RECORD_PRESERVED", msg, nil)
