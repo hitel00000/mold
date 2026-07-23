@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -168,7 +169,11 @@ func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *re
 
 func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, sess *auth.Session) {
 	input := make(map[string]any)
-	var uploadedKeys []string
+	type pendingFile struct {
+		fieldName string
+		header    *multipart.FileHeader
+	}
+	var pendingFiles []pendingFile
 
 	if strings.HasPrefix(req.Header.Get("Content-Type"), "multipart/form-data") {
 		if err := req.ParseMultipartForm(32 << 20); err != nil {
@@ -188,7 +193,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 			}
 		}
 
-		// Handle file uploads for blob fields if BlobStore is configured
+		// Collect file headers for blob fields to upload after record creation
 		if rt.blobStore != nil && req.MultipartForm != nil && len(req.MultipartForm.File) > 0 {
 			for _, f := range res.Fields {
 				if f.Type == resource.TypeBlob {
@@ -197,24 +202,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 						files = req.MultipartForm.File["file"]
 					}
 					if len(files) > 0 {
-						header := files[0]
-						file, err := header.Open()
-						if err == nil {
-							contentType := header.Header.Get("Content-Type")
-							if contentType == "" {
-								contentType = "application/octet-stream"
-							}
-							ext := ""
-							if parts := strings.Split(contentType, "/"); len(parts) == 2 {
-								ext = "." + parts[1]
-							}
-							blobKey := fmt.Sprintf("blobs/%s/new/%s_%d%s", res.Table, f.Name, time.Now().UnixNano(), ext)
-							if err := rt.blobStore.Put(req.Context(), blobKey, file, header.Size, contentType); err == nil {
-								input[f.Name] = blobKey
-								uploadedKeys = append(uploadedKeys, blobKey)
-							}
-							file.Close()
-						}
+						pendingFiles = append(pendingFiles, pendingFile{fieldName: f.Name, header: files[0]})
 					}
 				}
 			}
@@ -232,9 +220,6 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 	status, allowed, err := auth.Evaluate(sess, res, auth.ActionCreate, nil, input)
 	if !allowed {
-		for _, k := range uploadedKeys {
-			_ = rt.blobStore.Delete(req.Context(), k)
-		}
 		rt.writeAuthError(w, status, err)
 		return
 	}
@@ -246,17 +231,70 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
+	// 1. Create record in Store first to get actual record_id
 	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
-		for _, k := range uploadedKeys {
-			_ = rt.blobStore.Delete(req.Context(), k)
-		}
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
 		}
 		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
 		return
+	}
+
+	recID := created["id"]
+
+	// 2. Upload pending blobs with actual record_id: blobs/{table}/{record_id}/{field}_{ts}{ext}
+	if len(pendingFiles) > 0 {
+		blobUpdates := make(map[string]any)
+		var uploadedKeys []string
+
+		for _, pf := range pendingFiles {
+			file, err := pf.header.Open()
+			if err != nil {
+				_ = store.SoftDelete(req.Context(), res, recID)
+				for _, k := range uploadedKeys {
+					_ = rt.blobStore.Delete(req.Context(), k)
+				}
+				WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", fmt.Sprintf("failed to open file '%s', record creation rolled back: %v", pf.fieldName, err), nil)
+				return
+			}
+
+			contentType := pf.header.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+			ext := ""
+			if parts := strings.Split(contentType, "/"); len(parts) == 2 {
+				ext = "." + parts[1]
+			}
+			blobKey := fmt.Sprintf("blobs/%s/%v/%s_%d%s", res.Table, recID, pf.fieldName, time.Now().UnixNano(), ext)
+
+			if err := rt.blobStore.Put(req.Context(), blobKey, file, pf.header.Size, contentType); err != nil {
+				file.Close()
+				_ = store.SoftDelete(req.Context(), res, recID)
+				for _, k := range uploadedKeys {
+					_ = rt.blobStore.Delete(req.Context(), k)
+				}
+				WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", fmt.Sprintf("failed to store blob for '%s', record creation rolled back: %v", pf.fieldName, err), nil)
+				return
+			}
+			file.Close()
+			blobUpdates[pf.fieldName] = blobKey
+			uploadedKeys = append(uploadedKeys, blobKey)
+		}
+
+		// 3. Update created record with generated blob keys
+		updated, err := store.Update(req.Context(), res, recID, blobUpdates)
+		if err != nil {
+			_ = store.SoftDelete(req.Context(), res, recID)
+			for _, k := range uploadedKeys {
+				_ = rt.blobStore.Delete(req.Context(), k)
+			}
+			WriteError(w, http.StatusInternalServerError, "UPDATE_FAILED", fmt.Sprintf("failed to attach blob keys to record, creation rolled back: %v", err), nil)
+			return
+		}
+		created = updated
 	}
 
 	sanitized := SanitizeRecord(res, created)
