@@ -204,7 +204,7 @@ N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 
   - `Get(ctx context.Context, key string) (io.ReadCloser, string, error)` (바이트 스트림 및 Content-Type 반환)
   - `Delete(ctx context.Context, key string) error`
 * [x] **Key 발급 규칙**  
-  고유성이 보장되는(collision-free) Resource-scoped 계층형 경로인 `blobs/{table}/{record_id}/{field_name}_{timestamp_or_uuid}{ext}` 패턴을 채택함 (예: `blobs/drink_images/1/image_key_17847849.jpg`). 사케 앱과 동일한 리소스 범위 격리성을 보장함.
+  고유성이 보장되는(collision-free) Resource-scoped 계층형 경로인 `blobs/{table}/{record_id}/{field_name}_{timestamp_or_uuid}{ext}` 패턴을 채택함 (예: `blobs/drink_images/1/image_key_17847849.jpg`). 1-Step 멀티파트 생성(`POST /api/{table}`)과 2-Step 덮어쓰기 모두 리터럴 경로(예: `"new"`) 없이 실제 생성된 `{record_id}` 스코프 규칙을 동일하게 엄격히 준수함.
 * [x] **`auth.permissions` 및 엔드포인트 권한 적용**  
   별도 가드 코드 신설 없이 기존 Mold의 `auth.Evaluate` 엔진을 100% 동일하게 활용함.  
   - 1-Step 최초 생성 (`POST /api/{table}` multipart): 대상 레코드 생성에 대한 `ActionCreate` 권한 평가.
