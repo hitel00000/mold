@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
@@ -62,6 +63,12 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	res := entry.Resource
 	store := entry.Store
 	sess := rt.extractSession(req)
+
+	// Blob sub-endpoint routing (/api/{table}/{id}/upload or /api/{table}/{id}/blob)
+	if len(pathParts) >= 4 && (pathParts[3] == "upload" || pathParts[3] == "blob") {
+		rt.handleBlobSubendpoint(w, req, entry, idStr, pathParts)
+		return
+	}
 
 	if idStr == "" {
 		switch req.Method {
@@ -332,4 +339,223 @@ func (rt *Router) writeAuthError(w http.ResponseWriter, status int, err error) {
 		code = "NOT_FOUND"
 	}
 	WriteError(w, status, code, err.Error(), nil)
+}
+
+func (rt *Router) handleBlobSubendpoint(w http.ResponseWriter, req *http.Request, entry ResourceEntry, idStr string, pathParts []string) {
+	if rt.blobStore == nil {
+		WriteError(w, http.StatusNotImplemented, "BLOB_STORE_NOT_CONFIGURED", "blob storage is not configured on server", nil)
+		return
+	}
+
+	res := entry.Resource
+	store := entry.Store
+	sess := rt.extractSession(req)
+	idVal := parseID(idStr)
+
+	var fieldName string
+	if len(pathParts) >= 5 && pathParts[4] != "" {
+		fieldName = pathParts[4]
+	} else {
+		for _, f := range res.Fields {
+			if f.Type == resource.TypeBlob {
+				fieldName = f.Name
+				break
+			}
+		}
+	}
+
+	if fieldName == "" {
+		WriteError(w, http.StatusBadRequest, "BLOB_FIELD_NOT_FOUND", fmt.Sprintf("resource '%s' has no blob field specified", res.Name), nil)
+		return
+	}
+
+	var targetField *resource.Field
+	for _, f := range res.Fields {
+		if f.Name == fieldName {
+			targetField = &f
+			break
+		}
+	}
+
+	if targetField == nil || targetField.Type != resource.TypeBlob {
+		WriteError(w, http.StatusBadRequest, "INVALID_BLOB_FIELD", fmt.Sprintf("field '%s' on resource '%s' is not of type blob", fieldName, res.Name), nil)
+		return
+	}
+
+	opType := pathParts[3]
+
+	switch opType {
+	case "upload":
+		if req.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "upload sub-endpoint requires POST method", nil)
+			return
+		}
+		rt.handleBlobUpload(w, req, res, store, idVal, fieldName, sess)
+	case "blob":
+		switch req.Method {
+		case http.MethodGet:
+			rt.handleBlobGet(w, req, res, store, idVal, fieldName, sess)
+		case http.MethodDelete:
+			rt.handleBlobDelete(w, req, res, store, idVal, fieldName, sess)
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", fmt.Sprintf("method %s not allowed on blob sub-endpoint", req.Method), nil)
+		}
+	}
+}
+
+func (rt *Router) handleBlobUpload(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, fieldName string, sess *auth.Session) {
+	existingRec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("%s record with id '%v' not found", res.Name, id), nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionUpdate, existingRec, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, authErr)
+		return
+	}
+
+	var fileReader io.Reader
+	var fileSize int64
+	var contentType string
+
+	if strings.HasPrefix(req.Header.Get("Content-Type"), "multipart/form-data") {
+		err := req.ParseMultipartForm(32 << 20)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART_FORM", err.Error(), nil)
+			return
+		}
+		file, header, err := req.FormFile("file")
+		if err != nil {
+			if req.MultipartForm != nil && len(req.MultipartForm.File) > 0 {
+				for _, files := range req.MultipartForm.File {
+					if len(files) > 0 {
+						file, err = files[0].Open()
+						header = files[0]
+						break
+					}
+				}
+			}
+		}
+		if err != nil || file == nil {
+			WriteError(w, http.StatusBadRequest, "FILE_REQUIRED", "multipart file parameter 'file' is required", nil)
+			return
+		}
+		defer file.Close()
+		fileReader = file
+		fileSize = header.Size
+		contentType = header.Header.Get("Content-Type")
+	} else {
+		fileReader = req.Body
+		fileSize = req.ContentLength
+		contentType = req.Header.Get("Content-Type")
+	}
+
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	ext := ""
+	if parts := strings.Split(contentType, "/"); len(parts) == 2 {
+		ext = "." + parts[1]
+	}
+	blobKey := fmt.Sprintf("blobs/%s/%v/%s_%d%s", res.Table, id, fieldName, time.Now().UnixNano(), ext)
+
+	if err := rt.blobStore.Put(req.Context(), blobKey, fileReader, fileSize, contentType); err != nil {
+		WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", fmt.Sprintf("failed to store blob: %v", err), nil)
+		return
+	}
+
+	updatePayload := map[string]any{
+		fieldName: blobKey,
+	}
+	updatedRec, err := store.Update(req.Context(), res, id, updatePayload)
+	if err != nil {
+		_ = rt.blobStore.Delete(req.Context(), blobKey)
+		WriteError(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error(), nil)
+		return
+	}
+
+	SanitizeRecord(res, updatedRec)
+	WriteSuccess(w, http.StatusOK, updatedRec)
+}
+
+func (rt *Router) handleBlobGet(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, fieldName string, sess *auth.Session) {
+	existingRec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("%s record with id '%v' not found", res.Name, id), nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionRead, existingRec, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, authErr)
+		return
+	}
+
+	keyVal, ok := existingRec[fieldName].(string)
+	if !ok || keyVal == "" {
+		WriteError(w, http.StatusNotFound, "BLOB_NOT_FOUND", fmt.Sprintf("record '%v' has no blob stored in '%s'", id, fieldName), nil)
+		return
+	}
+
+	reader, contentType, err := rt.blobStore.Get(req.Context(), keyVal)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "BLOB_NOT_FOUND", "blob data file not found in storage", nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "BLOB_FETCH_FAILED", err.Error(), nil)
+		return
+	}
+	defer reader.Close()
+
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, reader)
+}
+
+func (rt *Router) handleBlobDelete(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, id any, fieldName string, sess *auth.Session) {
+	existingRec, err := store.Get(req.Context(), res, id)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("%s record with id '%v' not found", res.Name, id), nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil)
+		return
+	}
+
+	status, allowed, authErr := auth.Evaluate(sess, res, auth.ActionDelete, existingRec, nil)
+	if !allowed {
+		rt.writeAuthError(w, status, authErr)
+		return
+	}
+
+	if keyVal, ok := existingRec[fieldName].(string); ok && keyVal != "" {
+		_ = rt.blobStore.Delete(req.Context(), keyVal)
+	}
+
+	updatePayload := map[string]any{
+		fieldName: "",
+	}
+	updatedRec, err := store.Update(req.Context(), res, id, updatePayload)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error(), nil)
+		return
+	}
+
+	SanitizeRecord(res, updatedRec)
+	WriteSuccess(w, http.StatusOK, updatedRec)
 }

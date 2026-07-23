@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/hitel00000/mold/resource"
 )
@@ -32,4 +33,12 @@ type Store interface {
 	List(ctx context.Context, res *resource.Resource, query Query) ([]Record, error)
 	Update(ctx context.Context, res *resource.Resource, id any, record Record) (Record, error)
 	SoftDelete(ctx context.Context, res *resource.Resource, id any) error
+}
+
+// BlobStore defines the binary data storage interface for Mold resources (e.g. image/file upload).
+// Store (relational record CRUD) and BlobStore (binary byte stream storage) are kept as strictly separated responsibilities.
+type BlobStore interface {
+	Put(ctx context.Context, key string, data io.Reader, size int64, contentType string) error
+	Get(ctx context.Context, key string) (io.ReadCloser, string, error)
+	Delete(ctx context.Context, key string) error
 }

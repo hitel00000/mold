@@ -101,7 +101,7 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 
 func validateFieldType(resName string, f Field, val any) error {
 	switch f.Type {
-	case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL:
+	case TypeString, TypeText, TypeMarkdown, TypeEmail, TypeURL, TypeBlob:
 		if _, ok := val.(string); !ok {
 			return fmt.Errorf("resource '%s': field '%s' expects %s, got %s", resName, f.Name, f.Type, typeNameOf(val))
 		}

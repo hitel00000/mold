@@ -15,6 +15,7 @@ const (
 	TypeEmail    FieldType = "email"
 	TypeURL      FieldType = "url"
 	TypePassword FieldType = "password"
+	TypeBlob     FieldType = "blob"
 )
 
 // Constraints defines validation and configuration constraints for a field.

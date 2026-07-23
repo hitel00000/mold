@@ -59,6 +59,7 @@ type Router struct {
 	registryPointer atomic.Pointer[Registry]
 	reloadFn        func() (*Registry, error)
 	sessionMgr      *auth.SessionManager
+	blobStore       storage.BlobStore
 }
 
 // NewRouter creates a new Router with the initial Registry.
@@ -74,6 +75,14 @@ func (rt *Router) SetSessionManager(sm *auth.SessionManager) {
 
 func (rt *Router) SessionManager() *auth.SessionManager {
 	return rt.sessionMgr
+}
+
+func (rt *Router) SetBlobStore(bs storage.BlobStore) {
+	rt.blobStore = bs
+}
+
+func (rt *Router) BlobStore() storage.BlobStore {
+	return rt.blobStore
 }
 
 // SwapRegistry atomically replaces the active Registry snapshot.

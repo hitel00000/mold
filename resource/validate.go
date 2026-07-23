@@ -17,6 +17,7 @@ var validFieldTypes = map[FieldType]bool{
 	TypeEmail:    true,
 	TypeURL:      true,
 	TypePassword: true,
+	TypeBlob:     true,
 }
 
 var validRelationKinds = map[RelationKind]bool{

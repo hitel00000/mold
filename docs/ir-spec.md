@@ -197,13 +197,20 @@ fields:
 N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 전까지 도입하지
 않는다 (마세라티 원칙).
 
-### 미결정 사항 (다음 세션에서 확정 필요)
+### 결정된 사항 (Task 1.2.5 확정)
 
-* [ ] Blob Storage 어댑터 인터페이스의 정확한 메서드 시그니처
-* [ ] key 발급 규칙 (UUID vs Resource-scoped path — 사케 앱의
-      `images/{owner_id}/sake/{record_id}/{image_id}.jpg` 패턴 참고 가능)
-* [ ] `auth.permissions`가 blob 업로드/삭제 서브 엔드포인트에도 동일하게
-      적용되는지, 아니면 별도 규칙이 필요한지
+* [x] **Blob Storage 어댑터 인터페이스 메서드 시그니처**  
+  `storage.BlobStore` 인터페이스로 정의함:  
+  - `Put(ctx context.Context, key string, data io.Reader, size int64, contentType string) error`
+  - `Get(ctx context.Context, key string) (io.ReadCloser, string, error)` (바이트 스트림 및 Content-Type 반환)
+  - `Delete(ctx context.Context, key string) error`
+* [x] **Key 발급 규칙**  
+  결정적인 Resource-scoped 계층형 경로인 `blobs/{table}/{record_id}/{field_name}_{timestamp_or_uuid}{ext}` 패턴을 채택함 (예: `blobs/drink_images/1/image_key_17847849.jpg`). 사케 앱과 동일한 리소스 범위 격리성을 보장함.
+* [x] **`auth.permissions` 서브 엔드포인트 권한 적용**  
+  별도 가드 코드 신설 없이 기존 Mold의 `auth.Evaluate` 엔진을 100% 동일하게 활용함.  
+  - 업로드(`POST /api/{table}/{id}/upload/{field}`): 대상 레코드에 대한 `ActionUpdate` 권한 평가.
+  - 조회(`GET /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionRead` 권한 평가.
+  - 삭제(`DELETE /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionDelete` 권한 평가.
 
 ---
 
