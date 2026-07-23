@@ -20,17 +20,17 @@
 
 ---
 
-## 현재 상태 (2026-07-22 기준)
+## 현재 상태 (2026-07-23 기준)
 
-**완료된 마일스톤**: Milestone 0(철학 고정) ~ Milestone 6(AI Workflow & Resource Guide & Zero-Code Service Expansion)  
-👉 **Mold MVP 100% 개발 완결 및 실증적 실험 백로그 수립 완료 (`TASKS.md`)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1 (drink-log 외부 패키지 임포트, 초기 부팅 및 마찰 기록 완료)**  
+👉 **Post-MVP Phase 1 진행 중: Task 1.2 (drink-log 도메인 Resource 정의 및 CRUD/권한 서빙 실험) 착수 준비**
 
 ---
 
 ## 내일의 첫 번째 실험 (First Experiment)
 
-* **Task 1.1**: 외부 프로젝트 `drink-log`에서 Mold 패키지를 직접 불러와 부팅하는 첫 실험 진행
-  * **목적**: Mold를 외부 프로젝트에서 불러올 때 발생하는 초기 마찰(Friction)을 관찰하고 기록하여 제거함.
+* **Task 1.2**: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API / 권한 가드 서빙 실험
+  * **목적**: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 및 권한 가드가 오류 없이 작동하는지 관찰하고 검증함.
 
 ---
 
