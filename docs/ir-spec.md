@@ -182,9 +182,8 @@ fields:
 * `Store`(관계형 record CRUD)와 `BlobStore`(바이트 저장)는 서로 다른 책임이며,
   하나의 인터페이스로 합치지 않는다 (Milestone 2 회고 "검증 레이어의 책임 범위
   혼동" 패턴을 Storage 레이어에서 반복하지 않기 위함).
-* 업로드/삭제는 Resource의 기본 CRUD 엔드포인트(`POST/PUT /api/{table}`)가 아니라
-  별도 서브 엔드포인트(예: `POST /api/{table}/{id}/images`)로 분리한다. 사케 앱의
-  `POST /api/sake-records/:id/images` 패턴을 그대로 따른다.
+* 레코드 생성과 최초 Blob 업로드는 `POST /api/{table}`에 `multipart/form-data`를 전송하여 단일 `ActionCreate` 권한 평가로 원자 처리할 수 있다. ( create 권한만 있는 사용자도 레코드 생성과 함께 이미지를 즉시 업로드 가능).
+* 기존 레코드의 Blob 교체(overwrite) 및 삭제는 별도 서브 엔드포인트(`POST /api/{table}/{id}/upload/{field}`, `DELETE /api/{table}/{id}/blob/{field}`)를 통해 이뤄지며, 각각 `ActionUpdate`, `ActionDelete` 권한 평가가 적용된다. (남의 레코드에 대한 권한 우회 구멍 방지).
 * `POST /_mold/reload`는 스키마(컬럼, relation)만 원자적으로 교체하며, Blob
   Storage 쪽 상태를 건드리지 않는다. reload 실패 시 기존 IR이 보존되는 것과
   별개로, Blob Storage에는 애초에 reload가 손댈 대상이 없다.
@@ -206,11 +205,12 @@ N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 
   - `Delete(ctx context.Context, key string) error`
 * [x] **Key 발급 규칙**  
   고유성이 보장되는(collision-free) Resource-scoped 계층형 경로인 `blobs/{table}/{record_id}/{field_name}_{timestamp_or_uuid}{ext}` 패턴을 채택함 (예: `blobs/drink_images/1/image_key_17847849.jpg`). 사케 앱과 동일한 리소스 범위 격리성을 보장함.
-* [x] **`auth.permissions` 서브 엔드포인트 권한 적용**  
+* [x] **`auth.permissions` 및 엔드포인트 권한 적용**  
   별도 가드 코드 신설 없이 기존 Mold의 `auth.Evaluate` 엔진을 100% 동일하게 활용함.  
-  - 업로드(`POST /api/{table}/{id}/upload/{field}`): 대상 레코드에 대한 `ActionUpdate` 권한 평가.
-  - 조회(`GET /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionRead` 권한 평가.
-  - 삭제(`DELETE /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionDelete` 권한 평가.
+  - 1-Step 최초 생성 (`POST /api/{table}` multipart): 대상 레코드 생성에 대한 `ActionCreate` 권한 평가.
+  - 2-Step 덮어쓰기 (`POST /api/{table}/{id}/upload/{field}`): 대상 레코드에 대한 `ActionUpdate` 권한 평가 (overwrite 전용).
+  - 조회 (`GET /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionRead` 권한 평가.
+  - 삭제 (`DELETE /api/{table}/{id}/blob/{field}`): 대상 레코드에 대한 `ActionDelete` 권한 평가.
 
 ---
 
