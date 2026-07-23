@@ -214,7 +214,7 @@ N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 
 * [x] **1-Step 생성 실패 시 원자적 롤백 메커니즘**  
   - 1-Step 생성 중 Blob 파일 저장(`BlobStore.Put`) 또는 DB 업데이트 실패 시, 미완결 트랜잭션을 되돌리기 위해 DB 레코드를 물리적 hard delete(`DELETE FROM table WHERE id = ?`)로 롤백함.
   - 이 hard delete는 공개 삭제 정책(append-only + soft_delete)을 바꾸는 것이 아니며, 단일 요청 내 미완결 생성 트랜잭션 취소 전용 헬퍼임. (마세라티 원칙에 따라 롤백 중 동시 조회 클라이언트에 수 ms 간 레코드가 관찰될 수 있음).
-  - 만약 FK 제약 등으로 롤백 DELETE가 실패하면 `500 BLOB_STORE_FAILED_RECORD_PRESERVED` 에러 코드로 레코드 보존 사실을 정확히 안내함.
+  - 1-step create의 원자적 롤백은 Store 어댑터가 `HardDeletePhysically`(내부 hard delete 능력)를 제공할 때만 보장되며, 미지원 어댑터에서의 `SoftDelete` 조용한 폴백은 무결성 회귀 방지를 위해 엄격히 금지함. 미지원 어댑터이거나 FK 제약 등으로 롤백 DELETE가 실패하면 `500 BLOB_STORE_FAILED_RECORD_PRESERVED` 에러 코드로 레코드 보존 사실을 명시적으로 안내함.
 
 ---
 
