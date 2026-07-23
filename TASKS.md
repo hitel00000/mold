@@ -57,9 +57,11 @@
   - **실험 내용**: `drink-log`에 `User.yaml`, `Drink.yaml`을 추가하고 REST API 및 권한 가드를 작동시킨다.
   - **관찰 항목**: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 시 발생하는 문제점 관찰.
   - **완료 조건**: 외부 프로젝트에서 기본 CRUD 및 권한 가드가 오류 없이 작동함을 확인한다.
-  - **Task 1.2 완료 메모 (관찰 결과 및 보일러플레이트 측정)**:
-    - **실측 검증 성공**: `User.yaml`(`password` semantic type), `Drink.yaml`(`belongs_to: User`, `ownership_field: owner_id`) 추가 후 `main_test.go`에서 FK 스키마 생성, 로그인 세션 발급, 비인증 401, 타인 수정 403, 미존재 404, 본인 CRUD 200/201 실측 성공 (`go test -v -count=1` fresh PASS).
-    - **보일러플레이트 마찰 변화 관찰**: Resource 개수가 1개(`Post`)에서 3개(`Post`, `User`, `Drink`)로 증가하더라도, `resource.LoadAll` 동적 로드 덕분에 `main.go` 내 조립 코드(~50줄)는 전혀 늘어나지 않고 $O(1)$ 상수로 유지됨을 확인.
+  - **Task 1.2 완료 메모 (관찰 결과 및 마찰 재평가)**:
+    - **검증 완료 항목 (마찰 0건)**: FK 스키마 자동 생성, 로그인 세션 쿠키 발급, 401➔404➔403 3단계 가딩 순서, FK 무결성 위반 차단(`INVALID_FOREIGN_KEY`), role 권한 상승 차단(`ErrPrivilegeEscalation`) 실측 성공 (`go test -v -count=1` fresh PASS).
+    - **보일러플레이트 마찰 반증 데이터**: Resource 개수가 1개(`Post`)에서 3개(`Post`, `User`, `Drink`)로 늘어나더라도 `resource.LoadAll` 동적 탐색 덕분에 `main.go` 조립 보일러플레이트(~50줄)는 0줄 증가($O(1)$ 상수 유지)함 (Task 1.1 마찰 #2가 리소스 증가에 비례하여 악화되지 않는다는 반증).
+    - **새로 관찰된 파편화 데이터 포인트**: 외부 프로젝트(`drink-log`)에서 에러 응답 디코딩을 위해 `transport.ErrorEnvelope` 구조체를 직접 임포트해서 사용하고 있음. 이는 Task 1.1 마찰 #1(단일 entrypoint 부재)과 동일한 계열의 파편화 데이터 포인트임.
+    - **가설 1(외부 모듈 제품성) 판정 상태**: 조기 확정짓지 않고 Phase 1의 나머지 실험(Task 1.2.5, Task 1.3)까지 마친 뒤 Phase 3에서 종합 판정함.
 - [ ] **Task 1.2.5: [실험] Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증**
   - **배경**: 실제 배포된 사케 앱(`docs/schema.sql`)은 이미지 바이트를 R2에,
     key만 D1에 저장하는 구조다. 현재 IR 스펙(`docs/ir-spec.md`)엔 이 패턴이
