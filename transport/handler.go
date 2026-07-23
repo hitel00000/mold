@@ -231,6 +231,13 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
+	// Pre-populate placeholder for pending blob fields to satisfy non-nullable validation during store.Create
+	for _, pf := range pendingFiles {
+		if _, exists := input[pf.fieldName]; !exists {
+			input[pf.fieldName] = "pending"
+		}
+	}
+
 	// 1. Create record in Store first to get actual record_id
 	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
