@@ -117,7 +117,7 @@ func TestView_FKField_FormSubmission_E2E(t *testing.T) {
 	reg.Register(commentRes, store)
 
 	router := transport.NewRouter(reg)
-	vh, err := view.NewViewHandler(router)
+	vh, err := view.NewViewHandler(router, nil)
 	if err != nil {
 		t.Fatalf("failed to create view handler: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestView_FormValidationErrorHandling_E2E(t *testing.T) {
 	reg.Register(commentRes, store)
 
 	router := transport.NewRouter(reg)
-	vh, err := view.NewViewHandler(router)
+	vh, err := view.NewViewHandler(router, nil)
 	if err != nil {
 		t.Fatalf("failed to create view handler: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestFormValue_ReflectedXSS_AutoEscaping(t *testing.T) {
 	reg.Register(postRes, store)
 
 	router := transport.NewRouter(reg)
-	vh, err := view.NewViewHandler(router)
+	vh, err := view.NewViewHandler(router, nil)
 	if err != nil {
 		t.Fatalf("failed to create view handler: %v", err)
 	}

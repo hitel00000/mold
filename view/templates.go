@@ -339,7 +339,7 @@ const formTemplate = `
 {{ end }}
 `
 
-func compileTemplates() (listTmpl, detailTmpl, loginTmpl, formTmpl *template.Template, err error) {
+func createBaseTemplate() (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"renderMarkdown": func(val any) template.HTML {
 			if str, ok := val.(string); ok {
@@ -356,7 +356,11 @@ func compileTemplates() (listTmpl, detailTmpl, loginTmpl, formTmpl *template.Tem
 	}
 
 	base := template.New("baseLayout").Funcs(funcMap)
-	base, err = base.Parse(baseLayout)
+	return base.Parse(baseLayout)
+}
+
+func compileTemplates() (listTmpl, detailTmpl, loginTmpl, formTmpl *template.Template, err error) {
+	base, err := createBaseTemplate()
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

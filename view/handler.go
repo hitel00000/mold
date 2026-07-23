@@ -16,19 +16,21 @@ import (
 
 type ViewHandler struct {
 	router     *transport.Router
+	overrides  *TemplateOverrides
 	listTmpl   *template.Template
 	detailTmpl *template.Template
 	loginTmpl  *template.Template
 	formTmpl   *template.Template
 }
 
-func NewViewHandler(router *transport.Router) (*ViewHandler, error) {
+func NewViewHandler(router *transport.Router, overrides *TemplateOverrides) (*ViewHandler, error) {
 	listTmpl, detailTmpl, loginTmpl, formTmpl, err := compileTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile view templates: %w", err)
 	}
 	return &ViewHandler{
 		router:     router,
+		overrides:  overrides,
 		listTmpl:   listTmpl,
 		detailTmpl: detailTmpl,
 		loginTmpl:  loginTmpl,
@@ -219,7 +221,11 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 		CanCreate:    auth.Can(sess, res, auth.ActionCreate, nil),
 	}
 
-	_ = vh.listTmpl.ExecuteTemplate(w, "baseLayout", data)
+	tmpl := vh.listTmpl
+	if custom := vh.overrides.Get(table, "list"); custom != nil {
+		tmpl = custom
+	}
+	_ = tmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, navItems []NavItem, table string, id any, sess *auth.Session) {
@@ -248,7 +254,11 @@ func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, re
 		Session:      sess,
 	}
 
-	_ = vh.detailTmpl.ExecuteTemplate(w, "baseLayout", data)
+	tmpl := vh.detailTmpl
+	if custom := vh.overrides.Get(table, "detail"); custom != nil {
+		tmpl = custom
+	}
+	_ = tmpl.ExecuteTemplate(w, "baseLayout", data)
 }
 
 func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Resource, navItems []NavItem, table string, formValues map[string]any, errMsg string, errDetails []FieldErrorDetail, sess *auth.Session) {
@@ -265,8 +275,13 @@ func (vh *ViewHandler) renderCreateForm(w http.ResponseWriter, res *resource.Res
 		Session:      sess,
 	}
 
+	tmpl := vh.formTmpl
+	if custom := vh.overrides.Get(table, "form"); custom != nil {
+		tmpl = custom
+	}
+
 	var buf bytes.Buffer
-	if err := vh.formTmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
 		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
@@ -335,8 +350,13 @@ func (vh *ViewHandler) renderEditForm(w http.ResponseWriter, req *http.Request, 
 		Session:      sess,
 	}
 
+	tmpl := vh.formTmpl
+	if custom := vh.overrides.Get(table, "form"); custom != nil {
+		tmpl = custom
+	}
+
 	var buf bytes.Buffer
-	if err := vh.formTmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "baseLayout", data); err != nil {
 		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
