@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-23 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1 (drink-log 외부 패키지 임포트, 초기 부팅 및 마찰 기록 완료)**  
-👉 **Post-MVP Phase 1 진행 중: Task 1.2 (drink-log 도메인 Resource 정의 및 CRUD/권한 서빙 실험) 착수 준비**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 / Task 1.1 & Task 1.2 (drink-log 도메인 Resource 정의, CRUD & 권한 가드 서빙 실측 성공)**  
+👉 **Post-MVP Phase 1 진행 중: Task 1.2.5 (Blob Storage R2 갭 분석 및 `blob` type 초안 검증) 착수 준비**
 
 ---
 
@@ -37,5 +37,5 @@
 
 ## 다음 할 일 (Post-MVP)
 
-1. `Phase 1 / Task 1.2` 시작: `drink-log`에 `User.yaml`, `Drink.yaml` Resource 정의 추가 및 외부 REST API CRUD / 권한 가드 서빙 실측 검증 (목적: 외부 프로젝트 환경에서 스키마 생성, 로그인 세션, API 서빙 및 권한 가드가 오류 없이 작동하는지 관찰하고 검증함)
+1. `Phase 1 / Task 1.2.5` 시작: Blob Storage(R2) 갭 분석 및 `blob` type 초안 검증 (`storage.BlobStore` 최소 구현 및 서브 엔드포인트 동작 확인)
 2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
