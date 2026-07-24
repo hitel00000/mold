@@ -20,10 +20,10 @@
 
 ---
 
-## 현재 상태 (2026-07-23 기준)
+## 현재 상태 (2026-07-24 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 전체 완료 (Task 1.1 외부 모듈 적용, Task 1.2 Auth/Permissions 실측, Task 1.2.5 Blob Storage `blob` type 및 원자적 롤백, Task 1.3 Custom UI / Template Override 서빙 실측 성공)**  
-👉 **Post-MVP Phase 1 완결: 다음 세션 Phase 1 종합 회고 및 가설 1 최종 판정 세션 진행 예정**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md` 작성 및 가설 1 기각 / 가설 3 채택 및 구현 보류 판정 확정)**  
+👉 **Post-MVP Phase 1 완결: 다음 세션 진행할 작업 선택 준비 (근본 원인 A/B 해결을 위한 `runtime` 패키지 신설 vs Phase 2 DX 실험)**
 
 ---
 
@@ -35,7 +35,9 @@
 
 ---
 
-## 다음 할 일 (Post-MVP)
+## 다음 할 일 (Post-MVP - 다음 세션 시작 시 확정 필요)
 
-1. `Phase 1 종합 회고` 시작: Task 1.1~1.3에서 수집된 마찰 데이터 전체(단일 entrypoint 부재, 보일러플레이트, `ErrorEnvelope` 직접 참조, `PageData` 계약 미문서화 등)를 다각도로 분석하고 `TASKS.md` Phase 3 (Task 3.1) 가설 1 최종 판정 진행
-2. `TASKS.md`의 실험 ➔ 관찰 ➔ 마찰 제거 백로그 완료 조건에 따라 진행
+*다음 두 후보 중 하나를 사람 사용자가 확정하여 진행합니다:*
+
+1. **후보 (a) `runtime` 패키지 신설 착수**: 가설 1 기각의 근본 원인 A/B(단일 entrypoint 부재, ~50줄 보일러플레이트)를 해결하기 위해 `github.com/hitel00000/mold/runtime` 패키지(`runtime.App`, `runtime.Config`)를 최소 스코프로 신설하고 `drink-log` `main.go`를 10줄 이내로 단축.
+2. **후보 (b) `Phase 2` DX 실험 착수**: `resources/*.yaml` 파일 저장(`Ctrl + S`) 시 백그라운드 원자적 리로드가 동작하는 `mold dev` DX실험(Task 2.1) 진행.
