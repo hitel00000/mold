@@ -37,7 +37,9 @@
 
 ## 다음 할 일 (Post-MVP - 다음 세션 시작 시 확정 필요)
 
-*다음 두 후보 중 하나를 사람 사용자가 확정하여 진행합니다:*
+*다음 두 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. **후보 (a) `runtime` 패키지 신설 착수**: 가설 1 기각의 근본 원인 A/B(단일 entrypoint 부재, ~50줄 보일러플레이트)를 해결하기 위해 `github.com/hitel00000/mold/runtime` 패키지(`runtime.App`, `runtime.Config`)를 최소 스코프로 신설하고 `drink-log` `main.go`를 10줄 이내로 단축.
+1. 👉 **후보 (a) `runtime` 패키지 신설 착수 (★ 잠정 권장안)**: 
+   - **사유**: 가설 1 기각이 가장 명확히 실증된 문제이며, 근본 원인 B(App Container 부재)를 먼저 해결하여 `main.go`를 간결하게 다듬어두어야 Phase 2 (`mold dev` 파일 워처) 로직을 얹기 수월함.
+   - **내용**: `github.com/hitel00000/mold/runtime` 패키지(`runtime.App`, `runtime.Config`)를 최소 스코프로 신설하고 `drink-log` `main.go`를 10줄 이내로 단축.
 2. **후보 (b) `Phase 2` DX 실험 착수**: `resources/*.yaml` 파일 저장(`Ctrl + S`) 시 백그라운드 원자적 리로드가 동작하는 `mold dev` DX실험(Task 2.1) 진행.
