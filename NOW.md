@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-24 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결) 및 **Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md` 작성 및 가설 1 기각 / 가설 3 채택 및 구현 보류 판정 확정)**  
-👉 **Post-MVP Phase 1 완결: 다음 세션 진행할 작업 선택 준비 (근본 원인 A/B 해결을 위한 `runtime` 패키지 신설 vs Phase 2 DX 실험)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), 및 **`runtime` 패키지 신설 완결 (`runtime/` 신설, 조립부 6줄 축소, e2e 검증 통과)**  
+👉 **Post-MVP: 다음 세션 진행할 작업 선택 준비 (Phase 2 DX 실험 `mold dev` vs runtime 잔여 마찰 완화)**
 
 ---
 
@@ -39,7 +39,10 @@
 
 *다음 두 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. 👉 **후보 (a) `runtime` 패키지 신설 착수 (★ 잠정 권장안)**: 
-   - **사유**: 가설 1 기각이 가장 명확히 실증된 문제이며, 근본 원인 B(App Container 부재)를 먼저 해결하여 `main.go`를 간결하게 다듬어두어야 Phase 2 (`mold dev` 파일 워처) 로직을 얹기 수월함.
-   - **내용**: `github.com/hitel00000/mold/runtime` 패키지(`runtime.App`, `runtime.Config`)를 최소 스코프로 신설하고 `drink-log` `main.go`를 10줄 이내로 단축.
-2. **후보 (b) `Phase 2` DX 실험 착수**: `resources/*.yaml` 파일 저장(`Ctrl + S`) 시 백그라운드 원자적 리로드가 동작하는 `mold dev` DX실험(Task 2.1) 진행.
+1. 👉 **후보 (a) `Phase 2` DX 실험 착수 (★ 잠정 권장안)**: 
+   - **사유**: `runtime` 패키지로 `main.go` 조립부 캡슐화(6줄)가 완료되었으므로, 소스 저장(`Ctrl + S`) 시 원자적 리로드가 반영되는 개발자 경험(DX)을 다듬을 준비가 됨.
+   - **내용**: `resources/*.yaml` 파일 저장 시 백그라운드 원자적 리로드가 동작하는 `mold dev` DX 실험(Task 2.1) 진행.
+2. **후보 (b) `runtime` 패키지 잔여 표면 마찰 완화 검토**:
+   - **사유**: `runtime` 도입으로 조립 코드는 6줄로 줄었으나, `cmd/runtime_e2e_test.go`에서 확인되듯 초기 admin 계정 시딩 시 `resource.LoadAll` 및 `auth`/`storage` 서브패키지 직접 호출 마찰이 `runtime` 경계 외부에 남아있음.
+   - **내용**: admin 시딩 헬퍼나 Config 옵션을 `runtime` 패키지에 제공하여 외부 서브패키지 직접 참조를 추가로 캡슐화할지 검토.
+

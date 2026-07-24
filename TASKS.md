@@ -132,8 +132,19 @@
     - 가설 1 기각 (단일 패키지 및 부트스트래핑 컨테이너 부재).
     - 가설 3 **[채택 (Adopted)]**: Mold 본체 5개 패키지 내 `switch f.Type` 6개 지점, 필드 루프 11개 지점, 가딩 분산 실측 완료. 단, 마세라티 원칙에 따라 실제 Plan 계층 구조 추출 및 설계 착수는 Phase 4(두 번째 멀티 타깃 발생 시점)로 보류함.
     - 상세 내용은 [Phase 1 회고 문서](docs/retrospectives/phase1-retrospective.md) 참조.
+- [x] **Task 3.2: [구조 단순화 및 마찰 제거] `runtime` 패키지 신설 및 App 컨테이너 캡슐화 완료**
+  - **작업 내용**: 단일 진입점 `runtime` 패키지(`runtime/config.go`, `runtime/types.go`, `runtime/app.go`, `runtime/app_test.go`, `cmd/runtime_e2e_test.go`)를 신설하여 부트스트래핑 보일러플레이트 캡슐화 (총 5개 커밋 완료).
+  - **실측 결과**: 조립부 라인 수 6줄 (`runtime.New(cfg)` 후 `app.Listen()`)로 기존 `cmd/mvp_e2e_test.go` (~50줄) 대비 88% 축소 (목표 10줄 이내 달성). 전체 테스트(`go test ./... -count=1`) fresh PASS.
+  - **TemplateOverrides 확정**: Option A (`Config.Overrides *view.TemplateOverrides`)로 확정 반영.
+  - **가설 1 (외부 모듈 제품성) 재평가 메모**:
+    - 과거 Phase 1 회고에서 기각 원인이었던 근본 원인 A(공개 API 표면 부재)와 근본 원인 B(부트스트래핑 컨테이너 부재)가 `runtime` 패키지 도입으로 실측 기준 해소됨.
+    - 가설 1의 원래 채택 조건("1개 패키지 임포트, 보일러플레이트 0줄")과 정직하게 비교:
+      - `runtime` 단 1개 패키지 임포트만으로 런타임 생성/구동이 가능해졌으나,
+      - 초기 admin 계정 시딩 등 도메인 데이터 시딩 로직(`resource.LoadAll` 직접 호출, `auth`, `storage` 직접 참조)은 여전히 `runtime` 경계 외부에 별도 코드로 존재함 (`cmd/runtime_e2e_test.go` 내 seeding 코드 참고).
+      - 따라서 판정을 과거 문서까지 "소급 완전 채택"으로 뒤집지 않고, 외부 모듈 임포트 마찰이 극적으로 완화된 상태(6줄 조립)로 실측 성과를 기록함.
 
 ### Phase 4: Cloudflare Workers Static Generator 실험 (필요성 확정 시)
 
 - [ ] **Task 4.1: [실험] `drink-log` 명세를 TypeScript + Hono + D1 코드로 생성 및 로컬 Wrangler 실행**
   - **완료 조건**: 생성된 TS+D1 코드가 로컬 Wrangler 환경에서 기존 Go API와 동일하게 반응함을 확인한다. (※ 두 번째 타깃이 발생하는 이 시점에 채택된 **가설 3 (Plan 계층)**의 실구현 및 다형성 매핑 추상화 작성을 함께 진행/재검토함)
+
