@@ -19,29 +19,16 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		record = make(map[string]any)
 	}
 
-	// 1. Build sets of valid, system, and deprecated fields
+	// 1. Build sets of valid, system, and deprecated fields using canonical r.NormalizeFields()
 	validFields := make(map[string]Field)
 	systemFields := make(map[string]bool)
 	deprecatedFields := make(map[string]bool)
 
-	for _, f := range r.Fields {
+	for _, f := range r.NormalizeFields() {
 		if f.Deprecated {
 			deprecatedFields[f.Name] = true
 		} else {
 			validFields[f.Name] = f
-		}
-	}
-
-	// Foreign key derived fields from belongs_to relations
-	for _, rel := range r.Relations {
-		if rel.Kind == KindBelongsTo && rel.ForeignKey != "" {
-			if _, exists := validFields[rel.ForeignKey]; !exists {
-				validFields[rel.ForeignKey] = Field{
-					Name:     rel.ForeignKey,
-					Type:     TypeInt,
-					Nullable: true,
-				}
-			}
 		}
 	}
 
