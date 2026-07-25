@@ -17,6 +17,14 @@ type FieldPlan struct {
 	IsDerivedFK     bool
 }
 
+// RelationPlan represents a target-agnostic relation specification.
+type RelationPlan struct {
+	Name       string
+	Kind       resource.RelationKind
+	Target     string
+	ForeignKey string
+}
+
 // Plan represents the target-agnostic execution plan derived from a single Resource IR.
 type Plan struct {
 	ResourceName  string
@@ -27,6 +35,9 @@ type Plan struct {
 
 	// Fields contains explicit fields plus belongs_to derived FK fields.
 	Fields []FieldPlan
+
+	// Relations contains normalized relation plans.
+	Relations []RelationPlan
 }
 
 // Build constructs a target-agnostic Plan from a single resource.Resource IR.
@@ -44,6 +55,16 @@ func Build(res *resource.Resource) *Plan {
 		Timestamps:    res.Timestamps,
 		SoftDelete:    res.SoftDelete,
 		Fields:        make([]FieldPlan, 0, len(res.Fields)+len(res.Relations)),
+		Relations:     make([]RelationPlan, 0, len(res.Relations)),
+	}
+
+	for _, rel := range res.Relations {
+		p.Relations = append(p.Relations, RelationPlan{
+			Name:       rel.Name,
+			Kind:       rel.Kind,
+			Target:     rel.Target,
+			ForeignKey: rel.ForeignKey,
+		})
 	}
 
 	existingNames := make(map[string]bool)

@@ -1,27 +1,34 @@
 package transport
 
 import (
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
 
-// SanitizeRecord removes fields marked with deprecated: true in the Resource IR from output records.
+// SanitizeRecord removes fields marked with deprecated: true or password type using plan.Build(res).
+// Target 7 Migration: Consumes target-agnostic plan.Plan and plan.FieldPlan.
 func SanitizeRecord(res *resource.Resource, rec storage.Record) storage.Record {
 	if rec == nil || res == nil {
 		return rec
 	}
 
-	sanitized := make(storage.Record)
-	deprecatedFields := make(map[string]bool)
+	p := plan.Build(res)
+	if p == nil {
+		return rec
+	}
 
-	for _, f := range res.Fields {
+	sanitized := make(storage.Record)
+	omittedFields := make(map[string]bool)
+
+	for _, f := range p.Fields {
 		if f.Deprecated || f.Type == resource.TypePassword {
-			deprecatedFields[f.Name] = true
+			omittedFields[f.Name] = true
 		}
 	}
 
 	for k, v := range rec {
-		if !deprecatedFields[k] {
+		if !omittedFields[k] {
 			sanitized[k] = v
 		}
 	}

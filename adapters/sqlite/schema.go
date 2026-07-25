@@ -5,11 +5,18 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 )
 
-// GenerateCreateTableSQL generates the DDL for creating a SQLite table from a Resource IR.
+// GenerateCreateTableSQL generates the DDL for creating a SQLite table from a Resource IR using plan.Build(res).
+// Target 4 Migration: Consumes target-agnostic plan.Plan and plan.FieldPlan.
 func GenerateCreateTableSQL(res *resource.Resource) string {
+	p := plan.Build(res)
+	if p == nil {
+		return ""
+	}
+
 	var columns []string
 	var constraints []string
 
@@ -20,8 +27,8 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 	fieldMap := make(map[string]bool)
 	fieldMap["id"] = true
 
-	// Build columns from IR fields
-	for _, f := range res.Fields {
+	// Build columns from plan fields (explicit + derived FKs)
+	for _, f := range p.Fields {
 		if fieldMap[f.Name] {
 			continue
 		}
@@ -39,7 +46,7 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 
 		// Column-level UNIQUE constraint only if soft_delete is false.
 		// If soft_delete is true, a partial unique index (WHERE deleted_at IS NULL) is generated instead.
-		if f.Constraints.Unique && !res.SoftDelete {
+		if f.Constraints.Unique && !p.SoftDelete {
 			colDef += " UNIQUE"
 		}
 
@@ -62,20 +69,16 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 		columns = append(columns, colDef)
 	}
 
-	// Foreign key columns from belongs_to relations
-	for _, rel := range res.Relations {
+	// Foreign key constraints from belongs_to relations in plan
+	for _, rel := range p.Relations {
 		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
-			if !fieldMap[rel.ForeignKey] {
-				fieldMap[rel.ForeignKey] = true
-				columns = append(columns, fmt.Sprintf(`"%s" INTEGER`, rel.ForeignKey))
-			}
 			targetTable := toSnakeCase(rel.Target) + "s"
 			constraints = append(constraints, fmt.Sprintf(`FOREIGN KEY ("%s") REFERENCES "%s"("id")`, rel.ForeignKey, targetTable))
 		}
 	}
 
 	// Automatic timestamp columns
-	if res.Timestamps {
+	if p.Timestamps {
 		if !fieldMap["created_at"] {
 			columns = append(columns, `"created_at" TEXT NOT NULL DEFAULT (DATETIME('now'))`)
 		}
@@ -85,7 +88,7 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 	}
 
 	// Automatic soft delete column
-	if res.SoftDelete {
+	if p.SoftDelete {
 		if !fieldMap["deleted_at"] {
 			columns = append(columns, `"deleted_at" TEXT NULL`)
 		}
@@ -93,22 +96,23 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 
 	allDefs := append(columns, constraints...)
 
-	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (%s);`, res.Table, strings.Join(allDefs, ", "))
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS "%s" (%s);`, p.Table, strings.Join(allDefs, ", "))
 }
 
-// GenerateIndexesSQL generates index DDLs for a Resource, such as partial unique indexes for soft-deletable resources.
+// GenerateIndexesSQL generates index DDLs for a Resource using plan.Build(res).
 func GenerateIndexesSQL(res *resource.Resource) []string {
+	p := plan.Build(res)
 	var indexes []string
 
-	if !res.SoftDelete {
+	if p == nil || !p.SoftDelete {
 		return indexes
 	}
 
-	for _, f := range res.Fields {
+	for _, f := range p.Fields {
 		if f.Constraints.Unique {
-			idxName := fmt.Sprintf("idx_%s_%s_unique", res.Table, f.Name)
+			idxName := fmt.Sprintf("idx_%s_%s_unique", p.Table, f.Name)
 			idxSQL := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"("%s") WHERE "deleted_at" IS NULL;`,
-				idxName, res.Table, f.Name)
+				idxName, p.Table, f.Name)
 			indexes = append(indexes, idxSQL)
 		}
 	}
