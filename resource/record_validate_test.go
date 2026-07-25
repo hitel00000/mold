@@ -47,6 +47,49 @@ func TestValidateRecord_UnknownDeprecatedAndPKFields(t *testing.T) {
 	}
 }
 
+// TestValidateRecord_GoldenExecutionOrderSnapshot verifies the exact pre-migration execution order:
+// System column rejection -> Type Validation FIRST -> Constraint Validation SECOND.
+func TestValidateRecord_GoldenExecutionOrderSnapshot(t *testing.T) {
+	minLen := 5
+	res := &resource.Resource{
+		Name:       "User",
+		Timestamps: true,
+		SoftDelete: true,
+		Fields: []resource.Field{
+			{Name: "username", Type: resource.TypeString, Nullable: false, Constraints: resource.Constraints{MinLength: &minLen}},
+		},
+		Relations: []resource.Relation{
+			{Name: "org", Kind: resource.KindBelongsTo, Target: "Org", ForeignKey: "org_id"},
+		},
+	}
+
+	// 1. System Column Rejection (created_at)
+	err := resource.ValidateRecord(res, map[string]any{"username": "alice", "created_at": "2026-01-01"}, false)
+	if err == nil || err.Error() != "resource 'User': system column 'created_at' cannot be explicitly provided in write payload" {
+		t.Errorf("unexpected error for system column created_at: %v", err)
+	}
+
+	// 2. Type Validation FIRST: sending integer to string field (with min_length 5 constraint)
+	// Must return type error FIRST, NOT min_length error SECOND
+	err = resource.ValidateRecord(res, map[string]any{"username": 12345}, false)
+	if err == nil || err.Error() != "resource 'User': field 'username' expects string, got int" {
+		t.Errorf("expected type validation error FIRST ('expects string, got int'), got: %v", err)
+	}
+
+	// 3. Constraint Validation SECOND: sending short string to field with min_length 5
+	err = resource.ValidateRecord(res, map[string]any{"username": "bob"}, false)
+	if err == nil || err.Error() != "resource 'User': field 'username' length 3 is less than min_length 5" {
+		t.Errorf("expected constraint validation error SECOND ('length 3 is less than min_length 5'), got: %v", err)
+	}
+
+	// 4. Pre-migration behavior: derived FK fields in relations were in validFields, but Section 3 only iterated r.Fields,
+	// so derived FKs were not type-validated in pre-migration code. Plan migration will unify this.
+	err = resource.ValidateRecord(res, map[string]any{"username": "alice", "org_id": 42}, false)
+	if err != nil {
+		t.Errorf("unexpected error for valid org_id: %v", err)
+	}
+}
+
 func TestValidateRecord_SystemColumnRejection(t *testing.T) {
 	// Resource with Timestamps & SoftDelete true
 	resWithSys := &resource.Resource{
