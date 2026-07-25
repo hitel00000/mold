@@ -37,7 +37,7 @@
 * **질문**: DDL/API/View 전반에 걸쳐 반복되는 수직적 중복 로직이 실제로 존재하는가?
 * **채택 조건**: 독립 프로젝트 구동 중 3개 이상의 Resource에서 수직적 중복 로직이 실증되고, Plan 도입 시 구조가 더 단순해질 때.
 * **기각 조건**: 중복이 미미하거나 Plan 도입 시 단순 변환 코드만 늘어날 경우 (현재 단일 컴파일러 구조 유지).
-* **최종 판정**: **[채택 (Adopted)]** (본체 코드 5개 패키지 내 `switch f.Type` 6개 지점 및 필드 루프 11개 지점 등 수직적 중복 실증. 단, 구현 착수는 마세라티 원칙에 따라 Phase 4 멀티 타깃 시점으로 보류. 상세 근거는 [Phase 1 회고](docs/retrospectives/phase1-retrospective.md) 참조)
+* **최종 판정**: **[채택 (Adopted)]** (본체 코드 5개 패키지 내 `switch f.Type` 6개 지점 및 필드 루프 11개 지점 등 수직적 중복 실증. Phase 4 Task 4.1 Cloudflare TS 생성기 추가로 타입 분기 6➔9곳, 필드 루프 11➔14곳으로 늘어나 "두 번째 타깃 발생" 구현 전제 조건이 실측 충족됨. 단, Plan 계층 실제 추출 착수 여부는 다음 세션 사람의 확정 후 진행 예정)
 
 ---
 
@@ -155,6 +155,18 @@
 
 ### Phase 4: Cloudflare Workers Static Generator 실험 (필요성 확정 시)
 
-- [ ] **Task 4.1: [실험] `drink-log` 명세를 TypeScript + Hono + D1 코드로 생성 및 로컬 Wrangler 실행**
+- [x] **Task 4.1: [실험] `examples/blog` 명세를 TypeScript + Hono + D1 코드로 생성 및 로컬 Wrangler 실행**
   - **완료 조건**: 생성된 TS+D1 코드가 로컬 Wrangler 환경에서 기존 Go API와 동일하게 반응함을 확인한다. (※ 두 번째 타깃이 발생하는 이 시점에 채택된 **가설 3 (Plan 계층)**의 실구현 및 다형성 매핑 추상화 작성을 함께 진행/재검토함)
+  - **Task 4.1 완료 메모 (방향 B, 2단계 실행 검증 및 가설 3 실측 성과)**:
+    - **구현 위치 및 설계**: `codegen/cloudflare/` (`codegen/cloudflare/generator.go`, `codegen/cloudflare/generator_test.go`), 3개 커밋 (`a18c867`, `91157ed`, `8d4baa0`). 방향 B(Go 코어 패키지 diff 0줄 유지 + TS 생성기가 IR 직접 소비) 채택.
+    - **2단계 실행 검증 이력 (구현했다 vs 확인했다 명확히 구분)**:
+      - *1차 검증*: `generator_test.go`에서 생성된 TS 소스 문자열 패턴 검사 + Node 22 native `node:sqlite` DB 및 Hono `app.request()` shim 서버 검증 진행.
+      - *2차 재검증 (지적 반영)*: "실제 `wrangler dev`(Miniflare V8 isolate) 런타임 검증이 아니다"라는 정당한 지적 수용. 생성된 파일로 `npm install`, `npx tsc --noEmit` (타입 오류 0건), `npx wrangler d1 execute DB --local --file=schema.sql` (로컬 D1 SQLite 스키마 3개 테이블 정상 적용), `npx wrangler dev --port 8787` (Miniflare V8 isolate 런타임 구동) 환경 구축.
+      - *라이브 API 비교*: `http://127.0.0.1:8787` 구동 서버로 Create ➔ Read ➔ List ➔ Update ➔ Delete ➔ Soft-delete 404 등 6개 REST 엔드포인트에 실제 HTTP fetch 요청을 송신하여, Go Runtime API 서버와 100% 동일한 JSON Envelope 및 HTTP Status Code 응답 패리티 확인 (`[wrangler:inf] POST /api/posts 201 Created 32ms`, `GET /api/posts 200 OK 6ms` 등).
+    - **실행 검증으로 잡은 버그**: JS 라이브 런타임 실행 중 SQL insert 템플릿의 timestamps 파인딩 문제(`VALUES (?, ?, ?, now, now)` -> `ERR_SQLITE_ERROR: no such column: now`)를 포착하여 `generator.go`에 `?` 플레이스홀더 및 ISO Timestamp 값 바인딩 배열 적용으로 즉시 수정 (`8d4baa0`). 정적 테스트로는 발견할 수 없었던 실제 런타임 버그를 라이브 검증으로 격리 성공.
+    - **타입 분기 / 필드 루프 실측 데이터 (가설 3 전제 조건 충족)**:
+      - Go 코어: 타입 분기 `switch f.Type` 6곳, 필드 루프 `for _, f` 11곳
+      - TS 생성기: 타입 분기 3곳 추가 (DDL, TS validation, DB bind), 필드 루프 3곳 추가
+      - **총계**: 타입 분기 9곳, 필드 루프 14곳. 두 번째 타깃 등장 및 파편화 확증으로 가설 3의 실구현 전제 조건이 충족됨.
+
 

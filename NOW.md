@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-25 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 완결 (`runtime/` 신설, 조립부 6줄 축소), 및 **Phase 2 Task 2.1 `mold dev` DX 실험 완료 (`cmd/mold-dev` 신설, 파일 저장 ➔ HTTP POST /_mold/reload 자동 감지 핫컴파일 및 가설 2 [채택] 판정 완결)**  
-👉 **Post-MVP: 다음 세션 진행할 작업 선택 준비 (runtime 잔여 표면 마찰 완화 vs Phase 4 멀티 타깃 생성기 준비)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 완결 (`runtime/` 신설, 조립부 6줄 축소), Phase 2 `mold dev` DX 실험 완결, 및 **Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성 (`codegen/cloudflare` 신설, Miniflare V8 Isolate `wrangler dev` 라이브 실행 검증 및 Go API 응답 패리티 100% 확인 완료)**  
+👉 **Post-MVP: 다음 세션 진행할 작업 선택 준비 (Plan 계층 `plan` 패키지 추출 착수 여부 vs runtime 잔여 마찰 완화 vs Cloudflare Auth/View/Blob 확장)**
 
 ---
 
@@ -39,9 +39,12 @@
 
 *다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. 👉 **후보 (a) `runtime` 패키지 잔여 표면 마찰 완화 (★ 잠정 권장안)**:
-   - **사유**: `runtime` 패키지 도입으로 조립 코드는 6줄로 줄었으나, `cmd/runtime_e2e_test.go` 및 `cmd/mold-dev/dev_test.go`에서 확인되듯 초기 admin 계정 시딩 시 `resource.LoadAll` 및 `auth`/`storage` 서브패키지 직접 호출 마찰이 `runtime` 경계 외부에 남아있음.
-   - **내용**: admin 시딩 헬퍼(예: `app.SeedAdmin(email, pass)`)나 Config 옵션을 `runtime` 패키지에 제공하여 외부 서브패키지 직접 참조를 캡슐화할지 검토.
-2. **후보 (b) `Phase 4` Cloudflare Workers Static Generator 실험 착수**:
-   - **사유**: Go 런타임 및 `mold dev` DX 가설 검증이 완료되었으므로, 두 번째 타깃인 TS+Hono+D1 정적 코드 생성기 실험 (Task 4.1)을 착수할 준비가 됨. (※ 채택된 가설 3 Plan 계층 구현을 함께 검토).
+1. 👉 **후보 (a) `Plan` 계층 (`plan` 패키지) 추출 및 가설 3 실구현 착수 (★ 잠정 권장안)**:
+   - **사유**: 두 번째 타깃(Cloudflare Workers TS)이 실제 `wrangler dev` 라이브 검증까지 완결되어 가설 3의 전제 조건이 충족됨. 타입 분기 6➔9곳, 필드 루프 11➔14곳으로 중복이 확증되었으며, 문제는 착수 여부가 아니라 스코프 범위(방향 A: Go 코어 패키지 전체 리팩터링 vs 이번 생성기 수준의 국소적 Plan 추출)의 확정임.
+   - **내용**: `plan` 중간 스냅샷/매퍼 패키지를 작성하여 DDL, API, Codegen의 타입 해석을 단일 지점으로 수렴시키는 리팩터링 수행.
+2. **후보 (b) `runtime` 패키지 잔여 표면 마찰 완화**:
+   - **사유**: `runtime` 패키지 도입으로 조립 코드는 6줄로 줄었으나, 초기 admin 계정 시딩 시 `resource.LoadAll` 및 `auth`/`storage` 서브패키지 직접 호출 마찰이 `runtime` 경계 외부에 남아있음.
+   - **내용**: admin 시딩 헬퍼(예: `app.SeedAdmin(email, pass)`)나 Config 옵션을 `runtime` 패키지에 제공하여 외부 서브패키지 직접 참조를 캡슐화.
+3. **후보 (c) Cloudflare Workers TS Codegen 기능 확장 (Auth / View / Blob)**:
+   - **사유**: Task 4.1에서는 스코프 단축을 위해 단순 CRUD만 포함했으나, 사케 앱 배포 환경처럼 실서비스 적용을 위해서는 Auth/Permission, HTML View, 또는 Blob R2 필드 생성기로 확장이 필요함.
 
