@@ -123,7 +123,7 @@
   - **관찰 항목**: 파일 저장과 브라우저 반영 사이의 지연, 동시성 에러, 개발자가 느끼는 마찰을 기록한다.
   - **완료 조건**: 수동 명령어 없이 파일 저장만으로 핫컴파일 반영이 마찰 없이 완료된다.
   - **Task 2.1 완료 메모 (구현, 트레이드오프 및 가설 2 최종 판정)**:
-    - **구현 위치 및 단위 커밋**: `cmd/mold-dev/` ([client.go](file:///D:/dev/mold/cmd/mold-dev/client.go), [watcher.go](file:///D:/dev/mold/cmd/mold-dev/watcher.go), [dev.go](file:///D:/dev/mold/cmd/mold-dev/dev.go), [main.go](file:///D:/dev/mold/cmd/mold-dev/main.go), [dev_test.go](file:///D:/dev/mold/cmd/mold-dev/dev_test.go)), 총 4개 단위 커밋 (`f111432`, `1cff450`, `e8385da`, `fcebe37`).
+    - **구현 위치 및 단위 커밋**: `cmd/mold-dev/` (`cmd/mold-dev/client.go`, `cmd/mold-dev/watcher.go`, `cmd/mold-dev/dev.go`, `cmd/mold-dev/main.go`, `cmd/mold-dev/dev_test.go`), 총 4개 단위 커밋 (`f111432`, `1cff450`, `e8385da`, `fcebe37`).
     - **핵심 설계**: AGENTS.md의 확정 핵심 결정("런타임 코어는 오직 명시적 API `POST /_mold/reload`로만 reload된다")을 100% 보존. `mold dev`를 독립 실행형 전용 CLI 도구로 분리하여 HTTP 클라이언트로서 `POST /_mold/reload`를 호출함 (`git diff --stat` 코어 패키지 0줄 변경 증명 완료).
     - **Admin 인증**: 옵션 A(부팅 시 `/login` 폼 자동 로그인)를 기본으로 수행하고, `-session-cookie`/`MOLD_SESSION_COOKIE` 지정 시 옵션 B(세션 쿠키 직접 주입)로 오버라이드하는 하이브리드(Option C)로 구현.
     - **워처 구현 트레이드오프 (정직한 실측 기록)**:
