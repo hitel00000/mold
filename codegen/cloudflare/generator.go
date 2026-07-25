@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 )
 
@@ -58,20 +59,20 @@ func (g *Generator) Generate(reg *resource.Registry) (*Output, error) {
 	}, nil
 }
 
-// generateSchemaSQL builds D1 SQLite DDL for all resources.
-// TS Codegen dispatch/loop tracking:
-// - Field Loop #1: for _, f := range res.Fields
-// - Type Dispatch #1: switch f.Type (mapping IR PrimitiveType -> SQLite DDL Column Type & CHECK constraints)
+// generateSchemaSQL builds D1 SQLite DDL for all resources using plan.Build(res).
+// Target 1 Migration: Consumes target-agnostic plan.Plan and plan.FieldPlan.
 func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 	var sb strings.Builder
 	sb.WriteString("-- Auto-generated D1 SQLite Schema from Mold Resource IR\n\n")
 
 	for _, res := range resources {
-		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS \"%s\" (\n", res.Table))
+		p := plan.Build(res)
+
+		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS \"%s\" (\n", p.Table))
 		sb.WriteString("    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT")
 
-		// Field Loop #1 & Type Dispatch #1
-		for _, f := range res.Fields {
+		// Target 1 Loop over plan.Fields
+		for _, f := range p.Fields {
 			if f.Deprecated {
 				continue
 			}
@@ -79,7 +80,7 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 			colType := "TEXT"
 			var extra string
 
-			// Type Dispatch #1: IR PrimitiveType -> SQLite DDL Type
+			// Target 1 Type Mapping owned by Cloudflare generator
 			switch f.Type {
 			case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword, resource.TypeBlob:
 				colType = "TEXT"
@@ -112,11 +113,11 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 			sb.WriteString(fmt.Sprintf(",\n    \"%s\" %s%s", f.Name, colType, extra))
 		}
 
-		if res.Timestamps {
+		if p.Timestamps {
 			sb.WriteString(",\n    \"created_at\" TEXT NOT NULL")
 			sb.WriteString(",\n    \"updated_at\" TEXT NOT NULL")
 		}
-		if res.SoftDelete {
+		if p.SoftDelete {
 			sb.WriteString(",\n    \"deleted_at\" TEXT")
 		}
 

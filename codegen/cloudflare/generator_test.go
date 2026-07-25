@@ -71,6 +71,49 @@ func TestCloudflareGenerator_DirectIRConsumption(t *testing.T) {
 	}
 }
 
+// TestCloudflareGenerator_SchemaSQLGoldenParity verifies that the generated D1 DDL schema SQL
+// derived via plan.Plan matches the expected golden DDL string byte-for-byte.
+func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	expectedPostsDDL := `CREATE TABLE IF NOT EXISTS "posts" (
+    "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "title" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "author_id" INTEGER NOT NULL,
+    "created_at" TEXT NOT NULL,
+    "updated_at" TEXT NOT NULL,
+    "deleted_at" TEXT
+);`
+
+	expectedCommentsDDL := `CREATE TABLE IF NOT EXISTS "comments" (
+    "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "body" TEXT NOT NULL,
+    "post_id" INTEGER NOT NULL,
+    "author_id" INTEGER NOT NULL,
+    "created_at" TEXT NOT NULL,
+    "updated_at" TEXT NOT NULL,
+    "deleted_at" TEXT
+);`
+
+	if !strings.Contains(output.SchemaSQL, expectedPostsDDL) {
+		t.Errorf("posts DDL mismatch!\nExpected snippet:\n%s\nGot SchemaSQL:\n%s", expectedPostsDDL, output.SchemaSQL)
+	}
+	if !strings.Contains(output.SchemaSQL, expectedCommentsDDL) {
+		t.Errorf("comments DDL mismatch!\nExpected snippet:\n%s\nGot SchemaSQL:\n%s", expectedCommentsDDL, output.SchemaSQL)
+	}
+}
+
 // TestCloudflareGenerator_CRUDSpecificationParity compares the Go Runtime API responses
 // with the generated TS Hono API structure contract to ensure 100% envelope specification parity.
 func TestCloudflareGenerator_CRUDSpecificationParity(t *testing.T) {
