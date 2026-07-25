@@ -39,12 +39,14 @@ func (g *Generator) Generate(reg *resource.Registry) (*Output, error) {
 	indexTS := g.generateIndexTS(resources)
 	packageJSON := g.generatePackageJSON()
 	wranglerConfig := g.generateWranglerConfig()
+	tsConfig := g.generateTSConfig()
 
 	files := map[string]string{
 		"schema.sql":     schemaSQL,
 		"src/index.ts":   indexTS,
 		"package.json":   packageJSON,
 		"wrangler.jsonc": wranglerConfig,
+		"tsconfig.json":  tsConfig,
 	}
 
 	return &Output{
@@ -250,7 +252,8 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		if res.Timestamps {
 			cols = append(cols, "\"created_at\"", "\"updated_at\"")
-			bindVars = append(bindVars, "now", "now")
+			bindVars = append(bindVars, "?", "?")
+			vals = append(vals, "now", "now")
 		}
 
 		sb.WriteString("\n  const now = new Date().toISOString();\n")
@@ -363,3 +366,19 @@ func (g *Generator) generateWranglerConfig() string {
 }
 `
 }
+
+func (g *Generator) generateTSConfig() string {
+	return `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*"]
+}
+`
+}
+
