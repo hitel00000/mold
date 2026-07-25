@@ -91,3 +91,34 @@ type Resource struct {
 	Relations     []Relation `yaml:"relations" json:"relations"`
 	Auth          *Auth      `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
+
+// NormalizeFields returns the complete list of fields for the resource, expanding implicit foreign key
+// fields derived from belongs_to relations while avoiding duplicate field declarations.
+func (r *Resource) NormalizeFields() []Field {
+	if r == nil {
+		return nil
+	}
+
+	res := make([]Field, 0, len(r.Fields)+len(r.Relations))
+	fieldMap := make(map[string]bool, len(r.Fields))
+
+	for _, f := range r.Fields {
+		res = append(res, f)
+		fieldMap[f.Name] = true
+	}
+
+	for _, rel := range r.Relations {
+		if rel.Kind == KindBelongsTo && rel.ForeignKey != "" {
+			if !fieldMap[rel.ForeignKey] {
+				res = append(res, Field{
+					Name:     rel.ForeignKey,
+					Type:     TypeInt,
+					Nullable: true,
+				})
+				fieldMap[rel.ForeignKey] = true
+			}
+		}
+	}
+
+	return res
+}
