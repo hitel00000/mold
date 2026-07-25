@@ -152,7 +152,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 `)
 
 	for _, res := range resources {
-		table := res.Table
+		p := plan.Build(res)
+		if p == nil {
+			continue
+		}
+
+		table := p.Table
 		endpoint := "/api/" + table
 
 		// 1. GET /api/{table} (List)
@@ -162,7 +167,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);\n")
 
 		whereClause := ""
-		if res.SoftDelete {
+		if p.SoftDelete {
 			whereClause = " WHERE \"deleted_at\" IS NULL"
 		}
 
@@ -181,7 +186,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("app.get('%s/:id', async (c) => {\n", endpoint))
 		sb.WriteString("  const id = c.req.param('id');\n")
 		softCond := ""
-		if res.SoftDelete {
+		if p.SoftDelete {
 			softCond = " AND \"deleted_at\" IS NULL"
 		}
 		sb.WriteString(fmt.Sprintf("  const record = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first();\n", table, softCond))
@@ -201,8 +206,8 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');\n")
 		sb.WriteString("  }\n\n")
 
-		// Field Loop #2 & Type Dispatch #2 (Validation)
-		for _, f := range res.Fields {
+		// Field Loop #2 & Type Dispatch #2 (Validation derived via plan.Plan)
+		for _, f := range p.Fields {
 			if f.Deprecated {
 				continue
 			}
@@ -234,8 +239,8 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		vals := []string{}
 		bindVars := []string{}
 
-		// Field Loop #3 & Type Dispatch #3 (Parameter Binding)
-		for _, f := range res.Fields {
+		// Field Loop #3 & Type Dispatch #3 (Parameter Binding derived via plan.Plan)
+		for _, f := range p.Fields {
 			if f.Deprecated {
 				continue
 			}
@@ -251,7 +256,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			}
 		}
 
-		if res.Timestamps {
+		if p.Timestamps {
 			cols = append(cols, "\"created_at\"", "\"updated_at\"")
 			bindVars = append(bindVars, "?", "?")
 			vals = append(vals, "now", "now")
@@ -276,14 +281,14 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		setClauses := []string{}
 		updateVals := []string{}
-		for _, f := range res.Fields {
+		for _, f := range p.Fields {
 			if f.Deprecated {
 				continue
 			}
 			setClauses = append(setClauses, fmt.Sprintf("\"%s\" = ?", f.Name))
 			updateVals = append(updateVals, fmt.Sprintf("body['%s'] !== undefined ? body['%s'] : null", f.Name, f.Name))
 		}
-		if res.Timestamps {
+		if p.Timestamps {
 			setClauses = append(setClauses, "\"updated_at\" = ?")
 			updateVals = append(updateVals, "now")
 		}
@@ -291,7 +296,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		sb.WriteString("  const now = new Date().toISOString();\n")
 		softCheck := ""
-		if res.SoftDelete {
+		if p.SoftDelete {
 			softCheck = " AND \"deleted_at\" IS NULL"
 		}
 		sb.WriteString(fmt.Sprintf("  const updateSql = `UPDATE \"%s\" SET %s WHERE id = ?%s RETURNING *`;\n", table, strings.Join(setClauses, ", "), softCheck))

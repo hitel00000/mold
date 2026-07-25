@@ -242,3 +242,29 @@ auth:
 		t.Errorf("TS Hono delete response missing matching { data } envelope structure")
 	}
 }
+
+// TestCloudflareGenerator_FKValidationAndBinding_PlanParity verifies that derived FK fields in plan.Plan
+// generate number validation and D1 parameter binding in TS Hono app code.
+func TestCloudflareGenerator_FKValidationAndBinding_PlanParity(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed generating code: %v", err)
+	}
+
+	// 1. Verify TS Validation for derived FK post_id in comments handler
+	if !strings.Contains(out.IndexTS, "body['post_id'] !== undefined && body['post_id'] !== null && typeof body['post_id'] !== 'number'") {
+		t.Errorf("expected TS code to contain number validation for post_id FK, got:\n%s", out.IndexTS)
+	}
+
+	// 2. Verify D1 SQL INSERT includes post_id and author_id columns
+	if !strings.Contains(out.IndexTS, `INSERT INTO "comments" ("body", "post_id", "author_id"`) {
+		t.Errorf("expected TS code to contain INSERT INTO comments with post_id and author_id, got:\n%s", out.IndexTS)
+	}
+}
