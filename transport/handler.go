@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hitel00000/mold/auth"
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 )
@@ -194,16 +195,19 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 			}
 		}
 
-		// Collect file headers for blob fields to upload after record creation
+		// Collect file headers for blob fields to upload after record creation using plan.Build(res)
 		if rt.blobStore != nil && req.MultipartForm != nil && len(req.MultipartForm.File) > 0 {
-			for _, f := range res.Fields {
-				if f.Type == resource.TypeBlob {
-					files := req.MultipartForm.File[f.Name]
-					if len(files) == 0 && f.Name != "file" {
-						files = req.MultipartForm.File["file"]
-					}
-					if len(files) > 0 {
-						pendingFiles = append(pendingFiles, pendingFile{fieldName: f.Name, header: files[0]})
+			p := plan.Build(res)
+			if p != nil {
+				for _, f := range p.Fields {
+					if f.Type == resource.TypeBlob {
+						files := req.MultipartForm.File[f.Name]
+						if len(files) == 0 && f.Name != "file" {
+							files = req.MultipartForm.File["file"]
+						}
+						if len(files) > 0 {
+							pendingFiles = append(pendingFiles, pendingFile{fieldName: f.Name, header: files[0]})
+						}
 					}
 				}
 			}
@@ -326,8 +330,15 @@ func (rt *Router) rollbackRecordCreation(w http.ResponseWriter, req *http.Reques
 	WriteError(w, http.StatusInternalServerError, "BLOB_STORE_FAILED", msg, nil)
 }
 
+// coerceFormValue converts string form values to int64, float64, or bool using plan.Build(res).
+// Target 8 Migration: Consumes target-agnostic plan.Plan and iterates plan.Fields in a single unified loop.
 func coerceFormValue(res *resource.Resource, fieldName string, valStr string) any {
-	for _, f := range res.Fields {
+	p := plan.Build(res)
+	if p == nil {
+		return valStr
+	}
+
+	for _, f := range p.Fields {
 		if f.Name == fieldName {
 			switch f.Type {
 			case resource.TypeInt:
@@ -343,14 +354,7 @@ func coerceFormValue(res *resource.Resource, fieldName string, valStr string) an
 					return b
 				}
 			}
-			break
-		}
-	}
-	for _, rel := range res.Relations {
-		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey == fieldName {
-			if i, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-				return i
-			}
+			return valStr
 		}
 	}
 	return valStr
