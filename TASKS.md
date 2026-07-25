@@ -31,7 +31,7 @@
 * **질문**: 소스 저장(`Ctrl + S`) 후 브라우저 새로고침만으로 백그라운드 리로드가 투명하게 체감되는가?
 * **채택 조건**: 개발자가 인프라 명령어를 직접 칠 필요 없이, 소스 저장 시 원자적 리로드가 안정적으로 반영될 때.
 * **기각 조건**: 수동 명령어가 더 명확하거나 워처가 비결정적 동시성 오류를 유발할 경우.
-* **최종 판정**: **[판정 불가 (Pending)]** (Phase 2 진행 후 판정 예정)
+* **최종 판정**: **[채택 (Adopted)]** (독립 `mold dev` 도구 도입으로 파일 저장 즉시 원자적 리로드 반영 성공. 200ms 폴링 + 300ms 디바운스 조합으로 IDE 저장 폭풍 및 동시성 오류 원천 차단. 상세 근거는 Task 2.1 완료 메모 참조)
 
 ### [가설 3] Feature & Plan 계층 가설
 * **질문**: DDL/API/View 전반에 걸쳐 반복되는 수직적 중복 로직이 실제로 존재하는가?
@@ -118,10 +118,20 @@
 
 ### Phase 2: 개발자 경험(DX) 관찰 및 마찰 제거
 
-- [ ] **Task 2.1: [실험] 외부 프로젝트의 `resources/*.yaml` 변경 시 백그라운드 리로드 연결**
+- [x] **Task 2.1: [실험] 외부 프로젝트의 `resources/*.yaml` 변경 시 백그라운드 리로드 연결**
   - **실험 내용**: 파일 저장(`Ctrl + S`) 시 수동 재구동 없이 투명하게 컴파일 및 리로드되도록 만든다.
   - **관찰 항목**: 파일 저장과 브라우저 반영 사이의 지연, 동시성 에러, 개발자가 느끼는 마찰을 기록한다.
   - **완료 조건**: 수동 명령어 없이 파일 저장만으로 핫컴파일 반영이 마찰 없이 완료된다.
+  - **Task 2.1 완료 메모 (구현, 트레이드오프 및 가설 2 최종 판정)**:
+    - **구현 위치 및 단위 커밋**: `cmd/mold-dev/` ([client.go](file:///D:/dev/mold/cmd/mold-dev/client.go), [watcher.go](file:///D:/dev/mold/cmd/mold-dev/watcher.go), [dev.go](file:///D:/dev/mold/cmd/mold-dev/dev.go), [main.go](file:///D:/dev/mold/cmd/mold-dev/main.go), [dev_test.go](file:///D:/dev/mold/cmd/mold-dev/dev_test.go)), 총 4개 단위 커밋 (`f111432`, `1cff450`, `e8385da`, `fcebe37`).
+    - **핵심 설계**: AGENTS.md의 확정 핵심 결정("런타임 코어는 오직 명시적 API `POST /_mold/reload`로만 reload된다")을 100% 보존. `mold dev`를 독립 실행형 전용 CLI 도구로 분리하여 HTTP 클라이언트로서 `POST /_mold/reload`를 호출함 (`git diff --stat` 코어 패키지 0줄 변경 증명 완료).
+    - **Admin 인증**: 옵션 A(부팅 시 `/login` 폼 자동 로그인)를 기본으로 수행하고, `-session-cookie`/`MOLD_SESSION_COOKIE` 지정 시 옵션 B(세션 쿠키 직접 주입)로 오버라이드하는 하이브리드(Option C)로 구현.
+    - **워처 구현 트레이드오프 (정직한 실측 기록)**:
+      - *폴링 방식 채택*: OS 이벤트 기반(`fsnotify` 등) 대신 200ms 간격 디렉터리 폴링 방식(`ResourceWatcher`)을 선택. 이로 인해 최악의 경우 200ms의 감지 지연이 존재하지만, 의존성 0건 유지 및 Windows OS 환경의 저장 시 파일 잠금(file lock) 이슈를 원천 차단함.
+      - *300ms 디바운스(Debounce)*: IDE(VSCode 등)가 파일 저장 시 임시 파일 생성/덮어쓰기로 멀티 이벤트를 발행하는 문제에 대응하여 300ms(테스트 100ms) 디바운싱을 적용. 연쇄 저장 이벤트를 단 1회의 원자적 HTTP reload 호출로 배치 처리함.
+    - **테스트 결과**: 정상 파일 생성/수정 시 자동으로 API/HTML View가 reloaded되는 E2E 테스트 및 문법 오류 YAML 수정 시에도 기존 IR 스냅샷이 안전하게 유지되는 격리 검증 테스트 2종 수립 완료 (`go test ./...` 전 스위트 100% 통과).
+    - **가설 2 (Invisible Infrastructure DX) 최종 판정**: **[채택 (Adopted)]**
+      - *판정 근거*: 개발자가 인프라 재시작 명령어를 칠 필요 없이 소스 저장만으로 핫컴파일 및 원자적 reload가 안정 반영됨. 200ms 폴링 + 300ms 디바운스로 인한 전체 지연(~500ms)은 인간이 체감하는 DX 경계 이내이며, atomic pointer swap 구조 덕분에 핫컴파일 과정에서 비결정적 동시성 에러 발생 건수 0건 실측됨.
 
 ### Phase 3: 관찰된 패턴 기반으로 구조 판정 및 정리
 
