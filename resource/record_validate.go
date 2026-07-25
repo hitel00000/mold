@@ -8,7 +8,8 @@ import (
 )
 
 // ValidateRecord verifies that input record data satisfies type safety and all constraints defined in the Resource IR.
-// Primary key 'id' is strictly rejected in both Create and Update payloads to prevent PK mutation.
+// Target 9 Migration: Unifies field type validation for explicit and derived FK fields while maintaining strict execution order:
+// 1. System column rejection -> 2. Field Type Validation FIRST -> 3. Constraint Validation SECOND.
 func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	if r == nil {
 		return fmt.Errorf("resource is nil")
@@ -17,8 +18,8 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		record = make(map[string]any)
 	}
 
-	// 1. Build sets of valid, system, and deprecated fields based on IR flags
-	validFields := make(map[string]bool)
+	// 1. Build sets of valid, system, and deprecated fields
+	validFields := make(map[string]Field)
 	systemFields := make(map[string]bool)
 	deprecatedFields := make(map[string]bool)
 
@@ -26,12 +27,20 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		if f.Deprecated {
 			deprecatedFields[f.Name] = true
 		} else {
-			validFields[f.Name] = true
+			validFields[f.Name] = f
 		}
 	}
+
+	// Foreign key derived fields from belongs_to relations
 	for _, rel := range r.Relations {
 		if rel.Kind == KindBelongsTo && rel.ForeignKey != "" {
-			validFields[rel.ForeignKey] = true
+			if _, exists := validFields[rel.ForeignKey]; !exists {
+				validFields[rel.ForeignKey] = Field{
+					Name:     rel.ForeignKey,
+					Type:     TypeInt,
+					Nullable: true,
+				}
+			}
 		}
 	}
 
@@ -58,18 +67,14 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		if deprecatedFields[k] {
 			return fmt.Errorf("resource '%s': field '%s' is deprecated and cannot be written", r.Name, k)
 		}
-		if !validFields[k] {
+		if _, isValid := validFields[k]; !isValid {
 			return fmt.Errorf("resource '%s': unknown field '%s'", r.Name, k)
 		}
 	}
 
-	// 3. Field level checks for fields in Resource IR
-	for _, f := range r.Fields {
-		if f.Deprecated {
-			continue
-		}
-
-		val, exists := record[f.Name]
+	// 3. Field level checks for all valid fields (explicit + derived FK fields)
+	for name, f := range validFields {
+		val, exists := record[name]
 
 		// Required check for non-nullable fields without default values (only during Create)
 		if !isUpdate && !f.Nullable && f.Default == nil {
@@ -85,12 +90,12 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 			continue
 		}
 
-		// Field Type Validation
+		// Field Type Validation FIRST
 		if err := validateFieldType(r.Name, f, val); err != nil {
 			return err
 		}
 
-		// Constraints Validation
+		// Constraints Validation SECOND
 		if err := validateFieldConstraints(r.Name, f, val); err != nil {
 			return err
 		}
