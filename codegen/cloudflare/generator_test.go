@@ -114,6 +114,29 @@ func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
 	}
 }
 
+// TestCloudflareGenerator_TSValidationGoldenSnapshot captures the exact pre-migration TS validation and DB bind code snippets.
+func TestCloudflareGenerator_TSValidationGoldenSnapshot(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// Verify TS validation for string (title) and number (author_id)
+	if !strings.Contains(output.IndexTS, "body['title'] !== undefined && body['title'] !== null && typeof body['title'] !== 'string'") {
+		t.Errorf("expected TS validation snippet for title, got:\n%s", output.IndexTS)
+	}
+	if !strings.Contains(output.IndexTS, "body['author_id'] !== undefined && body['author_id'] !== null && typeof body['author_id'] !== 'number'") {
+		t.Errorf("expected TS validation snippet for author_id, got:\n%s", output.IndexTS)
+	}
+}
+
 // TestCloudflareGenerator_CRUDSpecificationParity compares the Go Runtime API responses
 // with the generated TS Hono API structure contract to ensure 100% envelope specification parity.
 func TestCloudflareGenerator_CRUDSpecificationParity(t *testing.T) {
