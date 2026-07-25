@@ -8,7 +8,8 @@ import (
 )
 
 // ValidateRecord verifies that input record data satisfies type safety and all constraints defined in the Resource IR.
-// Target 9 Migration: Unifies field type validation for explicit and derived FK fields while maintaining strict execution order:
+// Note: Due to Go package import cycle constraints (resource <-> plan), this function does not import plan package directly.
+// Instead, derived FK field normalization is executed independently within resource package while maintaining strict execution order:
 // 1. System column rejection -> 2. Field Type Validation FIRST -> 3. Constraint Validation SECOND.
 func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	if r == nil {
