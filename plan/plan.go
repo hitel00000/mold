@@ -67,10 +67,13 @@ func Build(res *resource.Resource) *Plan {
 		})
 	}
 
-	existingNames := make(map[string]bool)
-
-	// 1. Process explicit fields
+	explicitNames := make(map[string]bool, len(res.Fields))
 	for _, f := range res.Fields {
+		explicitNames[f.Name] = true
+	}
+
+	// Single unified iteration over res.NormalizeFields() (explicit + derived FK fields)
+	for _, f := range res.NormalizeFields() {
 		fp := FieldPlan{
 			Name:            f.Name,
 			Type:            f.Type,
@@ -80,26 +83,9 @@ func Build(res *resource.Resource) *Plan {
 			Deprecated:      f.Deprecated,
 			DeprecatedSince: f.DeprecatedSince,
 			IsSystemColumn:  false,
-			IsDerivedFK:     false,
+			IsDerivedFK:     !explicitNames[f.Name],
 		}
 		p.Fields = append(p.Fields, fp)
-		existingNames[f.Name] = true
-	}
-
-	// 2. Process belongs_to relations to derive FK fields if not already explicitly defined
-	for _, rel := range res.Relations {
-		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
-			if !existingNames[rel.ForeignKey] {
-				fp := FieldPlan{
-					Name:        rel.ForeignKey,
-					Type:        resource.TypeInt, // Default foreign key primitive type
-					Nullable:    true,             // Preserves 100% exact pre-migration DDL behavior (no NOT NULL)
-					IsDerivedFK: true,
-				}
-				p.Fields = append(p.Fields, fp)
-				existingNames[rel.ForeignKey] = true
-			}
-		}
 	}
 
 	return p
