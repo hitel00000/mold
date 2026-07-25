@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/hitel00000/mold/auth"
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/storage"
 	"github.com/hitel00000/mold/transport"
@@ -519,13 +520,19 @@ func buildNavItems(reg *transport.Registry, currentTable string) []NavItem {
 }
 
 func parseFormPayload(req *http.Request, res *resource.Resource) map[string]any {
+	p := plan.Build(res)
+	if p == nil {
+		return make(map[string]any)
+	}
+
 	payload := make(map[string]any)
 
-	// Fields
-	for _, f := range res.Fields {
+	// Single unified loop over plan.Fields (explicit + derived FK fields)
+	for _, f := range p.Fields {
 		if f.Deprecated {
 			continue
 		}
+
 		valStr := req.FormValue(f.Name)
 		if valStr == "" && f.Nullable {
 			continue
@@ -544,18 +551,6 @@ func parseFormPayload(req *http.Request, res *resource.Resource) map[string]any 
 			payload[f.Name] = req.FormValue(f.Name) == "true"
 		default:
 			payload[f.Name] = valStr
-		}
-	}
-
-	// Relations (belongs_to foreign keys)
-	for _, rel := range res.Relations {
-		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
-			valStr := req.FormValue(rel.ForeignKey)
-			if valStr != "" {
-				if v, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-					payload[rel.ForeignKey] = v
-				}
-			}
 		}
 	}
 

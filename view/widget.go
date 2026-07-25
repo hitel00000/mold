@@ -3,6 +3,7 @@ package view
 import (
 	"fmt"
 
+	"github.com/hitel00000/mold/plan"
 	"github.com/hitel00000/mold/resource"
 )
 
@@ -31,11 +32,11 @@ type FieldWidget struct {
 	Description string
 }
 
-// BuildFormFields constructs the list of form input widgets for Create and Edit forms.
-// It iterates over both res.Fields (excluding deprecated fields) and res.Relations (belongs_to foreign keys).
-// System columns (id, created_at, updated_at, deleted_at) are excluded from form fields.
+// BuildFormFields constructs the list of form input widgets for Create and Edit forms using plan.Build(res).
+// Target 5 Migration: Eliminates Fields + Relations double iteration by iterating plan.Fields in a single unified loop.
 func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpdate bool) []FieldWidget {
-	if res == nil {
+	p := plan.Build(res)
+	if p == nil {
 		return nil
 	}
 
@@ -43,15 +44,41 @@ func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpd
 		currentValues = make(map[string]any)
 	}
 
+	// Lookup map for belongs_to relation targets by foreign key name
+	relTargetMap := make(map[string]string)
+	for _, rel := range p.Relations {
+		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
+			relTargetMap[rel.ForeignKey] = rel.Target
+		}
+	}
+
 	var widgets []FieldWidget
 
-	// 1. Process regular IR fields
-	for _, f := range res.Fields {
+	// Single unified loop over plan.Fields (explicit + derived FK fields)
+	for _, f := range p.Fields {
 		if f.Deprecated {
 			continue
 		}
 
 		val := currentValues[f.Name]
+
+		// Check if field is a belongs_to foreign key
+		if target, isFK := relTargetMap[f.Name]; isFK || f.IsDerivedFK {
+			if target == "" {
+				target = "Resource"
+			}
+			w := FieldWidget{
+				Name:        f.Name,
+				Label:       fmt.Sprintf("%s (%s ID)", f.Name, target),
+				Type:        "number",
+				Kind:        WidgetInput,
+				Value:       val,
+				Required:    !isUpdate,
+				Description: fmt.Sprintf("Foreign key referencing %s", target),
+			}
+			widgets = append(widgets, w)
+			continue
+		}
 
 		w := FieldWidget{
 			Name:      f.Name,
@@ -65,6 +92,7 @@ func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpd
 			Pattern:   f.Constraints.Pattern,
 		}
 
+		// Widget selection owned by view package
 		switch f.Type {
 		case resource.TypeString:
 			w.Kind = WidgetInput
@@ -102,23 +130,6 @@ func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpd
 		}
 
 		widgets = append(widgets, w)
-	}
-
-	// 2. Process belongs_to Foreign Keys (e.g. post_id)
-	for _, rel := range res.Relations {
-		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
-			val := currentValues[rel.ForeignKey]
-			w := FieldWidget{
-				Name:        rel.ForeignKey,
-				Label:       fmt.Sprintf("%s (%s ID)", rel.ForeignKey, rel.Target),
-				Type:        "number",
-				Kind:        WidgetInput,
-				Value:       val,
-				Required:    !isUpdate,
-				Description: fmt.Sprintf("Foreign key referencing %s", rel.Target),
-			}
-			widgets = append(widgets, w)
-		}
 	}
 
 	return widgets

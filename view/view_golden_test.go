@@ -24,15 +24,26 @@ func TestView_WidgetGoldenSnapshot(t *testing.T) {
 
 	commentRes, _ := reg.Get("Comment")
 
-	// 1. Capture BuildFormFields output for Comment resource on pre-migration code
-	// Pre-migration BuildFormFields duplicated FK fields if listed in both fields: and relations: (5 widgets total)
+	// 1. Verify BuildFormFields output for Comment resource using plan.Plan
+	// Post-migration BuildFormFields eliminates Fields + Relations double iteration (3 widgets total: body, post_id, author_id)
 	widgets := view.BuildFormFields(commentRes, nil, false)
-	if len(widgets) != 5 {
-		t.Fatalf("expected 5 pre-migration widgets for Comment (body, post_id, author_id, post_id, author_id), got %d", len(widgets))
+	if len(widgets) != 3 {
+		t.Fatalf("expected 3 post-migration widgets for Comment (body, post_id, author_id), got %d", len(widgets))
 	}
 
+	// Widget 0: body (textarea)
 	if widgets[0].Name != "body" || widgets[0].Kind != view.WidgetTextarea {
 		t.Errorf("unexpected widget 0: %+v", widgets[0])
+	}
+
+	// Widget 1: post_id (number input with relation label)
+	if widgets[1].Name != "post_id" || widgets[1].Type != "number" || widgets[1].Kind != view.WidgetInput || widgets[1].Label != "post_id (Post ID)" {
+		t.Errorf("unexpected widget 1 (post_id FK): %+v", widgets[1])
+	}
+
+	// Widget 2: author_id (number input with relation label)
+	if widgets[2].Name != "author_id" || widgets[2].Type != "number" || widgets[2].Kind != view.WidgetInput || widgets[2].Label != "author_id (User ID)" {
+		t.Errorf("unexpected widget 2 (author_id FK): %+v", widgets[2])
 	}
 }
 
