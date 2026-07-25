@@ -54,8 +54,8 @@ func TestPlan_BuildExplicitAndDerivedFK(t *testing.T) {
 		t.Errorf("expected explicit body field, got %+v", p.Fields[0])
 	}
 
-	if p.Fields[1].Name != "post_id" || !p.Fields[1].IsDerivedFK || p.Fields[1].Type != resource.TypeInt {
-		t.Errorf("expected derived post_id FK field, got %+v", p.Fields[1])
+	if p.Fields[1].Name != "post_id" || !p.Fields[1].IsDerivedFK || p.Fields[1].Type != resource.TypeInt || !p.Fields[1].Nullable {
+		t.Errorf("expected derived post_id FK field with Nullable: true, got %+v", p.Fields[1])
 	}
 }
 

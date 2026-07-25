@@ -93,7 +93,7 @@ func Build(res *resource.Resource) *Plan {
 				fp := FieldPlan{
 					Name:        rel.ForeignKey,
 					Type:        resource.TypeInt, // Default foreign key primitive type
-					Nullable:    false,
+					Nullable:    true,             // Preserves 100% exact pre-migration DDL behavior (no NOT NULL)
 					IsDerivedFK: true,
 				}
 				p.Fields = append(p.Fields, fp)
