@@ -3,6 +3,7 @@ package transport_test
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -304,5 +305,81 @@ func TestTransport_PaginationTotalCount(t *testing.T) {
 
 	if listResp.Meta.Limit != 10 {
 		t.Errorf("expected meta.limit to be 10, got %d", listResp.Meta.Limit)
+	}
+}
+
+// TestTransport_MultipartFormGoldenSnapshot captures pre-migration multipart form coercion behavior for derived FKs.
+func TestTransport_MultipartFormGoldenSnapshot(t *testing.T) {
+	mpRes := &resource.Resource{
+		Name:  "Comment",
+		Table: "comments",
+		Fields: []resource.Field{
+			{Name: "body", Type: resource.TypeString, Nullable: false},
+		},
+		Relations: []resource.Relation{
+			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id"},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "public",
+				Read:   "public",
+			},
+		},
+	}
+	postRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "public",
+				Read:   "public",
+			},
+		},
+	}
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "mp_test.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed opening store: %v", err)
+	}
+	defer store.Close()
+
+	_ = store.EnsureSchema(t.Context(), mpRes)
+	_ = store.EnsureSchema(t.Context(), postRes)
+
+	trReg := transport.NewRegistry()
+	trReg.Register(mpRes, store)
+	trReg.Register(postRes, store)
+
+	router := transport.NewRouter(trReg)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Create post first
+	_, _ = store.Create(t.Context(), postRes, map[string]any{"title": "P1"})
+
+	// Send multipart/form-data request for Comment
+	var buf bytes.Buffer
+	bodyWriter := multipart.NewWriter(&buf)
+	_ = bodyWriter.WriteField("body", "Great post!")
+	_ = bodyWriter.WriteField("post_id", "1")
+	_ = bodyWriter.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/api/comments", &buf)
+	req.Header.Set("Content-Type", bodyWriter.FormDataContentType())
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/comments multipart failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created for multipart comment creation, got %d", resp.StatusCode)
 	}
 }
