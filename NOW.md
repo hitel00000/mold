@@ -20,10 +20,10 @@
 
 ---
 
-## 현재 상태 (2026-07-25 기준)
+## 현재 상태 (2026-07-26 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 완결 (`runtime/` 신설, 조립부 6줄 축소), Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, 및 **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**  
-👉 **Post-MVP: 다음 세션 진행할 작업 선택 준비 (runtime 잔여 마찰 완화 vs Cloudflare Auth/View/Blob 확장 vs 문서 스펙 구조 반영)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, 및 **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**  
+👉 **Post-MVP: 다음 세션 진행할 작업 선택 준비 (Cloudflare Auth/View/Blob 확장 vs 문서 스펙 구조 반영)**
 
 ---
 
@@ -40,12 +40,10 @@
 
 *다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. 👉 **후보 (a) `runtime` 패키지 잔여 표면 마찰 완화 (★ 잠정 권장안)**:
-   - **사유**: `runtime` 패키지 도입으로 조립 코드는 6줄로 줄었으나, 초기 admin 계정 시딩 시 `resource.LoadAll` 및 `auth`/`storage` 서브패키지 직접 호출 마찰이 `runtime` 경계 외부에 남아있음.
-   - **내용**: admin 시딩 헬퍼(예: `app.SeedAdmin(email, pass)`)나 Config 옵션을 `runtime` 패키지에 제공하여 외부 서브패키지 직접 참조를 캡슐화.
-2. **후보 (b) Cloudflare Workers TS Codegen 기능 확장 (Auth / View / Blob)**:
+1. [x] ~~**후보 (a) `runtime` 패키지 잔여 표면 마찰 완화**~~ (완료: `runtime.App.CreateRecord` 도입으로 e2e 테스트 내 `resource`/`storage` 직접 임포트 0줄 달성)
+2. 👉 **후보 (b) Cloudflare Workers TS Codegen 기능 확장 (Auth / View / Blob)**:
    - **사유**: Task 4.1에서는 스코프 단축을 위해 단순 CRUD만 포함했으나, 사케 앱 배포 환경처럼 실서비스 적용을 위해서는 Auth/Permission, HTML View, 또는 Blob R2 필드 생성기로 확장이 필요함.
-3. **후보 (c) 문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**:
+3. 👉 **후보 (c) 문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**:
    - **사유**: Plan 계층(`plan/plan.go`) 도입 및 `resource.NormalizeFields()`의 Layer 0 유틸 승격으로 IR 필드 파생과 실행 플랜 생성 아키텍처가 발전했으나, 기존 문서 스펙에 해당 3단계 계층 구조 및 파생 필드 처리 방식 설명이 업데이트되어 있지 않음.
    - **내용**: `docs/ir-spec.md` 및 `docs/resource-guide.md`에 Plan 계층 파이프라인 및 `NormalizeFields()`의 구조적 역할 설명을 갱신하여 문서와 코드 간 드리프트 차단.
 
