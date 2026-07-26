@@ -5,13 +5,35 @@
 *.dylib
 *.zip
 *.tar.gz
+*.test
+*.out
+coverage.txt
+coverage.html
 
-# Database and log files
+# Database, storage and log files
 *.db
 *.sqlite
 *.sqlite3
 *.log
 
-# Antigravity & OS files
+# Cloudflare & Wrangler artifacts
+.wrangler/
+.dev.vars
+.mf/
+
+# Scratch & Temporary directories
+scratch/
+.gemini/
+
+# Node & JavaScript dependencies / builds
+node_modules/
+dist/
+
+# IDE, Antigravity & OS files
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
