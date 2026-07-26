@@ -26,6 +26,7 @@ type App struct {
 	mu          sync.RWMutex
 	router      *transport.Router
 	viewHandler *view.ViewHandler
+	resReg      *resource.Registry
 }
 
 // New initializes and bootstraps a new App instance using the given Config.
@@ -103,6 +104,7 @@ func (a *App) buildAndAttach(ctx context.Context) error {
 	a.mu.Lock()
 	a.router = router
 	a.viewHandler = vh
+	a.resReg = resReg
 	a.mu.Unlock()
 
 	return nil
@@ -138,9 +140,53 @@ func (a *App) reload() (*transport.Registry, error) {
 	a.mu.Lock()
 	a.router = newRouter
 	a.viewHandler = newVh
+	a.resReg = newResReg
 	a.mu.Unlock()
 
 	return newTransReg, nil
+}
+
+// CreateRecord creates a new record for the specified resource table or resource name.
+// It retrieves the registered Resource IR from the internal Registry and delegates
+// record creation to the underlying Store.
+// Note: This method checks schema/resource existence (not record data validation).
+// Record validation is delegated downstream to storage.Store.Create / resource.ValidateRecord.
+func (a *App) CreateRecord(ctx context.Context, table string, record map[string]any) (map[string]any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	a.mu.RLock()
+	resReg := a.resReg
+	a.mu.RUnlock()
+
+	if resReg == nil {
+		return nil, fmt.Errorf("runtime: application resource registry is not initialized")
+	}
+
+	// Schema existence check: verify if resource definition exists in Registry
+	res, ok := resReg.Get(table)
+	if !ok {
+		// Fallback: check by table name or resource name (case-insensitive)
+		for _, r := range resReg.List() {
+			if r != nil && (strings.EqualFold(r.Table, table) || strings.EqualFold(r.Name, table)) {
+				res = r
+				ok = true
+				break
+			}
+		}
+	}
+
+	if !ok || res == nil {
+		return nil, fmt.Errorf("runtime: resource definition for table/resource %q not found", table)
+	}
+
+	created, err := a.store.Create(ctx, res, record)
+	if err != nil {
+		return nil, err
+	}
+
+	return created, nil
 }
 
 // ServeHTTP implements http.Handler for App, dispatching requests to API router or HTML view handler.
