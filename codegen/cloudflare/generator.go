@@ -378,11 +378,24 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("  }\n")
 		}
 
-		sb.WriteString("  let body: any;\n")
-		sb.WriteString("  try {\n")
-		sb.WriteString("    body = await c.req.json();\n")
-		sb.WriteString("  } catch (e) {\n")
-		sb.WriteString("    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');\n")
+		sb.WriteString("  let body: any = {};\n")
+		sb.WriteString("  let formData: FormData | null = null;\n")
+		sb.WriteString("  const contentType = c.req.header('Content-Type') || '';\n")
+		sb.WriteString("  if (contentType.includes('multipart/form-data')) {\n")
+		sb.WriteString("    try {\n")
+		sb.WriteString("      formData = await c.req.formData();\n")
+		sb.WriteString("      formData.forEach((val, key) => {\n")
+		sb.WriteString("        if (typeof val === 'string') { body[key] = val; }\n")
+		sb.WriteString("      });\n")
+		sb.WriteString("    } catch (e) {\n")
+		sb.WriteString("      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');\n")
+		sb.WriteString("    }\n")
+		sb.WriteString("  } else {\n")
+		sb.WriteString("    try {\n")
+		sb.WriteString("      body = await c.req.json();\n")
+		sb.WriteString("    } catch (e) {\n")
+		sb.WriteString("      return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');\n")
+		sb.WriteString("    }\n")
 		sb.WriteString("  }\n\n")
 
 		sb.WriteString("  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {\n")
@@ -401,7 +414,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				continue
 			}
 
-			if !f.Nullable && f.Default == nil {
+			if !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob {
 				sb.WriteString(fmt.Sprintf("  if (body['%s'] === undefined || body['%s'] === null) {\n", f.Name, f.Name))
 				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s is required');\n", f.Name))
 				sb.WriteString("  }\n")
@@ -460,7 +473,45 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		sb.WriteString("\n  const now = new Date().toISOString();\n")
 		sb.WriteString(fmt.Sprintf("  const insertSql = `INSERT INTO \"%s\" (%s) VALUES (%s) RETURNING *`;\n", table, strings.Join(cols, ", "), strings.Join(bindVars, ", ")))
-		sb.WriteString(fmt.Sprintf("  const created = await c.env.DB.prepare(insertSql).bind(%s).first();\n", strings.Join(vals, ", ")))
+		sb.WriteString(fmt.Sprintf("  const created = await c.env.DB.prepare(insertSql).bind(%s).first<any>();\n", strings.Join(vals, ", ")))
+
+		// 1-Step Blob upload and atomic rollback
+		hasBlob := false
+		for _, f := range p.Fields {
+			if f.Type == resource.TypeBlob && !f.Deprecated {
+				hasBlob = true
+				break
+			}
+		}
+
+		if hasBlob {
+			sb.WriteString("  if (created && formData) {\n")
+			for _, f := range p.Fields {
+				if f.Type == resource.TypeBlob && !f.Deprecated {
+					blobField := f.Name
+					sb.WriteString(fmt.Sprintf("    const file_%s = formData.get('%s');\n", blobField, blobField))
+					sb.WriteString(fmt.Sprintf("    if (file_%s && typeof file_%s === 'object' && 'arrayBuffer' in file_%s) {\n", blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("      const blobFile = file_%s as File;\n", blobField))
+					sb.WriteString("      const ext = blobFile.name ? blobFile.name.substring(blobFile.name.lastIndexOf('.')) : '';\n")
+					sb.WriteString(fmt.Sprintf("      const key = `blobs/%s/${created.id}/%s_${Date.now()}${ext}`;\n", table, blobField))
+					sb.WriteString("      try {\n")
+					sb.WriteString("        await c.env.BUCKET.put(key, blobFile.stream(), { httpMetadata: { contentType: blobFile.type } });\n")
+					sb.WriteString(fmt.Sprintf("        await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = ? WHERE id = ?').bind(key, created.id).run();\n", table, blobField))
+					sb.WriteString(fmt.Sprintf("        created['%s'] = key;\n", blobField))
+					sb.WriteString("      } catch (err) {\n")
+					sb.WriteString("        try {\n")
+					sb.WriteString(fmt.Sprintf("          await c.env.DB.prepare('DELETE FROM \"%s\" WHERE id = ?').bind(created.id).run();\n", table))
+					sb.WriteString("          return writeError(c, 500, 'BLOB_STORE_FAILED', 'failed uploading blob; record creation rolled back');\n")
+					sb.WriteString("        } catch (rollbackErr) {\n")
+					sb.WriteString("          return writeError(c, 500, 'BLOB_STORE_FAILED_RECORD_PRESERVED', 'failed uploading blob and failed rolling back record');\n")
+					sb.WriteString("        }\n")
+					sb.WriteString("      }\n")
+					sb.WriteString("    }\n")
+				}
+			}
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(created, %s) }, 201);\n", pwdFieldsJS))
 		sb.WriteString("});\n")
 

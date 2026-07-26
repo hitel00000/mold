@@ -520,4 +520,12 @@ fields:
 	if !strings.Contains(out.IndexTS, "app.delete('/api/documents/:id/blob/file_key', async (c) => {") {
 		t.Errorf("expected IndexTS to contain delete endpoint, got:\n%s", out.IndexTS)
 	}
+
+	// 6. Verify 1-Step multipart create and atomic rollback in POST /api/documents
+	if !strings.Contains(out.IndexTS, "contentType.includes('multipart/form-data')") {
+		t.Errorf("expected IndexTS to parse multipart/form-data in POST /api/documents, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "BLOB_STORE_FAILED_RECORD_PRESERVED") {
+		t.Errorf("expected IndexTS to contain atomic rollback error envelope for failed blob upload, got:\n%s", out.IndexTS)
+	}
 }
