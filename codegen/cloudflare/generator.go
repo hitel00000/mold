@@ -124,6 +124,15 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 		sb.WriteString("\n);\n\n")
 	}
 
+	sb.WriteString(`CREATE TABLE IF NOT EXISTS "_mold_sessions" (
+    "id" TEXT PRIMARY KEY,
+    "user_id" INTEGER NOT NULL,
+    "created_at" TEXT NOT NULL,
+    "expires_at" TEXT NOT NULL
+);
+
+`)
+
 	return sb.String()
 }
 
@@ -146,6 +155,23 @@ const app = new Hono<{ Bindings: Bindings }>();
 // Helper for error envelope
 function writeError(c: any, status: number, code: string, message: string) {
   return c.json({ error: { code, message } }, status);
+}
+
+async function hashPassword(plain: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain + ':mold_salt_v1');
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return '$sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function sanitizeRecord(record: any, passwordFields: string[]) {
+  if (!record) return record;
+  const copy = { ...record };
+  for (const pf of passwordFields) {
+    delete copy[pf];
+  }
+  return copy;
 }
 
 interface AuthUser {
@@ -217,6 +243,21 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			}
 		}
 
+		var pwdFields []string
+		for _, f := range p.Fields {
+			if f.Type == resource.TypePassword {
+				pwdFields = append(pwdFields, f.Name)
+			}
+		}
+		pwdFieldsJS := "[]"
+		if len(pwdFields) > 0 {
+			quoted := make([]string, len(pwdFields))
+			for i, name := range pwdFields {
+				quoted[i] = fmt.Sprintf("'%s'", name)
+			}
+			pwdFieldsJS = "[" + strings.Join(quoted, ", ") + "]"
+		}
+
 		// 1. GET /api/{table} (List)
 		sb.WriteString(fmt.Sprintf("\n// LIST /api/%s\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('%s', async (c) => {\n", endpoint))
@@ -245,8 +286,9 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  const total = countStmt ? countStmt.total : 0;\n")
 		sb.WriteString(fmt.Sprintf("  const query = 'SELECT * FROM \"%s\"%s ORDER BY id ASC LIMIT ? OFFSET ?';\n", table, whereClause))
 		sb.WriteString("  const { results } = await c.env.DB.prepare(query).bind(limit, offset).all();\n")
+		sb.WriteString(fmt.Sprintf("  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, %s));\n", pwdFieldsJS))
 		sb.WriteString("  return c.json({\n")
-		sb.WriteString("    data: results || [],\n")
+		sb.WriteString("    data: sanitized,\n")
 		sb.WriteString("    meta: { total, limit, offset }\n")
 		sb.WriteString("  });\n")
 		sb.WriteString("});\n")
@@ -282,7 +324,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("  }\n")
 		}
 
-		sb.WriteString("  return c.json({ data: record });\n")
+		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(record, %s) });\n", pwdFieldsJS))
 		sb.WriteString("});\n")
 
 		// 3. POST /api/{table} (Create)
@@ -332,7 +374,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 			// Type Dispatch #2: IR PrimitiveType -> TS type validation
 			switch f.Type {
-			case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL:
+			case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword:
 				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && typeof body['%s'] !== 'string') {\n", f.Name, f.Name, f.Name))
 				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s must be a string');\n", f.Name))
 				sb.WriteString("  }\n")
@@ -343,6 +385,13 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			case resource.TypeBool:
 				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && typeof body['%s'] !== 'boolean') {\n", f.Name, f.Name, f.Name))
 				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s must be a boolean');\n", f.Name))
+				sb.WriteString("  }\n")
+			}
+
+			// Password hashing on create
+			if f.Type == resource.TypePassword {
+				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && body['%s'] !== '') {\n", f.Name, f.Name, f.Name))
+				sb.WriteString(fmt.Sprintf("    body['%s'] = await hashPassword(String(body['%s']));\n", f.Name, f.Name))
 				sb.WriteString("  }\n")
 			}
 		}
@@ -377,7 +426,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("\n  const now = new Date().toISOString();\n")
 		sb.WriteString(fmt.Sprintf("  const insertSql = `INSERT INTO \"%s\" (%s) VALUES (%s) RETURNING *`;\n", table, strings.Join(cols, ", "), strings.Join(bindVars, ", ")))
 		sb.WriteString(fmt.Sprintf("  const created = await c.env.DB.prepare(insertSql).bind(%s).first();\n", strings.Join(vals, ", ")))
-		sb.WriteString("  return c.json({ data: created }, 201);\n")
+		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(created, %s) }, 201);\n", pwdFieldsJS))
 		sb.WriteString("});\n")
 
 		// 4. PUT /api/{table}/:id (Update)
@@ -422,6 +471,17 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');\n")
 		sb.WriteString("  }\n")
 
+		// Password hashing on update
+		for _, f := range p.Fields {
+			if f.Type == resource.TypePassword {
+				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && body['%s'] !== '') {\n", f.Name, f.Name, f.Name))
+				sb.WriteString(fmt.Sprintf("    body['%s'] = await hashPassword(String(body['%s']));\n", f.Name, f.Name))
+				sb.WriteString("  } else {\n")
+				sb.WriteString(fmt.Sprintf("    body['%s'] = (existing as any)['%s'];\n", f.Name, f.Name))
+				sb.WriteString("  }\n")
+			}
+		}
+
 		setClauses := []string{}
 		updateVals := []string{}
 		for _, f := range p.Fields {
@@ -443,7 +503,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  if (!updated) {\n")
 		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 		sb.WriteString("  }\n")
-		sb.WriteString("  return c.json({ data: updated });\n")
+		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(updated, %s) });\n", pwdFieldsJS))
 		sb.WriteString("});\n")
 
 		// 5. DELETE /api/{table}/:id (Delete)
@@ -493,7 +553,63 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("});\n")
 	}
 
-	sb.WriteString("\nexport default app;\n")
+	sb.WriteString(`
+// LOGIN
+app.post('/login', async (c) => {
+  let username = '';
+  let password = '';
+  const contentType = c.req.header('Content-Type') || '';
+  if (contentType.includes('application/json')) {
+    const body = await c.req.json().catch(() => ({}));
+    username = body.username || body.email || '';
+    password = body.password || '';
+  } else {
+    const formData = await c.req.formData().catch(() => new FormData());
+    username = (formData.get('username') || formData.get('email') || '').toString();
+    password = (formData.get('password') || '').toString();
+  }
+
+  if (!username || !password) {
+    return writeError(c, 400, 'VALIDATION_FAILED', 'username and password are required');
+  }
+
+  const hashed = await hashPassword(password);
+  let user: any = null;
+  try {
+    user = await c.env.DB.prepare('SELECT * FROM "users" WHERE email = ? AND password = ? AND ("deleted_at" IS NULL OR "deleted_at" = "")').bind(username, hashed).first<any>();
+  } catch (e) {}
+
+  if (!user) {
+    return writeError(c, 401, 'INVALID_CREDENTIALS', 'invalid email or password');
+  }
+
+  const sessionId = crypto.randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  try {
+    await c.env.DB.prepare('INSERT INTO "_mold_sessions" (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(sessionId, user.id, now.toISOString(), expiresAt).run();
+  } catch (e) {}
+
+  c.header('Set-Cookie', 'mold_session=' + sessionId + '; Path=/; HttpOnly; SameSite=Lax');
+  return c.json({ data: { user: sanitizeRecord(user, ['password']), session_id: sessionId } });
+});
+
+// LOGOUT
+app.post('/logout', async (c) => {
+  const cookieHeader = c.req.header('Cookie') || '';
+  const match = cookieHeader.match(/mold_session=([^;]+)/);
+  if (match) {
+    const token = match[1];
+    try {
+      await c.env.DB.prepare('DELETE FROM "_mold_sessions" WHERE id = ?').bind(token).run();
+    } catch (e) {}
+  }
+  c.header('Set-Cookie', 'mold_session=; Path=/; HttpOnly; Max-Age=0');
+  return c.json({ data: { logged_out: true } });
+});
+
+export default app;
+`)
 	return sb.String()
 }
 

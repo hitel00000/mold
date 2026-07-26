@@ -232,10 +232,10 @@ auth:
 	}
 
 	// Verify TS code has envelope structure parity:
-	if !strings.Contains(out.IndexTS, `data: results || []`) || !strings.Contains(out.IndexTS, `meta: { total, limit, offset }`) {
+	if !strings.Contains(out.IndexTS, `data: sanitized`) || !strings.Contains(out.IndexTS, `meta: { total, limit, offset }`) {
 		t.Errorf("TS Hono list response missing matching { data, meta } envelope structure")
 	}
-	if !strings.Contains(out.IndexTS, `data: created`) {
+	if !strings.Contains(out.IndexTS, `data: sanitizeRecord(created,`) {
 		t.Errorf("TS Hono create response missing matching { data } envelope structure")
 	}
 	if !strings.Contains(out.IndexTS, `data: { deleted: true, id: parsedId }`) {
@@ -349,5 +349,69 @@ auth:
 	// 4. Verify 404 check before 403 ownership check in update
 	if !strings.Contains(out.IndexTS, "writeError(c, 404, 'NOT_FOUND', 'record not found')") {
 		t.Errorf("expected IndexTS to contain 404 NOT_FOUND check, got:\n%s", out.IndexTS)
+	}
+}
+
+// TestCloudflareGenerator_PasswordHandling verifies password hashing on write,
+// response sanitization (strip), _mold_sessions DDL, and login/logout handlers.
+func TestCloudflareGenerator_PasswordHandling(t *testing.T) {
+	resourceDir := t.TempDir()
+	userYAML := `
+resource:
+  name: User
+  timestamps: true
+  soft_delete: true
+fields:
+  - name: email
+    type: email
+    nullable: false
+  - name: password
+    type: password
+    nullable: false
+`
+	if err := os.WriteFile(filepath.Join(resourceDir, "User.yaml"), []byte(userYAML), 0644); err != nil {
+		t.Fatalf("failed writing User.yaml: %v", err)
+	}
+
+	reg, err := resource.LoadAll(resourceDir)
+	if err != nil {
+		t.Fatalf("failed loading User IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify _mold_sessions DDL
+	if !strings.Contains(out.SchemaSQL, `CREATE TABLE IF NOT EXISTS "_mold_sessions"`) {
+		t.Errorf("expected SchemaSQL to contain _mold_sessions DDL, got:\n%s", out.SchemaSQL)
+	}
+
+	// 2. Verify hashPassword and sanitizeRecord TS helpers
+	if !strings.Contains(out.IndexTS, "async function hashPassword(plain: string): Promise<string>") {
+		t.Errorf("expected IndexTS to contain hashPassword helper, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "function sanitizeRecord(record: any, passwordFields: string[])") {
+		t.Errorf("expected IndexTS to contain sanitizeRecord helper, got:\n%s", out.IndexTS)
+	}
+
+	// 3. Verify password hashing on create & update
+	if !strings.Contains(out.IndexTS, "body['password'] = await hashPassword(String(body['password']))") {
+		t.Errorf("expected IndexTS to hash password on write, got:\n%s", out.IndexTS)
+	}
+
+	// 4. Verify password response sanitization
+	if !strings.Contains(out.IndexTS, "sanitizeRecord(created, ['password'])") {
+		t.Errorf("expected IndexTS to sanitize response on create, got:\n%s", out.IndexTS)
+	}
+
+	// 5. Verify /login and /logout endpoints
+	if !strings.Contains(out.IndexTS, "app.post('/login', async (c) => {") {
+		t.Errorf("expected IndexTS to contain /login route, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "app.post('/logout', async (c) => {") {
+		t.Errorf("expected IndexTS to contain /logout route, got:\n%s", out.IndexTS)
 	}
 }
