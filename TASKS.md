@@ -188,6 +188,7 @@
     4. *HTML Sanitizer 보강 (`3f323bc`)*: `sanitizeHTML` 정규식을 보강하여 큰따옴표(`onload="..."`), 작은따옴표(`onload='...'`), 따옴표 없음(`onload=...`) XSS 이벤트 핸들러 및 `<script>` 태그 완전 제거.
     5. *SQL 문자열 리터럴 수정 (`64192dc`)*: D1 SQL 쿼리 내 쌍따옴표 문자열 리터럴(`"deleted_at" = ""`)을 SQLite 표준 홑따옴표 리터럴(`"deleted_at" = ''`)로 수정.
     6. *Miniflare 실측 검증 8대 시나리오 100% PASS*: 로컬 Miniflare V8 Isolate 및 D1/R2 버킷을 동적으로 구동하여 8개 실측 시나리오(401 Unauthorized, 404 Not Found, 403 Cross-user access, 403 Role escalation, PBKDF2 D1 Query & Login, Detail View XSS Sanitization, Blob 1-Step Create/R2 Download/Delete, Cross-user Blob Upload 403) 100% 통과 확인.
+  - **상세 회고**: 상세 분석, 발견된 5대 문제 패턴, 2대 근본 원인 및 5대 예방 체크리스트는 [Cloudflare Codegen 리뷰 회고 문서](docs/retrospectives/cloudflare-codegen-review.md) 참조.
 
 
 

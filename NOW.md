@@ -15,7 +15,7 @@
 4. `docs/ir-spec.md` — Resource IR의 유일한 스펙 (구조체, 검증 규칙)
 5. `docs/resource-guide.md` — Resource YAML 작성 스펙 및 Good/Bad 패턴 가이드
 6. `TASKS.md` — MVP 완료 상태, 가설과 완료 조건을 담은 실증 백로그
-7. `docs/retrospectives/` 안의 가장 최근 회고 문서
+7. `docs/retrospectives/cloudflare-codegen-review.md` — 가장 최근 회고 문서 (Cloudflare Codegen 리뷰 반려 및 보안/스펙 수정 회고)
 8. 이 문서(NOW.md)의 "다음 할 일" 섹션
 
 ---
