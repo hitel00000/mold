@@ -415,3 +415,46 @@ fields:
 		t.Errorf("expected IndexTS to contain /logout route, got:\n%s", out.IndexTS)
 	}
 }
+
+// TestCloudflareGenerator_HTMLDefaultView verifies generation of SSR HTML List/Detail/Form routes and XSS sanitization.
+func TestCloudflareGenerator_HTMLDefaultView(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify escapeHTML and sanitizeHTML helpers
+	if !strings.Contains(out.IndexTS, "function escapeHTML(str: any): string") {
+		t.Errorf("expected IndexTS to contain escapeHTML helper, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "function sanitizeHTML(html: string): string") {
+		t.Errorf("expected IndexTS to contain sanitizeHTML helper, got:\n%s", out.IndexTS)
+	}
+
+	// 2. Verify List View route
+	if !strings.Contains(out.IndexTS, "app.get('/view/posts', async (c) => {") {
+		t.Errorf("expected IndexTS to contain GET /view/posts, got:\n%s", out.IndexTS)
+	}
+
+	// 3. Verify Form New route
+	if !strings.Contains(out.IndexTS, "app.get('/view/posts/new', async (c) => {") {
+		t.Errorf("expected IndexTS to contain GET /view/posts/new, got:\n%s", out.IndexTS)
+	}
+
+	// 4. Verify Form Create submit route and 303 redirect
+	if !strings.Contains(out.IndexTS, "c.redirect('/view/posts', 303)") {
+		t.Errorf("expected IndexTS to contain 303 redirect after create submit, got:\n%s", out.IndexTS)
+	}
+
+	// 5. Verify Detail View route with XSS sanitization on markdown body
+	if !strings.Contains(out.IndexTS, "sanitizeHTML(String(record['body'] || ''))") {
+		t.Errorf("expected IndexTS to apply sanitizeHTML to markdown body, got:\n%s", out.IndexTS)
+	}
+}

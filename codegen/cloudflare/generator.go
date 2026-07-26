@@ -174,6 +174,24 @@ function sanitizeRecord(record: any, passwordFields: string[]) {
   return copy;
 }
 
+function escapeHTML(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeHTML(html: string): string {
+  if (!html) return '';
+  return String(html)
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/on\w+="[^"]*"/gi, '')
+    .replace(/javascript:[^\s"']*/gi, '#');
+}
+
 interface AuthUser {
   id: any;
   role: string;
@@ -550,6 +568,89 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		}
 
 		sb.WriteString("  return c.json({ data: { deleted: true, id: parsedId } });\n")
+		sb.WriteString("});\n")
+
+		// 6. GET /view/{table} (HTML List View)
+		sb.WriteString(fmt.Sprintf("\n// VIEW LIST /view/%s\n", table))
+		sb.WriteString(fmt.Sprintf("app.get('/view/%s', async (c) => {\n", table))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		sb.WriteString(fmt.Sprintf("  const { results } = await c.env.DB.prepare('SELECT * FROM \"%s\"%s ORDER BY id ASC').all();\n", table, whereClause))
+		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s List</title></head><body>`;\n", p.ResourceName))
+		sb.WriteString(fmt.Sprintf("  html += `<h1>%s List</h1>`;\n", p.ResourceName))
+		sb.WriteString(fmt.Sprintf("  html += `<a href=\"/view/%s/new\">+ New %s</a><br/><br/><table border=\"1\"><thead><tr><th>id</th>`;\n", table, p.ResourceName))
+		for _, f := range p.Fields {
+			if f.Deprecated || f.Type == resource.TypePassword {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("  html += `<th>%s</th>`;\n", f.Name))
+		}
+		sb.WriteString("  html += `<th>Actions</th></tr></thead><tbody>`;\n")
+		sb.WriteString("  for (const row of (results || [])) {\n")
+		sb.WriteString("    html += `<tr><td>${(row as any).id}</td>`;\n")
+		for _, f := range p.Fields {
+			if f.Deprecated || f.Type == resource.TypePassword {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("    html += `<td>${escapeHTML((row as any)['%s'])}</td>`;\n", f.Name))
+		}
+		sb.WriteString(fmt.Sprintf("    html += `<td><a href=\"/view/%s/${(row as any).id}\">Detail</a> <a href=\"/view/%s/${(row as any).id}/edit\">Edit</a></td></tr>`;\n", table, table))
+		sb.WriteString("  }\n")
+		sb.WriteString("  html += `</tbody></table></body></html>`;\n")
+		sb.WriteString("  return c.html(html);\n")
+		sb.WriteString("});\n")
+
+		// 7. GET /view/{table}/new (HTML Form New)
+		sb.WriteString(fmt.Sprintf("\n// VIEW NEW /view/%s/new\n", table))
+		sb.WriteString(fmt.Sprintf("app.get('/view/%s/new', async (c) => {\n", table))
+		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>New %s</title></head><body><h1>New %s</h1><form method=\"POST\" action=\"/view/%s\">`;\n", p.ResourceName, p.ResourceName, table))
+		for _, f := range p.Fields {
+			if f.Deprecated || f.Type == resource.TypePassword {
+				continue
+			}
+			inputType := "text"
+			if f.Type == resource.TypeInt || f.Type == resource.TypeFloat || f.IsDerivedFK {
+				inputType = "number"
+			}
+			if f.Type == resource.TypeText || f.Type == resource.TypeMarkdown {
+				sb.WriteString(fmt.Sprintf("  html += `<label>%s: <textarea name=\"%s\"></textarea></label><br/><br/>`;\n", f.Name, f.Name))
+			} else {
+				sb.WriteString(fmt.Sprintf("  html += `<label>%s: <input type=\"%s\" name=\"%s\" /></label><br/><br/>`;\n", f.Name, inputType, f.Name))
+			}
+		}
+		sb.WriteString("  html += `<button type=\"submit\">Save</button></form></body></html>`;\n")
+		sb.WriteString("  return c.html(html);\n")
+		sb.WriteString("});\n")
+
+		// 8. POST /view/{table} (HTML Create Submit)
+		sb.WriteString(fmt.Sprintf("\n// VIEW CREATE SUBMIT /view/%s\n", table))
+		sb.WriteString(fmt.Sprintf("app.post('/view/%s', async (c) => {\n", table))
+		sb.WriteString("  const formData = await c.req.formData();\n")
+		sb.WriteString("  const body: any = {};\n")
+		sb.WriteString("  formData.forEach((value, key) => { body[key] = value; });\n")
+		sb.WriteString("  const now = new Date().toISOString();\n")
+		sb.WriteString(fmt.Sprintf("  await c.env.DB.prepare(insertSql).bind(%s).run();\n", strings.Join(vals, ", ")))
+		sb.WriteString(fmt.Sprintf("  return c.redirect('/view/%s', 303);\n", table))
+		sb.WriteString("});\n")
+
+		// 9. GET /view/{table}/:id (HTML Detail View with XSS Sanitization)
+		sb.WriteString(fmt.Sprintf("\n// VIEW DETAIL /view/%s/:id\n", table))
+		sb.WriteString(fmt.Sprintf("app.get('/view/%s/:id', async (c) => {\n", table))
+		sb.WriteString("  const id = c.req.param('id');\n")
+		sb.WriteString(fmt.Sprintf("  const record = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first<any>();\n", table, softCond))
+		sb.WriteString("  if (!record) return c.html('<h1>404 Not Found</h1>', 404);\n")
+		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s Detail</title></head><body><h1>%s #${id}</h1><dl>`;\n", p.ResourceName, p.ResourceName))
+		for _, f := range p.Fields {
+			if f.Deprecated || f.Type == resource.TypePassword {
+				continue
+			}
+			if f.Type == resource.TypeMarkdown {
+				sb.WriteString(fmt.Sprintf("  html += `<dt>%s</dt><dd>${sanitizeHTML(String(record['%s'] || ''))}</dd>`;\n", f.Name, f.Name))
+			} else {
+				sb.WriteString(fmt.Sprintf("  html += `<dt>%s</dt><dd>${escapeHTML(record['%s'])}</dd>`;\n", f.Name, f.Name))
+			}
+		}
+		sb.WriteString("  html += `</dl></body></html>`;\n")
+		sb.WriteString("  return c.html(html);\n")
 		sb.WriteString("});\n")
 	}
 
