@@ -551,3 +551,51 @@ func TestCloudflareGenerator_SQLLiteralQuoting(t *testing.T) {
 		t.Errorf("found double-quoted string literal \"deleted_at\" = \"\" in generated SQL; must use single quotes ''")
 	}
 }
+
+// TestCloudflareGenerator_MultipleBlobFieldsGenericness verifies generic table and multi-blob field codegen.
+func TestCloudflareGenerator_MultipleBlobFieldsGenericness(t *testing.T) {
+	tmpDir := t.TempDir()
+	sakePostYAML := `
+resource:
+  name: SakePost
+  table: sake_posts
+fields:
+  - name: title
+    type: string
+  - name: cover_image
+    type: blob
+  - name: attachment_file
+    type: blob
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "SakePost.yaml"), []byte(sakePostYAML), 0644); err != nil {
+		t.Fatalf("failed writing SakePost.yaml: %v", err)
+	}
+
+	reg, err := resource.LoadAll(tmpDir)
+	if err != nil {
+		t.Fatalf("failed loading SakePost IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// Verify generic dynamic table and field name interpolation
+	expectedCoverKey := "blobs/sake_posts/${created.id}/cover_image_"
+	expectedAttachmentKey := "blobs/sake_posts/${created.id}/attachment_file_"
+
+	if !strings.Contains(out.IndexTS, expectedCoverKey) {
+		t.Errorf("expected IndexTS to contain generic cover_image key %q, got:\n%s", expectedCoverKey, out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, expectedAttachmentKey) {
+		t.Errorf("expected IndexTS to contain generic attachment_file key %q, got:\n%s", expectedAttachmentKey, out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "const file_cover_image = formData.get('cover_image');") {
+		t.Errorf("expected IndexTS to contain cover_image form extraction, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "const file_attachment_file = formData.get('attachment_file');") {
+		t.Errorf("expected IndexTS to contain attachment_file form extraction, got:\n%s", out.IndexTS)
+	}
+}
