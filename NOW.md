@@ -46,5 +46,5 @@
    - **내용**: `docs/ir-spec.md` 및 `docs/resource-guide.md`에 Plan 계층 파이프라인 및 `NormalizeFields()`의 구조적 역할 설명을 갱신하여 문서와 코드 간 드리프트 차단.
 3. 👉 **후보 (b) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
    - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장.
-
-
+4. 📝 **참고 항목 (알려진 제약 추적 - 다중 Blob 롤백 시 R2 Orphan 객체 보상)**:
+   - **내용**: 하나의 리소스에 2개 이상의 blob 필드가 존재하는 경우, 두 번째 이후 blob 업로드 실패 시 D1 레코드는 물리적 hard delete로 롤백되나 앞서 R2에 저장된 첫 번째 blob 객체는 orphan 상태로 남음 (`docs/ir-spec.md` 5.5절 명시). 마세라티 원칙에 따라 실제 다중 blob 리소스가 프로덕션에 등장했을 때 트랜잭션 보상(compensating deletion) 구현 검토.
