@@ -22,7 +22,7 @@
 
 ## 현재 상태 (2026-07-26 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, 및 **Cloudflare Workers TS Codegen 기능 확장 완결 (Stage A 401/404/403 Auth 가드 + Role 승격 방지, Stage B Password Hashing/Response Sanitization/Login-Logout, Stage C SSR HTML Default View + XSS Sanitization, Stage D R2 Blob Upload/Download/Delete 4개 단계 100% 순차 실측 완결)**  
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, 및 **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결 (Stage A 401/404/403 Auth 가드 + Role 승격 방지, Stage B PBKDF2 Password Hashing/Response Sanitization/Login-Logout, Stage C SSR HTML Default View + XSS Sanitization, Stage D R2 Blob Upload/Download/Delete + 1-Step Multipart Create & Atomic Rollback, 및 Miniflare V8 Isolate 8대 시나리오 실측 검증 100% 통과 완결)**  
 👉 **Post-MVP: 문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 갱신 및 Phase 4 후속 백로그 선택**
 
 ---
@@ -40,7 +40,7 @@
 
 *다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. [x] ~~**Cloudflare Workers TS Codegen 기능 확장 (Auth / View / Blob)**~~ (완료: Stage A Auth 401->404->403 가딩 순서 및 role 승격 방지, Stage B password Web Crypto SHA-256 해싱/응답 마스킹/login-logout, Stage C default HTML view SSR/XSS sanitization/FK 폼, Stage D R2 blob put/get/delete 및 atomic rollback 4단계 실측 완결)
+1. [x] ~~**Cloudflare Workers TS Codegen 기능 확장 및 후속 리뷰 결함 수정 (Auth / View / Blob)**~~ (완료: Auth 헤더 우회 제거, PBKDF2 해싱 및 /login 검증, 1-Step Multipart Create & Atomic Rollback, HTML Sanitizer 보강, SQL 리터럴 홑따옴표 수정, Miniflare V8 Isolate 8대 시나리오 실측 100% PASS 완결)
 2. 👉 **후보 (a) 문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**:
    - **사유**: Plan 계층(`plan/plan.go`) 도입 및 `resource.NormalizeFields()`의 Layer 0 유틸 승격으로 IR 필드 파생과 실행 플랜 생성 아키텍처가 발전했으나, 기존 문서 스펙에 해당 3단계 계층 구조 및 파생 필드 처리 방식 설명이 업데이트되어 있지 않음.
    - **내용**: `docs/ir-spec.md` 및 `docs/resource-guide.md`에 Plan 계층 파이프라인 및 `NormalizeFields()`의 구조적 역할 설명을 갱신하여 문서와 코드 간 드리프트 차단.

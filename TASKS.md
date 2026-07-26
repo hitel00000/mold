@@ -179,4 +179,15 @@
       - *Cloudflare Miniflare V8 Isolate 라이브 검증*: 생성된 TS+D1 코드로 로컬 Wrangler DB 스키마 생성 및 `wrangler dev --port 8787` 서버 구동, Go API와 100% 동일한 REST Envelope 패리티 및 파이프라인 버그(`now` SQL 파싱 오류) 발견/수정 완료.
       - *ValidateRecord E2E 4가지 HTTP 검증*: 정상(`201`), 타입 미스매치(`400`), 제약위반(`400`), system column 주입(`400`) 응답 엔벨로프 실측 확인.
 
+- [x] **Task 4.2: Cloudflare Workers TS Codegen 기능 확장 및 후속 리뷰 결함 수정 완결**
+  - **작업 내용**: Auth, View, Blob endpoints, Password Hashing, HTML XSS Sanitization, 1-Step Multipart Create & Atomic Rollback 6대 후속 수정 항목 완결 및 Miniflare 실측 검증 (7개 커밋 완료: `7e7e59b`, `fd2e0c7`, `e7b3358`, `3f323bc`, `64192dc`, `68f6d78`).
+  - **후속 리뷰 결함 수정 6대 항목 및 실측 결과**:
+    1. *Auth Header Bypass Removal (`7e7e59b`)*: `getAuthUser` 내 검증 없는 `x-user-id`/`x-user-role` 헤더 신뢰 로직 완전 제거. `mold_session` 세션 쿠키 기반 D1 `_mold_sessions` 테이블 조회로 식별 100% 단일화.
+    2. *PBKDF2 Password Hashing (`fd2e0c7`)*: Web Crypto API `PBKDF2` (SHA-256, 100,000 iterations, 16-byte random salt, `$pbkdf2$<iterations>$<salt>$<hash>` format) 전환 및 `/login` 패스워드 검증 연결.
+    3. *1-Step Multipart Create & Atomic Rollback (`e7b3358`)*: `POST /api/{table}`에 `multipart/form-data` 파싱, R2 blob 업로드 및 실패 시 D1 hard delete(`DELETE FROM "{table}" WHERE id = ?`) atomic rollback (`500 BLOB_STORE_FAILED_RECORD_PRESERVED` 에러 엔벨로프 반환).
+    4. *HTML Sanitizer 보강 (`3f323bc`)*: `sanitizeHTML` 정규식을 보강하여 큰따옴표(`onload="..."`), 작은따옴표(`onload='...'`), 따옴표 없음(`onload=...`) XSS 이벤트 핸들러 및 `<script>` 태그 완전 제거.
+    5. *SQL 문자열 리터럴 수정 (`64192dc`)*: D1 SQL 쿼리 내 쌍따옴표 문자열 리터럴(`"deleted_at" = ""`)을 SQLite 표준 홑따옴표 리터럴(`"deleted_at" = ''`)로 수정.
+    6. *Miniflare 실측 검증 8대 시나리오 100% PASS*: 로컬 Miniflare V8 Isolate 및 D1/R2 버킷을 동적으로 구동하여 8개 실측 시나리오(401 Unauthorized, 404 Not Found, 403 Cross-user access, 403 Role escalation, PBKDF2 D1 Query & Login, Detail View XSS Sanitization, Blob 1-Step Create/R2 Download/Delete, Cross-user Blob Upload 403) 100% 통과 확인.
+
+
 
