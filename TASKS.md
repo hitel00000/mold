@@ -147,10 +147,12 @@
   - **실측 결과**: 조립부 라인 수 6줄 (`runtime.New(cfg)` 후 `app.Listen()`)로 기존 `cmd/mvp_e2e_test.go` (~50줄) 대비 88% 축소 (목표 10줄 이내 달성). 전체 테스트(`go test ./... -count=1`) fresh PASS.
   - **TemplateOverrides 확정**: Option A (`Config.Overrides *view.TemplateOverrides`)로 확정 반영.
   - **초기 데이터 시딩 캡슐화 (`CreateRecord` 완결)**:
-    - `runtime.App.CreateRecord(ctx context.Context, table string, record map[string]any) (map[string]any, error)` 공개 메서드를 추가하여 런타임 내부의 `resource.Registry` 및 `storage.Store` 인스턴스를 재사용.
+    - `runtime.App.CreateRecord(ctx context.Context, resourceName string, record map[string]any) (map[string]any, error)` 공개 메서드를 추가하여 런타임 내부의 `resource.Registry` 및 `storage.Store` 인스턴스를 재사용.
     - `cmd/runtime_e2e_test.go` 및 `cmd/mold-dev/dev_test.go`의 admin 시딩 코드를 `app.CreateRecord`로 교체.
     - 외부 테스트/구동 파일에서 `resource` 및 `storage` 패키지 직접 임포트 라인 수 **0줄** 실측 보고.
-    - 존재하지 않는 스키마 지정 시 `resource definition for table/resource %q not found` 에러 반환으로 스키마 존재 여부 확인(검증 레이어 구분) 명확화.
+    - **설계 확정 2건**:
+      1. *단일 식별자 계약*: `resource.Registry` 및 IR 유일 원천인 Resource Name(`res.Name`) 단일 계약만 수용 (`app.go` 주석 명시, SQL 테이블명 fallback 이중 탐색 배제로 마세라티 원칙 및 일관성 준수).
+      2. *구조화된 Sentinel Error*: `runtime.ErrResourceNotFound`를 공개 export하여 `errors.Is(err, runtime.ErrResourceNotFound)`로 문자열 파싱 없이 스키마 부재 에러와 하류 데이터 검증 에러를 프로그래밍적으로 판별 가능.
   - **가설 1 (외부 모듈 제품성) 재평가 메모**:
     - 과거 Phase 1 회고에서 기각 원인이었던 근본 원인 A(공개 API 표면 부재)와 근본 원인 B(부트스트래핑 컨테이너 부재)가 `runtime` 패키지 신설 및 `CreateRecord` 시딩 캡슐화로 완전히 해소됨.
     - `runtime` 단 1개 패키지 임포트만으로 부트스트래핑 및 초기 레코드 시딩까지 외부 서브패키지 직접 임포트 0줄로 완전 캡슐화됨.

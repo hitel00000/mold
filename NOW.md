@@ -40,7 +40,7 @@
 
 *다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. [x] ~~**후보 (a) `runtime` 패키지 잔여 표면 마찰 완화**~~ (완료: `runtime.App.CreateRecord` 도입으로 e2e 테스트 내 `resource`/`storage` 직접 임포트 0줄 달성)
+1. [x] ~~**후보 (a) `runtime` 패키지 잔여 표면 마찰 완화**~~ (완료: `runtime.App.CreateRecord` 도입으로 e2e 테스트 내 `resource`/`storage` 직접 임포트 0줄 달성. Resource Name 단일 계약 통일 및 `runtime.ErrResourceNotFound` sentinel error 반영으로 프로그래밍적 에러 구분 보장)
 2. 👉 **후보 (b) Cloudflare Workers TS Codegen 기능 확장 (Auth / View / Blob)**:
    - **사유**: Task 4.1에서는 스코프 단축을 위해 단순 CRUD만 포함했으나, 사케 앱 배포 환경처럼 실서비스 적용을 위해서는 Auth/Permission, HTML View, 또는 Blob R2 필드 생성기로 확장이 필요함.
 3. 👉 **후보 (c) 문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**:
