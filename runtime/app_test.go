@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,39 +188,44 @@ fields:
 		}
 	})
 
-	t.Run("success via table name", func(t *testing.T) {
-		record, err := app.CreateRecord(ctx, "posts", map[string]any{
+	t.Run("table name fallback rejected under single resource name contract", func(t *testing.T) {
+		_, err := app.CreateRecord(ctx, "posts", map[string]any{
 			"title": "Second Post",
 			"body":  "Content of second post",
 		})
-		if err != nil {
-			t.Fatalf("expected CreateRecord success via table name, got error: %v", err)
+		if err == nil {
+			t.Fatal("expected error when passing table name 'posts' instead of resource name 'Post', got nil")
 		}
-		if record["title"] != "Second Post" {
-			t.Errorf("expected title 'Second Post', got %v", record["title"])
+		if !errors.Is(err, runtime.ErrResourceNotFound) {
+			t.Errorf("expected errors.Is ErrResourceNotFound, got: %v", err)
 		}
 	})
 
-	t.Run("non-existent table error path (schema existence check)", func(t *testing.T) {
+	t.Run("non-existent resource error path (errors.Is sentinel check)", func(t *testing.T) {
 		_, err := app.CreateRecord(ctx, "NonExistent", map[string]any{
 			"name": "foo",
 		})
 		if err == nil {
-			t.Fatal("expected error for non-existent table, got nil")
+			t.Fatal("expected error for non-existent resource, got nil")
 		}
-		expectedErr := `resource definition for table/resource "NonExistent" not found`
-		if !strings.Contains(err.Error(), expectedErr) {
-			t.Errorf("expected error containing %q, got: %v", expectedErr, err)
+		if !errors.Is(err, runtime.ErrResourceNotFound) {
+			t.Errorf("expected errors.Is ErrResourceNotFound, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), `"NonExistent"`) {
+			t.Errorf("expected error message to contain resource name %q, got: %v", "NonExistent", err)
 		}
 	})
 
-	t.Run("record validation failure path", func(t *testing.T) {
+	t.Run("record validation failure path (not ErrResourceNotFound)", func(t *testing.T) {
 		// Missing non-nullable "body" field
 		_, err := app.CreateRecord(ctx, "Post", map[string]any{
 			"title": "Incomplete Post",
 		})
 		if err == nil {
 			t.Fatal("expected validation error for missing body, got nil")
+		}
+		if errors.Is(err, runtime.ErrResourceNotFound) {
+			t.Errorf("expected data validation error, not ErrResourceNotFound, got: %v", err)
 		}
 	})
 }
