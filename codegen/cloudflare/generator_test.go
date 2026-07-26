@@ -532,3 +532,22 @@ fields:
 		t.Errorf("expected IndexTS to contain atomic rollback error envelope for failed blob upload, got:\n%s", out.IndexTS)
 	}
 }
+
+// TestCloudflareGenerator_SQLLiteralQuoting verifies single quotes are strictly used for SQL string literals.
+func TestCloudflareGenerator_SQLLiteralQuoting(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	if strings.Contains(out.IndexTS, `"deleted_at" = ""`) {
+		t.Errorf("found double-quoted string literal \"deleted_at\" = \"\" in generated SQL; must use single quotes ''")
+	}
+}
