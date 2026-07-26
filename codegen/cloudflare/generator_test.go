@@ -268,3 +268,23 @@ func TestCloudflareGenerator_FKValidationAndBinding_PlanParity(t *testing.T) {
 		t.Errorf("expected TS code to contain INSERT INTO comments with post_id and author_id, got:\n%s", out.IndexTS)
 	}
 }
+
+// TestCloudflareGenerator_PreAuthGoldenSnapshot captures golden snapshot of basic route code structure before Auth extension.
+func TestCloudflareGenerator_PreAuthGoldenSnapshot(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed generating code: %v", err)
+	}
+
+	expectedRouteSnippet := "app.get('/api/posts', async (c) => {"
+	if !strings.Contains(out.IndexTS, expectedRouteSnippet) {
+		t.Errorf("pre-auth golden snapshot failed: route snippet %q missing", expectedRouteSnippet)
+	}
+}
