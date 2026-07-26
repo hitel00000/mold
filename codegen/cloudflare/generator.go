@@ -166,7 +166,7 @@ async function hashPassword(plain: string): Promise<string> {
   const derivedBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, keyMaterial, 256);
   const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
   const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
-  return `$pbkdf2$${iterations}$${saltHex}$${hashHex}`;
+  return '$pbkdf2$' + iterations + '$' + saltHex + '$' + hashHex;
 }
 
 async function verifyPassword(plain: string, storedHash: string): Promise<boolean> {
@@ -382,12 +382,13 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		sb.WriteString("  let body: any = {};\n")
 		sb.WriteString("  let formData: FormData | null = null;\n")
-		sb.WriteString("  const contentType = c.req.header('Content-Type') || '';\n")
+		sb.WriteString("  const rawHeader = c.req.header('content-type') || c.req.header('Content-Type') || (c.req.raw && c.req.raw.headers ? c.req.raw.headers.get('content-type') : '') || '';\n")
+		sb.WriteString("  const contentType = String(rawHeader).toLowerCase();\n")
 		sb.WriteString("  if (contentType.includes('multipart/form-data')) {\n")
 		sb.WriteString("    try {\n")
 		sb.WriteString("      formData = await c.req.formData();\n")
 		sb.WriteString("      formData.forEach((val, key) => {\n")
-		sb.WriteString("        if (typeof val === 'string') { body[key] = val; }\n")
+		sb.WriteString("        if (typeof val === 'string') { body[key] = (val !== '' && !isNaN(Number(val))) ? Number(val) : val; }\n")
 		sb.WriteString("      });\n")
 		sb.WriteString("    } catch (e) {\n")
 		sb.WriteString("      return writeError(c, 400, 'INVALID_MULTIPART', 'failed to parse multipart body');\n")
@@ -458,12 +459,23 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			cols = append(cols, fmt.Sprintf("\"%s\"", f.Name))
 			bindVars = append(bindVars, "?")
 
+			defaultVal := "null"
+			if f.Default != nil {
+				if f.Type == resource.TypeBool || f.Type == resource.TypeInt || f.Type == resource.TypeFloat {
+					defaultVal = fmt.Sprintf("%v", f.Default)
+				} else {
+					defaultVal = fmt.Sprintf("'%v'", f.Default)
+				}
+			}
+
 			// Type Dispatch #3: Value conversion for DB binding
 			switch f.Type {
 			case resource.TypeBool:
-				vals = append(vals, fmt.Sprintf("body['%s'] ? 1 : 0", f.Name))
+				vals = append(vals, fmt.Sprintf("body['%s'] !== undefined ? (body['%s'] ? 1 : 0) : %s", f.Name, f.Name, defaultVal))
+			case resource.TypeBlob:
+				vals = append(vals, "null")
 			default:
-				vals = append(vals, fmt.Sprintf("body['%s'] !== undefined ? body['%s'] : null", f.Name, f.Name))
+				vals = append(vals, fmt.Sprintf("body['%s'] !== undefined ? body['%s'] : %s", f.Name, f.Name, defaultVal))
 			}
 		}
 
@@ -492,12 +504,18 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				if f.Type == resource.TypeBlob && !f.Deprecated {
 					blobField := f.Name
 					sb.WriteString(fmt.Sprintf("    const file_%s = formData.get('%s');\n", blobField, blobField))
-					sb.WriteString(fmt.Sprintf("    if (file_%s && typeof file_%s === 'object' && 'arrayBuffer' in file_%s) {\n", blobField, blobField, blobField))
-					sb.WriteString(fmt.Sprintf("      const blobFile = file_%s as File;\n", blobField))
-					sb.WriteString("      const ext = blobFile.name ? blobFile.name.substring(blobFile.name.lastIndexOf('.')) : '';\n")
-					sb.WriteString(fmt.Sprintf("      const key = `blobs/%s/${created.id}/%s_${Date.now()}${ext}`;\n", table, blobField))
+					sb.WriteString(fmt.Sprintf("    if (file_%s !== null && file_%s !== undefined && file_%s !== '') {\n", blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("      let fileData_%s: any = file_%s;\n", blobField, blobField))
+					sb.WriteString(fmt.Sprintf("      let mimeType_%s = 'application/octet-stream';\n", blobField))
+					sb.WriteString(fmt.Sprintf("      let ext_%s = '';\n", blobField))
+					sb.WriteString(fmt.Sprintf("      if (typeof file_%s === 'object') {\n", blobField))
+					sb.WriteString(fmt.Sprintf("        mimeType_%s = (file_%s as any).type || mimeType_%s;\n", blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("        if ((file_%s as any).name) { ext_%s = (file_%s as any).name.substring((file_%s as any).name.lastIndexOf('.')); }\n", blobField, blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("        if (typeof (file_%s as any).stream === 'function') { fileData_%s = (file_%s as any).stream(); }\n", blobField, blobField, blobField))
+					sb.WriteString("      }\n")
+					sb.WriteString(fmt.Sprintf("      const key = `blobs/%s/${created.id}/%s_${Date.now()}${ext_%s}`;\n", table, blobField, blobField))
 					sb.WriteString("      try {\n")
-					sb.WriteString("        await c.env.BUCKET.put(key, blobFile.stream(), { httpMetadata: { contentType: blobFile.type } });\n")
+					sb.WriteString(fmt.Sprintf("        await c.env.BUCKET.put(key, fileData_%s, { httpMetadata: { contentType: mimeType_%s } });\n", blobField, blobField))
 					sb.WriteString(fmt.Sprintf("        await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = ? WHERE id = ?').bind(key, created.id).run();\n", table, blobField))
 					sb.WriteString(fmt.Sprintf("        created['%s'] = key;\n", blobField))
 					sb.WriteString("      } catch (err) {\n")

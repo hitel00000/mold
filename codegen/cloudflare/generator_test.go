@@ -396,7 +396,7 @@ fields:
 	if !strings.Contains(out.IndexTS, "async function verifyPassword(plain: string, storedHash: string)") {
 		t.Errorf("expected IndexTS to contain verifyPassword helper, got:\n%s", out.IndexTS)
 	}
-	if !strings.Contains(out.IndexTS, "`$pbkdf2$${iterations}$${saltHex}$${hashHex}`") {
+	if !strings.Contains(out.IndexTS, "'$pbkdf2$' + iterations + '$' + saltHex + '$' + hashHex") {
 		t.Errorf("expected IndexTS to contain $pbkdf2$ format string, got:\n%s", out.IndexTS)
 	}
 	if !strings.Contains(out.IndexTS, "function sanitizeRecord(record: any, passwordFields: string[])") {
