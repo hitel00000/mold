@@ -198,15 +198,10 @@ interface AuthUser {
   role: string;
 }
 
+// Resolves authenticated user strictly from session cookie token stored in D1 (_mold_sessions).
+// Security Note: Unverified HTTP headers like x-user-id / x-user-role are explicitly rejected
+// to prevent client-side header spoofing attacks.
 async function getAuthUser(c: any): Promise<AuthUser | null> {
-  const headerUserId = c.req.header('x-user-id');
-  if (headerUserId) {
-    const role = c.req.header('x-user-role') || 'user';
-    return {
-      id: isNaN(Number(headerUserId)) ? headerUserId : Number(headerUserId),
-      role: role
-    };
-  }
   const cookieHeader = c.req.header('Cookie') || '';
   const match = cookieHeader.match(/mold_session=([^;]+)/);
   if (match) {
