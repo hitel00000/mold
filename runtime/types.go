@@ -1,8 +1,19 @@
 package runtime
 
 import (
+	"errors"
+
 	"github.com/hitel00000/mold/transport"
 	"github.com/hitel00000/mold/view"
+)
+
+// Sentinel errors exported by the runtime package.
+var (
+	// ErrResourceNotFound is returned when CreateRecord is called with an unregistered resource name.
+	ErrResourceNotFound = errors.New("resource definition not found")
+
+	// ErrNotInitialized is returned when CreateRecord is called before the app registry is built.
+	ErrNotInitialized = errors.New("application resource registry is not initialized")
 )
 
 // Type aliases to expose a unified public runtime surface so consumers

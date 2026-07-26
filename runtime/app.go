@@ -146,12 +146,20 @@ func (a *App) reload() (*transport.Registry, error) {
 	return newTransReg, nil
 }
 
-// CreateRecord creates a new record for the specified resource table or resource name.
+// CreateRecord creates a new record for the specified resource by its Resource Name (e.g. "User", "Post").
 // It retrieves the registered Resource IR from the internal Registry and delegates
 // record creation to the underlying Store.
-// Note: This method checks schema/resource existence (not record data validation).
-// Record validation is delegated downstream to storage.Store.Create / resource.ValidateRecord.
-func (a *App) CreateRecord(ctx context.Context, table string, record map[string]any) (map[string]any, error) {
+//
+// Contract & Rationale:
+// - Single Contract: Accepts ONLY the canonical Resource Name (res.Name in IR). It intentionally
+//   does NOT fallback to SQL table names (res.Table) in adherence to Mold's core philosophy
+//   ("Resource is the single source of truth", "Opinionated Framework: consistency over flexibility",
+//   and the Maserati Principle against premature multi-way fallback lookups).
+// - Verification Layer Separation: Checks schema existence in Registry before storage call.
+//   If missing, wraps runtime.ErrResourceNotFound sentinel error so callers can programmatically
+//   distinguish missing schemas from record validation errors.
+// - Record Validation: Downstream record data validation is delegated to storage.Store.Create.
+func (a *App) CreateRecord(ctx context.Context, resourceName string, record map[string]any) (map[string]any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -161,24 +169,13 @@ func (a *App) CreateRecord(ctx context.Context, table string, record map[string]
 	a.mu.RUnlock()
 
 	if resReg == nil {
-		return nil, fmt.Errorf("runtime: application resource registry is not initialized")
+		return nil, ErrNotInitialized
 	}
 
-	// Schema existence check: verify if resource definition exists in Registry
-	res, ok := resReg.Get(table)
-	if !ok {
-		// Fallback: check by table name or resource name (case-insensitive)
-		for _, r := range resReg.List() {
-			if r != nil && (strings.EqualFold(r.Table, table) || strings.EqualFold(r.Name, table)) {
-				res = r
-				ok = true
-				break
-			}
-		}
-	}
-
+	// Schema existence check: verify if resource definition exists in Registry by Resource Name
+	res, ok := resReg.Get(resourceName)
 	if !ok || res == nil {
-		return nil, fmt.Errorf("runtime: resource definition for table/resource %q not found", table)
+		return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, resourceName)
 	}
 
 	created, err := a.store.Create(ctx, res, record)
