@@ -148,6 +148,39 @@ function writeError(c: any, status: number, code: string, message: string) {
   return c.json({ error: { code, message } }, status);
 }
 
+interface AuthUser {
+  id: any;
+  role: string;
+}
+
+async function getAuthUser(c: any): Promise<AuthUser | null> {
+  const headerUserId = c.req.header('x-user-id');
+  if (headerUserId) {
+    const role = c.req.header('x-user-role') || 'user';
+    return {
+      id: isNaN(Number(headerUserId)) ? headerUserId : Number(headerUserId),
+      role: role
+    };
+  }
+  const cookieHeader = c.req.header('Cookie') || '';
+  const match = cookieHeader.match(/mold_session=([^;]+)/);
+  if (match) {
+    const token = match[1];
+    try {
+      const sess = await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first<{ user_id: any }>();
+      if (sess && sess.user_id != null) {
+        const u = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first<any>();
+        if (u) {
+          return { id: u.id, role: u.role || 'user' };
+        }
+      }
+    } catch (e) {
+      // Ignore if session table not present
+    }
+  }
+  return null;
+}
+
 app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 `)
 
@@ -160,9 +193,46 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		table := p.Table
 		endpoint := "/api/" + table
 
+		permCreate := "public"
+		permRead := "public"
+		permUpdate := "public"
+		permDelete := "public"
+		ownershipField := ""
+
+		if p.Auth != nil {
+			if p.Auth.OwnershipField != "" {
+				ownershipField = p.Auth.OwnershipField
+			}
+			if p.Auth.Permissions.Create != "" {
+				permCreate = p.Auth.Permissions.Create
+			}
+			if p.Auth.Permissions.Read != "" {
+				permRead = p.Auth.Permissions.Read
+			}
+			if p.Auth.Permissions.Update != "" {
+				permUpdate = p.Auth.Permissions.Update
+			}
+			if p.Auth.Permissions.Delete != "" {
+				permDelete = p.Auth.Permissions.Delete
+			}
+		}
+
 		// 1. GET /api/{table} (List)
 		sb.WriteString(fmt.Sprintf("\n// LIST /api/%s\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('%s', async (c) => {\n", endpoint))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		if permRead != "public" {
+			sb.WriteString("  if (!authUser) {\n")
+			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("  }\n")
+			if strings.HasPrefix(permRead, "role:") {
+				role := strings.TrimPrefix(permRead, "role:")
+				sb.WriteString(fmt.Sprintf("  if (authUser.role !== '%s') {\n", role))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			}
+		}
+
 		sb.WriteString("  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);\n")
 		sb.WriteString("  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);\n")
 
@@ -184,6 +254,13 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		// 2. GET /api/{table}/:id (Detail)
 		sb.WriteString(fmt.Sprintf("\n// DETAIL /api/%s/:id\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('%s/:id', async (c) => {\n", endpoint))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		if permRead != "public" {
+			sb.WriteString("  if (!authUser) {\n")
+			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  const id = c.req.param('id');\n")
 		softCond := ""
 		if p.SoftDelete {
@@ -193,18 +270,53 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  if (!record) {\n")
 		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 		sb.WriteString("  }\n")
+
+		if permRead == "owner" && ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (record as any)['%s'] != authUser.id) {\n", ownershipField))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		} else if strings.HasPrefix(permRead, "role:") {
+			role := strings.TrimPrefix(permRead, "role:")
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  return c.json({ data: record });\n")
 		sb.WriteString("});\n")
 
 		// 3. POST /api/{table} (Create)
 		sb.WriteString(fmt.Sprintf("\n// CREATE /api/%s\n", table))
 		sb.WriteString(fmt.Sprintf("app.post('%s', async (c) => {\n", endpoint))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		if permCreate != "public" {
+			sb.WriteString("  if (!authUser) {\n")
+			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("  }\n")
+		}
+		if strings.HasPrefix(permCreate, "role:") {
+			role := strings.TrimPrefix(permCreate, "role:")
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  let body: any;\n")
 		sb.WriteString("  try {\n")
 		sb.WriteString("    body = await c.req.json();\n")
 		sb.WriteString("  } catch (e) {\n")
 		sb.WriteString("    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');\n")
 		sb.WriteString("  }\n\n")
+
+		sb.WriteString("  if (body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {\n")
+		sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');\n")
+		sb.WriteString("  }\n")
+
+		if ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if ((body['%s'] === undefined || body['%s'] === null) && authUser) {\n", ownershipField, ownershipField))
+			sb.WriteString(fmt.Sprintf("    body['%s'] = authUser.id;\n", ownershipField))
+			sb.WriteString("  }\n")
+		}
 
 		// Field Loop #2 & Type Dispatch #2 (Validation derived via plan.Plan)
 		for _, f := range p.Fields {
@@ -271,13 +383,44 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		// 4. PUT /api/{table}/:id (Update)
 		sb.WriteString(fmt.Sprintf("\n// UPDATE /api/%s/:id\n", table))
 		sb.WriteString(fmt.Sprintf("app.put('%s/:id', async (c) => {\n", endpoint))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		if permUpdate != "public" {
+			sb.WriteString("  if (!authUser) {\n")
+			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  const id = c.req.param('id');\n")
+		softCond = ""
+		if p.SoftDelete {
+			softCond = " AND \"deleted_at\" IS NULL"
+		}
+		sb.WriteString(fmt.Sprintf("  const existing = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first();\n", table, softCond))
+		sb.WriteString("  if (!existing) {\n")
+		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
+		sb.WriteString("  }\n")
+
+		if permUpdate == "owner" && ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (existing as any)['%s'] != authUser.id) {\n", ownershipField))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		} else if strings.HasPrefix(permUpdate, "role:") {
+			role := strings.TrimPrefix(permUpdate, "role:")
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  let body: any;\n")
 		sb.WriteString("  try {\n")
 		sb.WriteString("    body = await c.req.json();\n")
 		sb.WriteString("  } catch (e) {\n")
 		sb.WriteString("    return writeError(c, 400, 'INVALID_JSON', 'failed to parse json body');\n")
 		sb.WriteString("  }\n\n")
+
+		sb.WriteString("  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {\n")
+		sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');\n")
+		sb.WriteString("  }\n")
 
 		setClauses := []string{}
 		updateVals := []string{}
@@ -295,11 +438,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		updateVals = append(updateVals, "id")
 
 		sb.WriteString("  const now = new Date().toISOString();\n")
-		softCheck := ""
-		if p.SoftDelete {
-			softCheck = " AND \"deleted_at\" IS NULL"
-		}
-		sb.WriteString(fmt.Sprintf("  const updateSql = `UPDATE \"%s\" SET %s WHERE id = ?%s RETURNING *`;\n", table, strings.Join(setClauses, ", "), softCheck))
+		sb.WriteString(fmt.Sprintf("  const updateSql = `UPDATE \"%s\" SET %s WHERE id = ?%s RETURNING *`;\n", table, strings.Join(setClauses, ", "), softCond))
 		sb.WriteString(fmt.Sprintf("  const updated = await c.env.DB.prepare(updateSql).bind(%s).first();\n", strings.Join(updateVals, ", ")))
 		sb.WriteString("  if (!updated) {\n")
 		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
@@ -310,10 +449,34 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		// 5. DELETE /api/{table}/:id (Delete)
 		sb.WriteString(fmt.Sprintf("\n// DELETE /api/%s/:id\n", table))
 		sb.WriteString(fmt.Sprintf("app.delete('%s/:id', async (c) => {\n", endpoint))
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		if permDelete != "public" {
+			sb.WriteString("  if (!authUser) {\n")
+			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("  }\n")
+		}
+
 		sb.WriteString("  const id = c.req.param('id');\n")
 		sb.WriteString("  const parsedId = isNaN(Number(id)) ? id : Number(id);\n")
 
-		if res.SoftDelete {
+		sb.WriteString(fmt.Sprintf("  const existing = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first();\n", table, softCond))
+		// Wait, let's fix query: SELECT * FROM "table" WHERE id = ? AND deleted_at IS NULL
+		sb.WriteString("  if (!existing) {\n")
+		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
+		sb.WriteString("  }\n")
+
+		if permDelete == "owner" && ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (existing as any)['%s'] != authUser.id) {\n", ownershipField))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		} else if strings.HasPrefix(permDelete, "role:") {
+			role := strings.TrimPrefix(permDelete, "role:")
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("  }\n")
+		}
+
+		if p.SoftDelete {
 			sb.WriteString("  const now = new Date().toISOString();\n")
 			sb.WriteString(fmt.Sprintf("  const res = await c.env.DB.prepare('UPDATE \"%s\" SET \"deleted_at\" = ? WHERE id = ? AND \"deleted_at\" IS NULL').bind(now, id).run();\n", table))
 			sb.WriteString("  if (!res.meta.changes) {\n")

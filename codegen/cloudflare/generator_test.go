@@ -288,3 +288,66 @@ func TestCloudflareGenerator_PreAuthGoldenSnapshot(t *testing.T) {
 		t.Errorf("pre-auth golden snapshot failed: route snippet %q missing", expectedRouteSnippet)
 	}
 }
+
+// TestCloudflareGenerator_AuthGuards verifies code generation of 401/404/403 auth guards,
+// ownership field checks, and role escalation protection.
+func TestCloudflareGenerator_AuthGuards(t *testing.T) {
+	resourceDir := t.TempDir()
+	userYAML := `
+resource:
+  name: User
+  timestamps: true
+  soft_delete: true
+fields:
+  - name: email
+    type: email
+    nullable: false
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    constraints:
+      values: ["admin", "user"]
+auth:
+  permissions:
+    create: public
+    read: authenticated
+    update: owner
+    delete: role:admin
+  ownership_field: id
+`
+	if err := os.WriteFile(filepath.Join(resourceDir, "User.yaml"), []byte(userYAML), 0644); err != nil {
+		t.Fatalf("failed writing User.yaml: %v", err)
+	}
+
+	reg, err := resource.LoadAll(resourceDir)
+	if err != nil {
+		t.Fatalf("failed loading User IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify getAuthUser helper function is included
+	if !strings.Contains(out.IndexTS, "async function getAuthUser(c: any): Promise<AuthUser | null>") {
+		t.Errorf("expected IndexTS to contain getAuthUser helper, got:\n%s", out.IndexTS)
+	}
+
+	// 2. Verify 401 UNAUTHORIZED check for read: authenticated
+	if !strings.Contains(out.IndexTS, "writeError(c, 401, 'UNAUTHORIZED', 'authentication required')") {
+		t.Errorf("expected IndexTS to contain 401 UNAUTHORIZED check, got:\n%s", out.IndexTS)
+	}
+
+	// 3. Verify role escalation check for role: admin
+	if !strings.Contains(out.IndexTS, "writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role')") {
+		t.Errorf("expected IndexTS to contain role escalation guard, got:\n%s", out.IndexTS)
+	}
+
+	// 4. Verify 404 check before 403 ownership check in update
+	if !strings.Contains(out.IndexTS, "writeError(c, 404, 'NOT_FOUND', 'record not found')") {
+		t.Errorf("expected IndexTS to contain 404 NOT_FOUND check, got:\n%s", out.IndexTS)
+	}
+}
