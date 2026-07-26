@@ -148,6 +148,7 @@ func (g *Generator) generateIndexTS(resources []*resource.Resource) string {
 
 type Bindings = {
   DB: D1Database;
+  BUCKET: R2Bucket;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -652,6 +653,119 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  html += `</dl></body></html>`;\n")
 		sb.WriteString("  return c.html(html);\n")
 		sb.WriteString("});\n")
+
+		// 10. Blob endpoints for any blob fields
+		for _, f := range p.Fields {
+			if f.Type != resource.TypeBlob || f.Deprecated {
+				continue
+			}
+			blobField := f.Name
+
+			// 10a. POST /api/{table}/:id/upload/{field} (2-Step Overwrite Upload)
+			sb.WriteString(fmt.Sprintf("\n// OVERWRITE UPLOAD /api/%s/:id/upload/%s\n", table, blobField))
+			sb.WriteString(fmt.Sprintf("app.post('%s/:id/upload/%s', async (c) => {\n", endpoint, blobField))
+			sb.WriteString("  const authUser = await getAuthUser(c);\n")
+			if permUpdate != "public" {
+				sb.WriteString("  if (!authUser) {\n")
+				sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+				sb.WriteString("  }\n")
+			}
+			sb.WriteString("  const id = c.req.param('id');\n")
+			sb.WriteString(fmt.Sprintf("  const existing = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first<any>();\n", table, softCond))
+			sb.WriteString("  if (!existing) {\n")
+			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
+			sb.WriteString("  }\n")
+			if permUpdate == "owner" && ownershipField != "" {
+				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && existing['%s'] != authUser.id) {\n", ownershipField))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			} else if strings.HasPrefix(permUpdate, "role:") {
+				role := strings.TrimPrefix(permUpdate, "role:")
+				sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			}
+
+			sb.WriteString("  const formData = await c.req.formData().catch(() => null);\n")
+			sb.WriteString(fmt.Sprintf("  const file = formData ? formData.get('%s') as File : null;\n", blobField))
+			sb.WriteString("  if (!file) {\n")
+			sb.WriteString("    return writeError(c, 400, 'VALIDATION_FAILED', 'missing file payload');\n")
+			sb.WriteString("  }\n")
+			sb.WriteString("  const ext = file.name ? file.name.substring(file.name.lastIndexOf('.')) : '';\n")
+			sb.WriteString(fmt.Sprintf("  const key = `blobs/%s/${id}/%s_${Date.now()}${ext}`;\n", table, blobField))
+			sb.WriteString("  await c.env.BUCKET.put(key, file.stream(), { httpMetadata: { contentType: file.type } });\n")
+			sb.WriteString(fmt.Sprintf("  await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = ? WHERE id = ?').bind(key, id).run();\n", table, blobField))
+			sb.WriteString(fmt.Sprintf("  return c.json({ data: { %s: key } });\n", blobField))
+			sb.WriteString("});\n")
+
+			// 10b. GET /api/{table}/:id/blob/{field} (Download)
+			sb.WriteString(fmt.Sprintf("\n// DOWNLOAD BLOB /api/%s/:id/blob/%s\n", table, blobField))
+			sb.WriteString(fmt.Sprintf("app.get('%s/:id/blob/%s', async (c) => {\n", endpoint, blobField))
+			sb.WriteString("  const authUser = await getAuthUser(c);\n")
+			if permRead != "public" {
+				sb.WriteString("  if (!authUser) {\n")
+				sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+				sb.WriteString("  }\n")
+			}
+			sb.WriteString("  const id = c.req.param('id');\n")
+			sb.WriteString(fmt.Sprintf("  const record = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first<any>();\n", table, softCond))
+			sb.WriteString("  if (!record) {\n")
+			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
+			sb.WriteString("  }\n")
+			if permRead == "owner" && ownershipField != "" {
+				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && record['%s'] != authUser.id) {\n", ownershipField))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			} else if strings.HasPrefix(permRead, "role:") {
+				role := strings.TrimPrefix(permRead, "role:")
+				sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			}
+			sb.WriteString(fmt.Sprintf("  const key = record['%s'];\n", blobField))
+			sb.WriteString("  if (!key) {\n")
+			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'blob key not found');\n")
+			sb.WriteString("  }\n")
+			sb.WriteString("  const object = await c.env.BUCKET.get(key);\n")
+			sb.WriteString("  if (!object) {\n")
+			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'blob object not found in R2');\n")
+			sb.WriteString("  }\n")
+			sb.WriteString("  c.header('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream');\n")
+			sb.WriteString("  return c.body(object.body);\n")
+			sb.WriteString("});\n")
+
+			// 10c. DELETE /api/{table}/:id/blob/{field} (Delete Blob)
+			sb.WriteString(fmt.Sprintf("\n// DELETE BLOB /api/%s/:id/blob/%s\n", table, blobField))
+			sb.WriteString(fmt.Sprintf("app.delete('%s/:id/blob/%s', async (c) => {\n", endpoint, blobField))
+			sb.WriteString("  const authUser = await getAuthUser(c);\n")
+			if permDelete != "public" {
+				sb.WriteString("  if (!authUser) {\n")
+				sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+				sb.WriteString("  }\n")
+			}
+			sb.WriteString("  const id = c.req.param('id');\n")
+			sb.WriteString(fmt.Sprintf("  const record = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first<any>();\n", table, softCond))
+			sb.WriteString("  if (!record) {\n")
+			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
+			sb.WriteString("  }\n")
+			if permDelete == "owner" && ownershipField != "" {
+				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && record['%s'] != authUser.id) {\n", ownershipField))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			} else if strings.HasPrefix(permDelete, "role:") {
+				role := strings.TrimPrefix(permDelete, "role:")
+				sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("  }\n")
+			}
+			sb.WriteString(fmt.Sprintf("  const key = record['%s'];\n", blobField))
+			sb.WriteString("  if (key) {\n")
+			sb.WriteString("    await c.env.BUCKET.delete(key);\n")
+			sb.WriteString(fmt.Sprintf("    await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = NULL WHERE id = ?').bind(id).run();\n", table, blobField))
+			sb.WriteString("  }\n")
+			sb.WriteString("  return c.json({ data: { deleted: true } });\n")
+			sb.WriteString("});\n")
+		}
 	}
 
 	sb.WriteString(`
@@ -747,6 +861,12 @@ func (g *Generator) generateWranglerConfig() string {
       "binding": "DB",
       "database_name": "mold-d1",
       "database_id": "local-mold-d1"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "mold-r2"
     }
   ]
 }

@@ -458,3 +458,60 @@ func TestCloudflareGenerator_HTMLDefaultView(t *testing.T) {
 		t.Errorf("expected IndexTS to apply sanitizeHTML to markdown body, got:\n%s", out.IndexTS)
 	}
 }
+
+// TestCloudflareGenerator_BlobFieldR2 verifies generation of R2 Blob endpoints and Wrangler config.
+func TestCloudflareGenerator_BlobFieldR2(t *testing.T) {
+	resourceDir := t.TempDir()
+	docYAML := `
+resource:
+  name: Document
+  timestamps: true
+  soft_delete: true
+fields:
+  - name: title
+    type: string
+    nullable: false
+  - name: file_key
+    type: blob
+    nullable: true
+`
+	if err := os.WriteFile(filepath.Join(resourceDir, "Document.yaml"), []byte(docYAML), 0644); err != nil {
+		t.Fatalf("failed writing Document.yaml: %v", err)
+	}
+
+	reg, err := resource.LoadAll(resourceDir)
+	if err != nil {
+		t.Fatalf("failed loading Document IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify BUCKET binding in IndexTS
+	if !strings.Contains(out.IndexTS, "BUCKET: R2Bucket;") {
+		t.Errorf("expected IndexTS to contain BUCKET: R2Bucket binding, got:\n%s", out.IndexTS)
+	}
+
+	// 2. Verify r2_buckets in WranglerConfig
+	if !strings.Contains(out.WranglerConfig, `"r2_buckets": [`) {
+		t.Errorf("expected WranglerConfig to contain r2_buckets, got:\n%s", out.WranglerConfig)
+	}
+
+	// 3. Verify Overwrite Upload endpoint
+	if !strings.Contains(out.IndexTS, "app.post('/api/documents/:id/upload/file_key', async (c) => {") {
+		t.Errorf("expected IndexTS to contain upload endpoint, got:\n%s", out.IndexTS)
+	}
+
+	// 4. Verify Download Blob endpoint
+	if !strings.Contains(out.IndexTS, "app.get('/api/documents/:id/blob/file_key', async (c) => {") {
+		t.Errorf("expected IndexTS to contain download endpoint, got:\n%s", out.IndexTS)
+	}
+
+	// 5. Verify Delete Blob endpoint
+	if !strings.Contains(out.IndexTS, "app.delete('/api/documents/:id/blob/file_key', async (c) => {") {
+		t.Errorf("expected IndexTS to contain delete endpoint, got:\n%s", out.IndexTS)
+	}
+}
