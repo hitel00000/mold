@@ -210,7 +210,9 @@ function sanitizeHTML(html: string): string {
   if (!html) return '';
   return String(html)
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/on\w+="[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/on\w+\s*=\s*[^\s>]+/gi, '')
     .replace(/javascript:[^\s"']*/gi, '#');
 }
 

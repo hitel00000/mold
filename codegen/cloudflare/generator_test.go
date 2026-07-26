@@ -459,9 +459,12 @@ func TestCloudflareGenerator_HTMLDefaultView(t *testing.T) {
 		t.Errorf("expected IndexTS to contain 303 redirect after create submit, got:\n%s", out.IndexTS)
 	}
 
-	// 5. Verify Detail View route with XSS sanitization on markdown body
+	// 5. Verify Detail View route with XSS sanitization on markdown body and single/unquoted event handler stripping
 	if !strings.Contains(out.IndexTS, "sanitizeHTML(String(record['body'] || ''))") {
 		t.Errorf("expected IndexTS to apply sanitizeHTML to markdown body, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, ".replace(/on\\w+\\s*=\\s*'[^']*'/gi, '')") || !strings.Contains(out.IndexTS, ".replace(/on\\w+\\s*=\\s*[^\\s>]+/gi, '')") {
+		t.Errorf("expected IndexTS sanitizeHTML to contain single-quote and unquoted event handler stripping, got:\n%s", out.IndexTS)
 	}
 }
 
