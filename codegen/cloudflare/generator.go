@@ -160,10 +160,31 @@ function writeError(c: any, status: number, code: string, message: string) {
 
 async function hashPassword(plain: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(plain + ':mold_salt_v1');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return '$sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(plain), 'PBKDF2', false, ['deriveBits']);
+  const iterations = 100000;
+  const derivedBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, keyMaterial, 256);
+  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `$pbkdf2$${iterations}$${saltHex}$${hashHex}`;
+}
+
+async function verifyPassword(plain: string, storedHash: string): Promise<boolean> {
+  if (!storedHash || !storedHash.startsWith('$pbkdf2$')) {
+    return false;
+  }
+  const parts = storedHash.split('$');
+  if (parts.length !== 5) return false;
+  const iterations = parseInt(parts[2], 10);
+  const saltHex = parts[3];
+  const expectedHashHex = parts[4];
+
+  const saltBytes = new Uint8Array(saltHex.match(/.{1,2}/g)?.map(b => parseInt(b, 16)) || []);
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(plain), 'PBKDF2', false, ['deriveBits']);
+  const derivedBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations, hash: 'SHA-256' }, keyMaterial, 256);
+  const derivedHashHex = Array.from(new Uint8Array(derivedBits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return derivedHashHex === expectedHashHex;
 }
 
 function sanitizeRecord(record: any, passwordFields: string[]) {
@@ -783,13 +804,12 @@ app.post('/login', async (c) => {
     return writeError(c, 400, 'VALIDATION_FAILED', 'username and password are required');
   }
 
-  const hashed = await hashPassword(password);
   let user: any = null;
   try {
-    user = await c.env.DB.prepare('SELECT * FROM "users" WHERE email = ? AND password = ? AND ("deleted_at" IS NULL OR "deleted_at" = "")').bind(username, hashed).first<any>();
+    user = await c.env.DB.prepare('SELECT * FROM "users" WHERE email = ? AND ("deleted_at" IS NULL OR "deleted_at" = \'\')').bind(username).first<any>();
   } catch (e) {}
 
-  if (!user) {
+  if (!user || !(await verifyPassword(password, user.password))) {
     return writeError(c, 401, 'INVALID_CREDENTIALS', 'invalid email or password');
   }
 

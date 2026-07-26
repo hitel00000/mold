@@ -389,9 +389,15 @@ fields:
 		t.Errorf("expected SchemaSQL to contain _mold_sessions DDL, got:\n%s", out.SchemaSQL)
 	}
 
-	// 2. Verify hashPassword and sanitizeRecord TS helpers
+	// 2. Verify hashPassword, verifyPassword and sanitizeRecord TS helpers
 	if !strings.Contains(out.IndexTS, "async function hashPassword(plain: string): Promise<string>") {
 		t.Errorf("expected IndexTS to contain hashPassword helper, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "async function verifyPassword(plain: string, storedHash: string)") {
+		t.Errorf("expected IndexTS to contain verifyPassword helper, got:\n%s", out.IndexTS)
+	}
+	if !strings.Contains(out.IndexTS, "`$pbkdf2$${iterations}$${saltHex}$${hashHex}`") {
+		t.Errorf("expected IndexTS to contain $pbkdf2$ format string, got:\n%s", out.IndexTS)
 	}
 	if !strings.Contains(out.IndexTS, "function sanitizeRecord(record: any, passwordFields: string[])") {
 		t.Errorf("expected IndexTS to contain sanitizeRecord helper, got:\n%s", out.IndexTS)
