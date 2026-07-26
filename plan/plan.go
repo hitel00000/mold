@@ -33,6 +33,9 @@ type Plan struct {
 	Timestamps    bool
 	SoftDelete    bool
 
+	// Auth contains authentication and row-level permission specifications.
+	Auth *resource.Auth
+
 	// Fields contains explicit fields plus belongs_to derived FK fields.
 	Fields []FieldPlan
 
@@ -54,6 +57,7 @@ func Build(res *resource.Resource) *Plan {
 		SchemaVersion: res.SchemaVersion,
 		Timestamps:    res.Timestamps,
 		SoftDelete:    res.SoftDelete,
+		Auth:          res.Auth,
 		Fields:        make([]FieldPlan, 0, len(res.Fields)+len(res.Relations)),
 		Relations:     make([]RelationPlan, 0, len(res.Relations)),
 	}
