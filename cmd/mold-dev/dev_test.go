@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/hitel00000/mold/resource"
 )
 
 func TestMoldDev_E2EFileWatchReload(t *testing.T) {
@@ -90,13 +88,8 @@ fields:
 	defer ds.Close()
 
 	// Seed Admin User into database before login so Option A login succeeds
-	resReg, err := resource.LoadAll(resourceDir)
-	if err != nil {
-		t.Fatalf("failed loading resources for admin seeding: %v", err)
-	}
-	userRes, _ := resReg.Get("User")
 	ctx := context.Background()
-	_, err = ds.App().Store().Create(ctx, userRes, map[string]any{
+	_, err = ds.App().CreateRecord(ctx, "User", map[string]any{
 		"email":    "admin@mold.dev",
 		"password": "adminpassword123",
 		"name":     "Admin User",

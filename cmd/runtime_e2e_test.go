@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
 )
 
@@ -104,12 +103,7 @@ fields:
 	}
 
 	// 2. Seed Admin User & Login
-	resReg, err := resource.LoadAll(resourceDir)
-	if err != nil {
-		t.Fatalf("failed to load resources for seeding: %v", err)
-	}
-	userRes, _ := resReg.Get("User")
-	_, err = app.Store().Create(ctx, userRes, map[string]any{
+	_, err = app.CreateRecord(ctx, "User", map[string]any{
 		"email":    "admin@mold.dev",
 		"password": "adminpassword123",
 		"name":     "Admin User",
