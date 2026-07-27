@@ -13,6 +13,30 @@
 
 ---
 
+## 1.5 실행 파이프라인 계층 (Resource → IR → Plan → Target)
+
+Mold 런타임 및 정적 코드 생성기(Codegen)는 아래 3단계 단방향 파이프라인으로 동작하며, 9개 타깃(DDL/Validation/Sanitize/View Form/View Handler/Cloudflare TS 등)의 필드 해석이 이 계층을 통해 100% 수렴되어 있다.
+
+```
+resource.NormalizeFields()  (Layer 0: IR 원천 유틸 — FK 필드 파생 등 구조적 사실)
+        ↓
+plan.Build()                (Layer 1: 타깃 독립 정규화 Execution Plan)
+        ↓
+각 타깃 패키지               (Layer 2: adapters/sqlite, transport, view, codegen/cloudflare)
+```
+
+1. **Layer 0 (IR 원천 및 파생 유틸 - `resource.Resource` / `resource.NormalizeFields()`)**:
+   - Resource IR의 순수 구조적 명세 및 기본 필드 파생(예: `belongs_to` 연관 관계에 따른 implicit FK 필드 팽창)을 담당한다.
+   - 타깃 독립적이고 순수한 domain entity 계층으로, 상위 `plan` 패키지를 참조하지 않아 Go 언어 패키지 순환 참조(`import cycle`)를 차단한다.
+2. **Layer 1 (Execution Plan - `plan.Build()`)**:
+   - 단일 `*resource.Resource` IR을 입력받아 타깃 독립적인 실행 플랜(`*plan.Plan`)을 생성한다.
+   - `res.NormalizeFields()`를 순회하며 각 필드의 `IsDerivedFK` 등의 속성을 계산하고 정규화된 `FieldPlan` / `RelationPlan` 목록을 구축한다.
+   - 단일 리소스 스코프 1:1 보존으로 관계 대상 리소스 간 순환 참조 발생 가능성을 원천 차단한다.
+3. **Layer 2 (Target Implementations - `adapters/sqlite`, `transport`, `view`, `codegen/cloudflare`)**:
+   - 비즈니스 해석이나 추가 파생 로직 없이 `plan.Plan` (또는 필요시 `resource.NormalizeFields()`)만을 전달받아 주어진 명세를 직렬화 및 실행(DDL 생성, JSON Parsing, Form Rendering, TS Codegen 등)한다.
+
+---
+
 ## 2. Top-level: Resource
 
 ```yaml
