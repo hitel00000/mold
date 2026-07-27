@@ -471,4 +471,36 @@ func TestRouter_UniqueTogether_E2E(t *testing.T) {
 	if resp3.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created on insert after soft delete, got %d", resp3.StatusCode)
 	}
+
+	// 5. Create a second distinct record (sake_record_id: 1, tag_id: 20) -> 201 Created
+	payload2 := `{"sake_record_id": 1, "tag_id": 20}`
+	resp4, err := ts.Client().Post(ts.URL+"/api/record_tags", "application/json", strings.NewReader(payload2))
+	if err != nil {
+		t.Fatalf("failed to send post for second record: %v", err)
+	}
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created on second distinct insert, got %d", resp4.StatusCode)
+	}
+
+	// 6. Update second record (id: 3) to conflict with active record 2 (sake_record_id: 1, tag_id: 10) -> 400 Bad Request
+	payloadUpdateConflict := `{"sake_record_id": 1, "tag_id": 10}`
+	reqUpd, _ := http.NewRequest("PUT", ts.URL+"/api/record_tags/3", strings.NewReader(payloadUpdateConflict))
+	reqUpd.Header.Set("Content-Type", "application/json")
+	respUpd, err := ts.Client().Do(reqUpd)
+	if err != nil {
+		t.Fatalf("failed to send update request: %v", err)
+	}
+	defer respUpd.Body.Close()
+	if respUpd.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on conflicting update, got %d", respUpd.StatusCode)
+	}
+
+	var errEnvelopeUpd transport.ErrorEnvelope
+	if err := json.NewDecoder(respUpd.Body).Decode(&errEnvelopeUpd); err != nil {
+		t.Fatalf("failed to decode update error response: %v", err)
+	}
+	if errEnvelopeUpd.Error.Code != "INVALID_INPUT" {
+		t.Errorf("expected error code INVALID_INPUT on update conflict, got '%s'", errEnvelopeUpd.Error.Code)
+	}
 }
