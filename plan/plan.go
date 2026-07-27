@@ -41,6 +41,9 @@ type Plan struct {
 
 	// Relations contains normalized relation plans.
 	Relations []RelationPlan
+
+	// UniqueTogether contains multi-column uniqueness constraints.
+	UniqueTogether [][]string
 }
 
 // Build constructs a target-agnostic Plan from a single resource.Resource IR.
@@ -51,15 +54,21 @@ func Build(res *resource.Resource) *Plan {
 		return nil
 	}
 
+	var uniqueTogether [][]string
+	if res.Constraints != nil {
+		uniqueTogether = res.Constraints.UniqueTogether
+	}
+
 	p := &Plan{
-		ResourceName:  res.Name,
-		Table:         res.Table,
-		SchemaVersion: res.SchemaVersion,
-		Timestamps:    res.Timestamps,
-		SoftDelete:    res.SoftDelete,
-		Auth:          res.Auth,
-		Fields:        make([]FieldPlan, 0, len(res.Fields)+len(res.Relations)),
-		Relations:     make([]RelationPlan, 0, len(res.Relations)),
+		ResourceName:   res.Name,
+		Table:          res.Table,
+		SchemaVersion:  res.SchemaVersion,
+		Timestamps:     res.Timestamps,
+		SoftDelete:     res.SoftDelete,
+		Auth:           res.Auth,
+		UniqueTogether: uniqueTogether,
+		Fields:         make([]FieldPlan, 0, len(res.Fields)+len(res.Relations)),
+		Relations:      make([]RelationPlan, 0, len(res.Relations)),
 	}
 
 	for _, rel := range res.Relations {

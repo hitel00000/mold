@@ -80,16 +80,22 @@ type Auth struct {
 	Permissions    Permissions `yaml:"permissions,omitempty" json:"permissions,omitempty"`
 }
 
+// ResourceConstraints defines resource-level multi-column constraints.
+type ResourceConstraints struct {
+	UniqueTogether [][]string `yaml:"unique_together,omitempty" json:"unique_together,omitempty"`
+}
+
 // Resource represents the complete Intermediate Representation (IR) of a resource.
 type Resource struct {
-	Name          string     `yaml:"name" json:"name"`
-	Table         string     `yaml:"table" json:"table"`
-	SchemaVersion int        `yaml:"schema_version" json:"schema_version"`
-	Timestamps    bool       `yaml:"timestamps" json:"timestamps"`
-	SoftDelete    bool       `yaml:"soft_delete" json:"soft_delete"`
-	Fields        []Field    `yaml:"fields" json:"fields"`
-	Relations     []Relation `yaml:"relations" json:"relations"`
-	Auth          *Auth      `yaml:"auth,omitempty" json:"auth,omitempty"`
+	Name          string               `yaml:"name" json:"name"`
+	Table         string               `yaml:"table" json:"table"`
+	SchemaVersion int                  `yaml:"schema_version" json:"schema_version"`
+	Timestamps    bool                 `yaml:"timestamps" json:"timestamps"`
+	SoftDelete    bool                 `yaml:"soft_delete" json:"soft_delete"`
+	Fields        []Field              `yaml:"fields" json:"fields"`
+	Relations     []Relation           `yaml:"relations" json:"relations"`
+	Auth          *Auth                `yaml:"auth,omitempty" json:"auth,omitempty"`
+	Constraints   *ResourceConstraints `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 }
 
 // NormalizeFields returns the complete list of fields for the resource, expanding implicit foreign key
