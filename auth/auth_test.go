@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hitel00000/mold/adapters/sqlite"
 	"github.com/hitel00000/mold/auth"
@@ -663,3 +665,54 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 		t.Errorf("expected session cookie %s to be set upon successful login", auth.SessionCookieName)
 	}
 }
+
+func TestSessionManager_CreateSessionForUser(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sess_test.db")
+
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed opening sqlite: %v", err)
+	}
+	defer rawDB.Close()
+
+	sm, err := auth.NewSessionManager(rawDB)
+	if err != nil {
+		t.Fatalf("failed creating SessionManager: %v", err)
+	}
+
+	// 1. Create session for user ID without user table record (defaults to role 'user')
+	token1, exp1, err := sm.CreateSessionForUser(context.Background(), 101)
+	if err != nil {
+		t.Fatalf("failed CreateSessionForUser for ID 101: %v", err)
+	}
+	if token1 == "" || exp1.Before(time.Now()) {
+		t.Errorf("invalid session output: token=%s, exp=%v", token1, exp1)
+	}
+
+	sess1, err := sm.GetSession(context.Background(), token1)
+	if err != nil || sess1 == nil {
+		t.Fatalf("failed retrieving session: %v", err)
+	}
+	if fmt.Sprintf("%v", sess1.UserID) != "101" || sess1.Role != "user" {
+		t.Errorf("unexpected session data: userID=%v, role=%s", sess1.UserID, sess1.Role)
+	}
+
+	// 2. Create session for user ID with explicit role in "users" table
+	_, _ = rawDB.Exec(`CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY, "role" TEXT NOT NULL);`)
+	_, _ = rawDB.Exec(`INSERT INTO "users" ("id", "role") VALUES (202, 'admin');`)
+
+	token2, _, err := sm.CreateSessionForUser(context.Background(), 202)
+	if err != nil {
+		t.Fatalf("failed CreateSessionForUser for ID 202: %v", err)
+	}
+
+	sess2, err := sm.GetSession(context.Background(), token2)
+	if err != nil || sess2 == nil {
+		t.Fatalf("failed retrieving session 2: %v", err)
+	}
+	if sess2.Role != "admin" {
+		t.Errorf("expected role 'admin', got '%s'", sess2.Role)
+	}
+}
+
