@@ -213,13 +213,21 @@
     4. **에러 포획 & 패리티 100%**: Go `transport` (`handler.go`) 및 Cloudflare TS (`generator.go`) POST / PUT 핸들러에서 Unique 위반 발생 시 `HTTP 400 Bad Request`, `code: INVALID_INPUT`으로 100% 동일 패리티 응답 구조 확립.
   - **실측 검증**: RecordTag (`sake_record_id`, `tag_id` + `soft_delete: true`) 기반 Miniflare/D1 실측 5대 시나리오 (1차 생성 201 ➔ 2차 중복 생성 차단 400 `INVALID_INPUT` ➔ soft delete 200 ➔ 3차 동일 조합 재생성 허용 201 ➔ 4차 충돌 update 차단 400 `INVALID_INPUT`) 100% PASS 완결.
 
-- [ ] **Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log`에 실제 적용**
-  - **목적**: `docs/resource-guide.md` N:M 패턴 가이드에 따라 `RecordTag` Join Resource YAML (`sake_record_id`, `tag_id` FK + `nullable: false` + `unique_together`)을 작성하고 `drink-log` 프로젝트에 적용한다.
-  - **완료 조건**: 사케 기록에 태그를 다중 연결/해제하는 CRUD 동작 및 동일 태그 중복 연결 시 무결성 차단 동작을 E2E 검증한다.
+- [x] **Task 5.2: N:M (`record_tags`) Join Resource 패턴 `drink-log` 격리 파일럿 적용 및 마찰 수집 완결**
+  - **작업 내용**:
+    1. **격리 파일럿 Resource YAML 3개 작성 (`examples/drink-log-pilot/`)**: `SakeRecord.yaml`, `Tag.yaml`, `RecordTag.yaml` (`sake_record_id` & `tag_id` `nullable: false`, `belongs_to` 2개, `constraints.unique_together: [[sake_record_id, tag_id]]`).
+    2. **DDL Parity 대조표 수립**: `codegen/cloudflare` D1 DDL 생성 결과와 기존 손수 작성 스키마 대조 (Partial Unique Index `CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL` 자동 반영 및 구조적 동등성 확인).
+    3. **Miniflare 5대 E2E 실측 시나리오 100% PASS**: SakeRecord 생성(201) ➔ System/User Tag 생성 및 List(201/200) ➔ RecordTag 연결(201) ➔ 중복 연결 시 `unique_together` 차단 (400 Bad Request `INVALID_INPUT` - `unique constraint failed: D1_ERROR: UNIQUE constraint failed: record_tags.sake_record_id, record_tags.tag_id: SQLITE_CONSTRAINT`) ➔ RecordTag 관계 조회(200).
+    4. **YAML Loader 결함 수정 (`fix(resource)`)**: 파일럿 구동 중 YAML 파일에서 최상위 `constraints.unique_together`를 파싱할 때 `resource/loader.go` switch 문에 `case "constraints":` 디코딩 누락으로 `r.Constraints`가 nil이 되던 결함 발견 및 수정 (`loader.go`, `loader_test.go`).
+  - **발견된 3대 마찰 기록 (Phase 1 회고 형식)**:
+    - *마찰 A (Nullable Ownership 표현 한계)*: `Tag` 리소스처럼 기본 태그(`owner_id = NULL`)와 사용자 커스텀 태그(`owner_id = <user_id>`)가 혼재할 때, `auth.permissions.read: owner` 지정 시 `owner_id = NULL`인 기본 태그를 어느 유저도 조회하지 못함 (403 Forbidden). 현재 IR 엔진은 "ownership_field가 NULL이면 public 접근 허용" 식의 Nullable 소유권 정책 semantic을 지원하지 않아 `read: public`으로 완화해야 하며, 이 경우 타인의 커스텀 태그까지 읽기 권한이 열리는 권한 모호성이 관찰됨.
+    - *마찰 B (Join Resource를 통한 관계 조인의 자연스러움 한계)*: `RecordTag` Join Resource 작성 후 `GET /api/record_tags` 호출 시, 특정 `sake_record_id`에 속한 태그 목록만 필터링하거나 태그 상세 정보(`Tag.name`)를 한 번의 API 호출로 함께 내려받는 관계 조인 조회(Eager Loading / Include)가 기본 REST CRUD API 수준에서는 지원되지 않음. 클라이언트는 N+1 번의 API 호출(`RecordTag` 목록 조회 -> 개별 `Tag` 조회)을 수행하거나 Custom View/쿼리를 도입해야 하는 한계 관찰.
+    - *마찰 C (복합 Unique 제약의 SoftDelete 마킹 후 Re-creation 및 DDL 차이)*: 기존 SQL의 `UNIQUE(record_id, tag_id)` 제약이 Mold의 SoftDelete 정책과 결합하면서 `WHERE deleted_at IS NULL`인 Partial Unique Index로 자동 전환됨. 이는 soft-deleted 레코드와 무결성 충돌 없이 re-creation을 보장하는 올바른 디자인이나, 기존 DDL과의 직접 문자열 diff 시 차이로 관찰됨.
 
 - [ ] **Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 `drink-log` Google OAuth 연동**
   - **목적**: 외부 OAuth 검증 완료 후 Mold 세션을 발급하는 공개 API (가칭 `runtime.App.IssueSessionForUser` 또는 `auth.SessionManager` 동등 메서드)를 구현한다.
   - **완료 조건**: `drink-log`에서 Google OAuth 콜백 처리 후 발급받은 세션 쿠키로 Mold의 보호된 엔드포인트 접근 및 row-level owner 권한 평가가 정상 작동함을 실측 검증한다.
+
 
 
 
