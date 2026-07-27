@@ -205,9 +205,13 @@
 
 ### Phase 5: `drink-log` 잔여 기능 - N:M & OAuth
 
-- [ ] **Task 5.1: 복합 Unique Constraint (`constraints.unique_together`) IR/DDL/Validation 실구현**
-  - **목적**: `docs/ir-spec.md` 5.6절에 정의된 `constraints.unique_together` 스펙을 `resource/ir.go` IR 구조체, `adapters/sqlite` Partial Unique Index DDL 생성, 및 `resource/record_validate.go` 유일성 검증 로직에 구현한다.
-  - **완료 조건**: 단일 및 복합 `unique_together` 컬럼 조합에 대한 SQLite DDL (`CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL`) 정상 생성 검증 및 중복 데이터 입력 시 400 Validation Error 차단을 단위 테스트로 증명한다.
+- [x] **Task 5.1: 복합 Unique Constraint (`constraints.unique_together`) Go 코어 & Cloudflare D1 Target 실구현 완결**
+  - **작업 내용**:
+    1. **IR 확장 & Plan 수렴**: `resource/ir.go`에 `ResourceConstraints` 구조체 및 `Resource.Constraints` 추가. `plan/plan.go` `plan.Plan` 최상위에 `UniqueTogether [][]string`을 편입시켜 타깃 독립적 실행 계획으로 수렴.
+    2. **메타스키마 검증**: `resource/validate.go`에 지정 필드 존재 여부(`NormalizeFields()`), 최소 2개 필드 필수, 그룹 내 필드명 중복 금지 규칙 추가.
+    3. **DDL 생성**: `adapters/sqlite` 및 `codegen/cloudflare`에 `soft_delete: true`일 경우 Partial Unique Index (`CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL`), `soft_delete: false`일 경우 Normal Unique Index DDL 생성 구현.
+    4. **에러 포획 & 패리티 100%**: Go `transport` (`handler.go`) 및 Cloudflare TS (`generator.go`) POST / PUT 핸들러에서 Unique 위반 발생 시 `HTTP 400 Bad Request`, `code: INVALID_INPUT`으로 100% 동일 패리티 응답 구조 확립.
+  - **실측 검증**: RecordTag (`sake_record_id`, `tag_id` + `soft_delete: true`) 기반 Miniflare/D1 실측 5대 시나리오 (1차 생성 201 ➔ 2차 중복 생성 차단 400 `INVALID_INPUT` ➔ soft delete 200 ➔ 3차 동일 조합 재생성 허용 201 ➔ 4차 충돌 update 차단 400 `INVALID_INPUT`) 100% PASS 완결.
 
 - [ ] **Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log`에 실제 적용**
   - **목적**: `docs/resource-guide.md` N:M 패턴 가이드에 따라 `RecordTag` Join Resource YAML (`sake_record_id`, `tag_id` FK + `nullable: false` + `unique_together`)을 작성하고 `drink-log` 프로젝트에 적용한다.
