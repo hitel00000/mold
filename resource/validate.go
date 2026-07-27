@@ -116,6 +116,31 @@ func Validate(r *Resource) error {
 		}
 	}
 
+	// Validate Resource-level Constraints (unique_together)
+	if r.Constraints != nil && len(r.Constraints.UniqueTogether) > 0 {
+		normalizedFields := r.NormalizeFields()
+		allFieldNames := make(map[string]bool, len(normalizedFields))
+		for _, f := range normalizedFields {
+			allFieldNames[f.Name] = true
+		}
+
+		for idx, group := range r.Constraints.UniqueTogether {
+			if len(group) < 2 {
+				return fmt.Errorf("resource '%s': unique_together group at index %d must contain at least 2 fields, got %d", r.Name, idx, len(group))
+			}
+			groupFieldMap := make(map[string]bool, len(group))
+			for _, col := range group {
+				if groupFieldMap[col] {
+					return fmt.Errorf("resource '%s': duplicate field '%s' in unique_together group at index %d", r.Name, col, idx)
+				}
+				groupFieldMap[col] = true
+				if !allFieldNames[col] {
+					return fmt.Errorf("resource '%s': unique_together field '%s' does not exist in resource fields", r.Name, col)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

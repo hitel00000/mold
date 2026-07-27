@@ -118,3 +118,66 @@ func TestValidateTargetResources_MissingTarget(t *testing.T) {
 		t.Errorf("expected error for missing relation target, got nil")
 	}
 }
+
+func TestValidate_UniqueTogether(t *testing.T) {
+	validRes := &resource.Resource{
+		Name: "RecordTag",
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+			{Name: "tag_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "tag_id"},
+			},
+		},
+	}
+	if err := resource.Validate(validRes); err != nil {
+		t.Errorf("expected valid unique_together to pass validation, got: %v", err)
+	}
+
+	nonExistentFieldRes := &resource.Resource{
+		Name: "RecordTag",
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "unknown_field"},
+			},
+		},
+	}
+	if err := resource.Validate(nonExistentFieldRes); err == nil {
+		t.Errorf("expected error for non-existent field in unique_together, got nil")
+	}
+
+	singleFieldGroupRes := &resource.Resource{
+		Name: "RecordTag",
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id"},
+			},
+		},
+	}
+	if err := resource.Validate(singleFieldGroupRes); err == nil {
+		t.Errorf("expected error for single field group in unique_together, got nil")
+	}
+
+	duplicateInGroupRes := &resource.Resource{
+		Name: "RecordTag",
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "sake_record_id"},
+			},
+		},
+	}
+	if err := resource.Validate(duplicateInGroupRes); err == nil {
+		t.Errorf("expected error for duplicate field in unique_together group, got nil")
+	}
+}
