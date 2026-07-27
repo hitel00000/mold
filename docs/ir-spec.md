@@ -274,3 +274,7 @@ Authorization: (세션 쿠키, role: admin 필요)
 * [x] **`schema_version` 관리 단위**  
   **결정**: `schema_version`은 Resource 단위로 관리함.  
   **근거**: Resource 파싱, 검증, 로드가 단일 파일(Resource) 단위로 원자적(Atomic) 처리되므로, 필드 단위 관리는 불필요한 추상화 복잡도를 가중시킴 (마세라티 원칙 적용).
+
+* [x] **Plan 계층 (`plan` 패키지) 도입 및 3단계 파이프라인 수렴**  
+  **결정**: `resource.NormalizeFields()` (Layer 0) ➔ `plan.Build()` (Layer 1) ➔ Target Packages (Layer 2) 3단계 단방향 계층 구조를 채택하고, 9개 타깃(SQLite DDL, Transport Sanitize/Multipart, View Form/Widget, Record Validation, Cloudflare Codegen DDL/Validation/Bind)의 필드 루프 및 FK 파생 로직을 단일 수렴 지점으로 이관 완료함.  
+  **근거**: Target 패키지마다 반복되던 `switch f.Type` 및 `KindBelongsTo` 루프 파편화를 원천 차단하고, `resource` ➔ `plan` ➔ `resource` 순환 참조(`import cycle`) 오류 포착 시 `NormalizeFields()`를 Layer 0 IR 원천 유틸로 승격시켜 단방향 컴파일 계층을 완성함.
