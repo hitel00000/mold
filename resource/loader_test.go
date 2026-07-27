@@ -77,3 +77,35 @@ fields:
 		t.Errorf("expected error when fields is a map instead of sequence, got nil")
 	}
 }
+
+func TestLoad_ResourceConstraints(t *testing.T) {
+	yamlData := []byte(`
+resource:
+  name: RecordTag
+  table: record_tags
+
+fields:
+  - name: sake_record_id
+    type: int
+  - name: tag_id
+    type: int
+
+constraints:
+  unique_together:
+    - [sake_record_id, tag_id]
+`)
+	r, err := resource.Load(yamlData)
+	if err != nil {
+		t.Fatalf("unexpected load error: %v", err)
+	}
+
+	if r.Constraints == nil || len(r.Constraints.UniqueTogether) != 1 {
+		t.Fatalf("expected 1 unique_together constraint group, got: %v", r.Constraints)
+	}
+
+	group := r.Constraints.UniqueTogether[0]
+	if len(group) != 2 || group[0] != "sake_record_id" || group[1] != "tag_id" {
+		t.Errorf("unexpected unique_together content: %v", group)
+	}
+}
+

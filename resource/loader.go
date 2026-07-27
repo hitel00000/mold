@@ -99,6 +99,12 @@ func Load(data []byte) (*Resource, error) {
 				return nil, fmt.Errorf("failed to parse auth: %w", err)
 			}
 			r.Auth = &auth
+		case "constraints":
+			var c ResourceConstraints
+			if err := valNode.Decode(&c); err != nil {
+				return nil, fmt.Errorf("failed to parse constraints: %w", err)
+			}
+			r.Constraints = &c
 		}
 	}
 
