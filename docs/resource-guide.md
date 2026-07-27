@@ -89,6 +89,10 @@ Mold는 11가지 Primitive / Semantic Type을 지원한다.
 - `foreign_key`: 타겟 또는 대상 테이블의 FK 컬럼명 (필수, 예: `post_id`)
 - `on_delete`: `restrict` | `soft_cascade` (선택, 부모 삭제 시 자식 처리)
 
+> [!TIP]
+> **`belongs_to` 관계의 자동 외래키(FK) 필드 파생**:
+> `belongs_to` 관계를 정의할 때 `foreign_key`에 지정한 컬럼(예: `post_id`)은 Mold 런타임에서 자동으로 `int` 타입(nullable: true) 필드로 확장 처리됩니다. 따라서 YAML 작성 시 **`fields` 목록에 해당 외래키 컬럼을 별도로 중복 기재할 필요가 없습니다.** (만약 `fields`에 명시적으로 추가하더라도 중복 생성 없이 안전하게 처리됩니다).
+
 ---
 
 ## 5. Auth & Permissions (인증 및 권한)
