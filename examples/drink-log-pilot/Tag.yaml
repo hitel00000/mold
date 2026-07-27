@@ -1,0 +1,23 @@
+resource:
+  name: Tag
+  table: tags
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+    constraints:
+      unique: true
+  - name: owner_id
+    type: int
+    nullable: true
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: public
+    update: owner
+    delete: owner

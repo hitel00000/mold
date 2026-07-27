@@ -1,0 +1,30 @@
+resource:
+  name: SakeRecord
+  table: sake_records
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+  - name: consumed_date
+    type: datetime
+    nullable: false
+  - name: rating
+    type: float
+    nullable: true
+  - name: notes
+    type: text
+    nullable: true
+  - name: owner_id
+    type: int
+    nullable: false
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner

@@ -1,0 +1,34 @@
+resource:
+  name: RecordTag
+  table: record_tags
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: sake_record_id
+    type: int
+    nullable: false
+  - name: tag_id
+    type: int
+    nullable: false
+
+relations:
+  - name: sake_record
+    kind: belongs_to
+    target: SakeRecord
+    foreign_key: sake_record_id
+  - name: tag
+    kind: belongs_to
+    target: Tag
+    foreign_key: tag_id
+
+constraints:
+  unique_together:
+    - [sake_record_id, tag_id]
+
+auth:
+  permissions:
+    create: authenticated
+    read: authenticated
+    update: authenticated
+    delete: authenticated
