@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hitel00000/mold/adapters/fsblob"
 	"github.com/hitel00000/mold/adapters/sqlite"
@@ -217,3 +218,29 @@ func (a *App) Close() error {
 func (a *App) Store() *sqlite.Store {
 	return a.store
 }
+
+// IssueSessionForUser issues a session cookie value string and expiration time for an authenticated user ID.
+// This is an in-process Escape Hatch for external authentication (e.g. OAuth verification handled outside Mold).
+//
+// Security Rationale & Trust Boundary:
+// - In-process API ONLY: This method is intentionally NOT registered to any HTTP router endpoints.
+//   It must be invoked directly by trusted server-side Go application code within the same process boundary.
+// - Returns the formatted cookie value string (and raw session token) for '_mold_session' suitable for Set-Cookie header.
+func (a *App) IssueSessionForUser(ctx context.Context, userID int64) (string, time.Time, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if a.sessionMgr == nil {
+		return "", time.Time{}, ErrNotInitialized
+	}
+
+	token, exp, err := a.sessionMgr.CreateSessionForUser(ctx, userID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	cookieVal := fmt.Sprintf("%s=%s; Path=/; HttpOnly; SameSite=Lax", auth.SessionCookieName, token)
+	return cookieVal, exp, nil
+}
+

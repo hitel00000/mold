@@ -2,10 +2,14 @@ package runtime_test
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hitel00000/mold/runtime"
 	"github.com/hitel00000/mold/view"
@@ -229,3 +233,89 @@ fields:
 		}
 	})
 }
+
+func TestApp_IssueSessionForUser(t *testing.T) {
+	docYAML := `
+resource:
+  name: Document
+  table: documents
+fields:
+  - name: title
+    type: string
+  - name: user_id
+    type: int
+auth:
+  ownership_field: user_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner
+`
+	resDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(resDir, "Document.yaml"), []byte(docYAML), 0644); err != nil {
+		t.Fatalf("failed writing Document.yaml: %v", err)
+	}
+
+	cfg := runtime.Config{
+		ResourceDir: resDir,
+		DBPath:      filepath.Join(t.TempDir(), "oauth_session.db"),
+	}
+	app, err := runtime.New(cfg)
+	if err != nil {
+		t.Fatalf("failed building app: %v", err)
+	}
+	defer app.Close()
+
+	ctx := t.Context()
+
+	// 1. Issue session cookie for user_id = 999
+	cookieVal, exp, err := app.IssueSessionForUser(ctx, 999)
+	if err != nil {
+		t.Fatalf("failed IssueSessionForUser: %v", err)
+	}
+	if !strings.HasPrefix(cookieVal, "_mold_session=") {
+		t.Errorf("expected cookie value to start with '_mold_session=', got %s", cookieVal)
+	}
+	if exp.Before(time.Now()) {
+		t.Errorf("invalid expiration time: %v", exp)
+	}
+
+	// 2. Create document owned by user_id = 999
+	doc, err := app.CreateRecord(ctx, "Document", map[string]any{
+		"title":   "OAuth Protected Doc",
+		"user_id": 999,
+	})
+	if err != nil {
+		t.Fatalf("failed CreateRecord: %v", err)
+	}
+	docID := doc["id"]
+
+	// 3. Test HTTP request with issued session cookie -> 200 OK (Owner Access)
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%v", docID), nil)
+	req.Header.Set("Cookie", cookieVal)
+
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for owner read with issued session cookie, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 4. Test HTTP request for another user_id = 888 session -> 403 Forbidden
+	cookieVal888, _, err := app.IssueSessionForUser(ctx, 888)
+	if err != nil {
+		t.Fatalf("failed issuing session for 888: %v", err)
+	}
+
+	req403, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%v", docID), nil)
+	req403.Header.Set("Cookie", cookieVal888)
+
+	w403 := httptest.NewRecorder()
+	app.ServeHTTP(w403, req403)
+
+	if w403.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for non-owner user, got %d: %s", w403.Code, w403.Body.String())
+	}
+}
+
