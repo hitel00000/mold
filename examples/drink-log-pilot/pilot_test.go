@@ -59,12 +59,15 @@ func TestDrinkLogPilot_OAuthSessionE2E(t *testing.T) {
 	}
 
 	// 2. Issue session cookie using in-process Escape Hatch: app.IssueSessionForUser
-	cookieVal, exp, err := app.IssueSessionForUser(ctx, userID)
+	cookieVal, exp, err := app.IssueSessionForUser(ctx, userID, "user")
 	if err != nil {
 		t.Fatalf("failed IssueSessionForUser: %v", err)
 	}
 	if !strings.HasPrefix(cookieVal, "_mold_session=") {
 		t.Errorf("expected cookie value to start with '_mold_session=', got %s", cookieVal)
+	}
+	if !strings.Contains(cookieVal, "Secure") || !strings.Contains(cookieVal, "Expires=") || !strings.Contains(cookieVal, "Max-Age=") {
+		t.Errorf("expected cookie value to contain Secure, Expires, and Max-Age attributes, got %s", cookieVal)
 	}
 	if exp.Before(time.Now()) {
 		t.Errorf("invalid expiration time: %v", exp)
@@ -95,7 +98,7 @@ func TestDrinkLogPilot_OAuthSessionE2E(t *testing.T) {
 	}
 
 	// 5. Test HTTP GET /api/sake_records/:id with another user's cookie -> 403 Forbidden
-	cookieValOther, _, err := app.IssueSessionForUser(ctx, 999999)
+	cookieValOther, _, err := app.IssueSessionForUser(ctx, 999999, "user")
 	if err != nil {
 		t.Fatalf("failed issuing session for other user: %v", err)
 	}

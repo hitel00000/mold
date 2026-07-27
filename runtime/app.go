@@ -219,14 +219,15 @@ func (a *App) Store() *sqlite.Store {
 	return a.store
 }
 
-// IssueSessionForUser issues a session cookie value string and expiration time for an authenticated user ID.
+// IssueSessionForUser issues a session cookie value string and expiration time for an authenticated user ID and role.
 // This is an in-process Escape Hatch for external authentication (e.g. OAuth verification handled outside Mold).
 //
 // Security Rationale & Trust Boundary:
 // - In-process API ONLY: This method is intentionally NOT registered to any HTTP router endpoints.
 //   It must be invoked directly by trusted server-side Go application code within the same process boundary.
-// - Returns the formatted cookie value string (and raw session token) for '_mold_session' suitable for Set-Cookie header.
-func (a *App) IssueSessionForUser(ctx context.Context, userID int64) (string, time.Time, error) {
+// - Parity & Cookie Attributes: Returns the formatted cookie value string for '_mold_session' matching
+//   Cloudflare target attributes (Expires, Max-Age, HttpOnly, Secure, SameSite=Lax) suitable for Set-Cookie header.
+func (a *App) IssueSessionForUser(ctx context.Context, userID int64, role string) (string, time.Time, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -235,12 +236,14 @@ func (a *App) IssueSessionForUser(ctx context.Context, userID int64) (string, ti
 		return "", time.Time{}, ErrNotInitialized
 	}
 
-	token, exp, err := a.sessionMgr.CreateSessionForUser(ctx, userID)
+	token, exp, err := a.sessionMgr.CreateSessionForUser(ctx, userID, role)
 	if err != nil {
 		return "", time.Time{}, err
 	}
 
-	cookieVal := fmt.Sprintf("%s=%s; Path=/; HttpOnly; SameSite=Lax", auth.SessionCookieName, token)
+	maxAge := int(time.Until(exp).Seconds())
+	cookieVal := fmt.Sprintf("%s=%s; Path=/; Expires=%s; Max-Age=%d; HttpOnly; Secure; SameSite=Lax",
+		auth.SessionCookieName, token, exp.UTC().Format(http.TimeFormat), maxAge)
 	return cookieVal, exp, nil
 }
 

@@ -270,12 +270,15 @@ auth:
 	ctx := t.Context()
 
 	// 1. Issue session cookie for user_id = 999
-	cookieVal, exp, err := app.IssueSessionForUser(ctx, 999)
+	cookieVal, exp, err := app.IssueSessionForUser(ctx, 999, "user")
 	if err != nil {
 		t.Fatalf("failed IssueSessionForUser: %v", err)
 	}
 	if !strings.HasPrefix(cookieVal, "_mold_session=") {
 		t.Errorf("expected cookie value to start with '_mold_session=', got %s", cookieVal)
+	}
+	if !strings.Contains(cookieVal, "Secure") || !strings.Contains(cookieVal, "Expires=") || !strings.Contains(cookieVal, "Max-Age=") {
+		t.Errorf("expected cookie value to contain Secure, Expires, and Max-Age attributes, got %s", cookieVal)
 	}
 	if exp.Before(time.Now()) {
 		t.Errorf("invalid expiration time: %v", exp)
@@ -303,7 +306,7 @@ auth:
 	}
 
 	// 4. Test HTTP request for another user_id = 888 session -> 403 Forbidden
-	cookieVal888, _, err := app.IssueSessionForUser(ctx, 888)
+	cookieVal888, _, err := app.IssueSessionForUser(ctx, 888, "user")
 	if err != nil {
 		t.Fatalf("failed issuing session for 888: %v", err)
 	}
