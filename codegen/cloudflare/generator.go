@@ -122,6 +122,31 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 		}
 
 		sb.WriteString("\n);\n\n")
+
+		if p.SoftDelete {
+			for _, f := range p.Fields {
+				if f.Constraints.Unique {
+					idxName := fmt.Sprintf("idx_%s_%s_unique", p.Table, f.Name)
+					sb.WriteString(fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS \"%s\" ON \"%s\"(\"%s\") WHERE \"deleted_at\" IS NULL;\n", idxName, p.Table, f.Name))
+				}
+			}
+		}
+
+		for _, group := range p.UniqueTogether {
+			if len(group) == 0 {
+				continue
+			}
+			quotedCols := make([]string, 0, len(group))
+			for _, col := range group {
+				quotedCols = append(quotedCols, fmt.Sprintf("\"%s\"", col))
+			}
+			idxName := fmt.Sprintf("idx_%s_unique_%s", p.Table, strings.Join(group, "_"))
+			if p.SoftDelete {
+				sb.WriteString(fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS \"%s\" ON \"%s\"(%s) WHERE \"deleted_at\" IS NULL;\n", idxName, p.Table, strings.Join(quotedCols, ", ")))
+			} else {
+				sb.WriteString(fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS \"%s\" ON \"%s\"(%s);\n", idxName, p.Table, strings.Join(quotedCols, ", ")))
+			}
+		}
 	}
 
 	sb.WriteString(`CREATE TABLE IF NOT EXISTS "_mold_sessions" (
@@ -491,7 +516,16 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		sb.WriteString("\n  const now = new Date().toISOString();\n")
 		sb.WriteString(fmt.Sprintf("  const insertSql = `INSERT INTO \"%s\" (%s) VALUES (%s) RETURNING *`;\n", table, strings.Join(cols, ", "), strings.Join(bindVars, ", ")))
-		sb.WriteString(fmt.Sprintf("  const created = await c.env.DB.prepare(insertSql).bind(%s).first<any>();\n", strings.Join(vals, ", ")))
+		sb.WriteString("  let created: any = null;\n")
+		sb.WriteString("  try {\n")
+		sb.WriteString(fmt.Sprintf("    created = await c.env.DB.prepare(insertSql).bind(%s).first<any>();\n", strings.Join(vals, ", ")))
+		sb.WriteString("  } catch (err: any) {\n")
+		sb.WriteString("    const errMsg = String(err?.message || err);\n")
+		sb.WriteString("    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {\n")
+		sb.WriteString("      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);\n")
+		sb.WriteString("    }\n")
+		sb.WriteString("    return writeError(c, 400, 'INVALID_INPUT', errMsg);\n")
+		sb.WriteString("  }\n")
 
 		// 1-Step Blob upload and atomic rollback
 		hasBlob := false
@@ -635,7 +669,16 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		sb.WriteString("  const now = new Date().toISOString();\n")
 		sb.WriteString(fmt.Sprintf("  const updateSql = `UPDATE \"%s\" SET %s WHERE id = ?%s RETURNING *`;\n", table, strings.Join(setClauses, ", "), softCond))
-		sb.WriteString(fmt.Sprintf("  const updated = await c.env.DB.prepare(updateSql).bind(%s).first();\n", strings.Join(updateVals, ", ")))
+		sb.WriteString("  let updated: any = null;\n")
+		sb.WriteString("  try {\n")
+		sb.WriteString(fmt.Sprintf("    updated = await c.env.DB.prepare(updateSql).bind(%s).first();\n", strings.Join(updateVals, ", ")))
+		sb.WriteString("  } catch (err: any) {\n")
+		sb.WriteString("    const errMsg = String(err?.message || err);\n")
+		sb.WriteString("    if (errMsg.includes('UNIQUE constraint failed') || errMsg.includes('SQLITE_CONSTRAINT')) {\n")
+		sb.WriteString("      return writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`);\n")
+		sb.WriteString("    }\n")
+		sb.WriteString("    return writeError(c, 400, 'INVALID_INPUT', errMsg);\n")
+		sb.WriteString("  }\n")
 		sb.WriteString("  if (!updated) {\n")
 		sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 		sb.WriteString("  }\n")

@@ -613,3 +613,46 @@ fields:
 		t.Errorf("expected IndexTS to handle BLOB_ORPHAN_CLEANUP_FAILED error code")
 	}
 }
+
+func TestCloudflareGenerator_UniqueTogether(t *testing.T) {
+	recTagRes := &resource.Resource{
+		Name:          "RecordTag",
+		Table:         "record_tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "tag_id"},
+			},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	if err := reg.Register(recTagRes); err != nil {
+		t.Fatalf("failed to register resource: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify D1 DDL
+	expectedDDL := `CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_unique_sake_record_id_tag_id" ON "record_tags"("sake_record_id", "tag_id") WHERE "deleted_at" IS NULL;`
+	if !strings.Contains(out.SchemaSQL, expectedDDL) {
+		t.Errorf("expected SchemaSQL to contain Partial Unique Index DDL %q, got:\n%s", expectedDDL, out.SchemaSQL)
+	}
+
+	// 2. Verify UNIQUE constraint try-catch and INVALID_INPUT error response in TS codegen
+	if !strings.Contains(out.IndexTS, "errMsg.includes('UNIQUE constraint failed')") {
+		t.Errorf("expected IndexTS to catch UNIQUE constraint failed in try-catch block")
+	}
+	if !strings.Contains(out.IndexTS, "writeError(c, 400, 'INVALID_INPUT', `unique constraint failed: ${errMsg}`)") {
+		t.Errorf("expected IndexTS to write INVALID_INPUT error code with 400 status")
+	}
+}
