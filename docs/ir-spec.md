@@ -246,6 +246,8 @@ N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 
   - 이 hard delete는 공개 삭제 정책(append-only + soft_delete)을 바꾸는 것이 아니며, 단일 요청 내 미완결 생성 트랜잭션 취소 전용 헬퍼임. (마세라티 원칙에 따라 롤백 중 동시 조회 클라이언트에 수 ms 간 레코드가 관찰될 수 있음).
   - 1-step create의 원자적 롤백은 Store 어댑터가 `HardDeletePhysically`(내부 hard delete 능력)를 제공할 때만 보장되며, 미지원 어댑터에서의 `SoftDelete` 조용한 폴백은 무결성 회귀 방지를 위해 엄격히 금지함. 미지원 어댑터이거나 FK 제약 등으로 롤백 DELETE가 실패하면 `500 BLOB_STORE_FAILED_RECORD_PRESERVED` 에러 코드로 레코드 보존 사실을 명시적으로 안내함.
   - **알려진 제약 (다중 Blob 필드 실패 시 R2 Orphan 객체 남음)**: 현 5.5절의 1-Step 원자적 롤백 명세는 단일 blob 필드를 전제로 작성됨. 하나의 리소스에 2개 이상의 blob 필드가 존재할 때, 첫 번째 blob 업로드는 성공했으나 두 번째 blob 업로드가 실패하는 경우 DB 레코드는 물리적 hard delete로 정상 롤백되지만, 이미 Storage/R2에 저장된 첫 번째 blob 객체는 삭제되지 않고 orphan 상태로 남게 됨. 마세라티 원칙에 따라 현재 단계에서 별도의 트랜잭션 보상(compensating deletion) 복잡성을 도입하지 않고 알려진 제약으로 남기며, 향후 다중 blob 리소스가 프로덕션에 실제 등장했을 때 해결 대상으로 추적함.
+  - **[해결됨 - Cloudflare R2 Target 동기 보상 삭제 적용]**: `codegen/cloudflare` (Cloudflare Workers TS+D1+R2 Target)에서 1-Step Multipart Create 도중 N번째 blob 업로드가 실패할 경우, 요청 스코프 내에서 이미 R2에 성공적으로 저장된 이전 blob 키 목록(`uploadedBlobKeys`)을 추적하여 동기 보상 삭제(Compensating Deletion: `c.env.BUCKET.delete(key)`)를 D1 레코드 hard delete에 앞서 수행하도록 구현함. 보상 삭제 중 하나 이상의 객체 삭제가 실패하는 경우, 조용히 삼키지 않고 `BLOB_ORPHAN_CLEANUP_FAILED` (HTTP 500) 에러 코드와 함께 정리되지 못한 `orphan_keys` 목록 및 `d1_rollback_failed` 여부를 명시적 응답 바디로 반환함.
+  - **새로운 알려진 제약 (보상 삭제 1회 시도 및 비동기 스위퍼 미도입)**: R2 보상 삭제 시도는 네트워크 transient failure에 대비한 백오프 재시도(retry with backoff)나 비동기 스위퍼(sweep queue)를 도입하지 않고 현재 요청 스코프 내 1회 시도 후 실패 시 즉시 `BLOB_ORPHAN_CLEANUP_FAILED`로 명시적 보고함. 마세라티 원칙에 따라 실제 프로덕션에서 R2 보상 삭제 재시도가 자주 요구되는 상황이 검증되었을 때 비동기 스위퍼 도입을 검토함.
 
 ---
 
