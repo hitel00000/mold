@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-26 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결 (`docs/ir-spec.md`, `docs/resource-guide.md` 반영 완결)**, 및 **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결 (`codegen/cloudflare` D1 hard delete ➔ R2 보상 삭제 Direction C 적용 & Miniflare 100% PASS 완결)**  
-👉 **Post-MVP: 다음 세션 백로그 확정 (PostgreSQL/MySQL Adapter 등)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결**, **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결**, 및 **복합 Unique Constraint 스펙 반영 & N:M/OAuth 설계 결정 문서화 완결 (`docs/ir-spec.md` 5.6절 `constraints.unique_together` & Partial Unique Index 전환 스펙 + Section 5 OAuth 세션 발급 방향 + `docs/resource-guide.md` N:M Join Resource Good 패턴 반영 완결)**  
+👉 **Post-MVP: 다음 세션 백로그 확정 (Task 5.1 복합 Unique 실구현 vs PostgreSQL/MySQL Adapter 등)**
 
 ---
 
@@ -43,5 +43,8 @@
 1. [x] ~~**Cloudflare Workers TS Codegen 기능 확장 및 후속 리뷰 결함 수정 (Auth / View / Blob)**~~ (완료: Auth 헤더 우회 제거, PBKDF2 해싱 및 /login 검증, 1-Step Multipart Create & Atomic Rollback, HTML Sanitizer 보강, SQL 리터럴 홑따옴표 수정, Miniflare V8 Isolate 8대 시나리오 실측 100% PASS 완결)
 2. [x] ~~**문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**~~ (완료: Plan 계층 3단계 계층 구조 1.5절 신설, FK 파생 필드의 NormalizeFields & Nullable: true 골든 패리티 서술, Section 7 결정 사항 채택, resource-guide.md belongs_to FK 자동 파생 팁 추가 완료)
 3. [x] ~~**Cloudflare R2 Multi-Blob Orphan 객체 동기 보상 삭제 (Direction C)**~~ (완료: N번째 blob 업로드 실패 시 D1 hard delete ➔ R2 보상 삭제 순서 정렬, `BLOB_ORPHAN_CLEANUP_FAILED` 명시적 보고 및 SakePost Miniflare 실측 시나리오 1·2 100% PASS 완료)
-4. 👉 **후보 (a) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
+4. [x] ~~**복합 Unique Constraint 스펙 반영 및 N:M/OAuth 설계 결정 문서화**~~ (완료: `constraints.unique_together` 최상위 노드 문법, Partial Unique Index 전환 스펙, OAuth 세션 발급 Escape Hatch 확장 방향, N:M Join Resource Good 패턴 가이드 및 NULL 우회 방지 FK `nullable: false` 필수성 반영 완료)
+5. 👉 **후보 (a) Task 5.1: 복합 Unique Constraint (`unique_together`) IR/DDL/Validation 실구현**:
+   - **사유**: `docs/ir-spec.md` 5.6절에 스펙이 추가된 `constraints.unique_together`의 IR 구조체(`resource/ir.go`), SQLite Partial Unique Index DDL 생성(`adapters/sqlite`), 및 Record Validation(`resource/record_validate.go`) 실구현.
+6. 👉 **후보 (b) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
    - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장.

@@ -203,6 +203,20 @@
   - **실측 검증**: SakePost (blob 2개: `cover_image`, `attachment_file`) 리소스 기반 Miniflare 시나리오 1(정상 보상 삭제 ➔ 0 orphans) & 시나리오 2(보상 삭제 실패 ➔ `BLOB_ORPHAN_CLEANUP_FAILED` + `orphan_keys` 포함) 100% PASS 완결.
   - **문서 스펙 갱신**: `docs/ir-spec.md` 5.5절 알려진 제약 정정(보상 삭제 채택 해결) 및 새 알려진 제약(1회 시도, 재시도/스위퍼 미도입) 반영 완결.
 
+### Phase 5: `drink-log` 잔여 기능 - N:M & OAuth
+
+- [ ] **Task 5.1: 복합 Unique Constraint (`constraints.unique_together`) IR/DDL/Validation 실구현**
+  - **목적**: `docs/ir-spec.md` 5.6절에 정의된 `constraints.unique_together` 스펙을 `resource/ir.go` IR 구조체, `adapters/sqlite` Partial Unique Index DDL 생성, 및 `resource/record_validate.go` 유일성 검증 로직에 구현한다.
+  - **완료 조건**: 단일 및 복합 `unique_together` 컬럼 조합에 대한 SQLite DDL (`CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL`) 정상 생성 검증 및 중복 데이터 입력 시 400 Validation Error 차단을 단위 테스트로 증명한다.
+
+- [ ] **Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log`에 실제 적용**
+  - **목적**: `docs/resource-guide.md` N:M 패턴 가이드에 따라 `RecordTag` Join Resource YAML (`sake_record_id`, `tag_id` FK + `nullable: false` + `unique_together`)을 작성하고 `drink-log` 프로젝트에 적용한다.
+  - **완료 조건**: 사케 기록에 태그를 다중 연결/해제하는 CRUD 동작 및 동일 태그 중복 연결 시 무결성 차단 동작을 E2E 검증한다.
+
+- [ ] **Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 `drink-log` Google OAuth 연동**
+  - **목적**: 외부 OAuth 검증 완료 후 Mold 세션을 발급하는 공개 API (가칭 `runtime.App.IssueSessionForUser` 또는 `auth.SessionManager` 동등 메서드)를 구현한다.
+  - **완료 조건**: `drink-log`에서 Google OAuth 콜백 처리 후 발급받은 세션 쿠키로 Mold의 보호된 엔드포인트 접근 및 row-level owner 권한 평가가 정상 작동함을 실측 검증한다.
+
 
 
 
