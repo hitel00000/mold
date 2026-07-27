@@ -198,6 +198,11 @@
     3. `docs/ir-spec.md` Section 7 Plan 계층 도입 및 3단계 파이프라인 채택 결정 사항 추가.
     4. `docs/resource-guide.md` Section 4 `belongs_to` 연관 관계의 자동 외래키(FK) 필드 파생 안내 팁 반영.
 
+- [x] **Task 4.4: [R2 Multi-Blob Orphan] Cloudflare R2 동기 보상 삭제 (Direction C) 및 명시적 에러 보고 완결**
+  - **작업 내용**: 다중 blob 필드 리소스 생성 중 N번째 blob 업로드 실패 시, 성공한 이전 R2 blob 객체들을 요청 스코프 내에서 추적(`uploadedBlobKeys`)하여 동기 보상 삭제를 수행함. 깨진 레코드(dangling reference) 노출 차단을 위해 D1 hard delete ➔ R2 보상 삭제 순서로 이행하며, 보상 삭제 실패 시 `BLOB_ORPHAN_CLEANUP_FAILED` (HTTP 500) 및 `orphan_keys`를 명시적 반환하도록 구현함.
+  - **실측 검증**: SakePost (blob 2개: `cover_image`, `attachment_file`) 리소스 기반 Miniflare 시나리오 1(정상 보상 삭제 ➔ 0 orphans) & 시나리오 2(보상 삭제 실패 ➔ `BLOB_ORPHAN_CLEANUP_FAILED` + `orphan_keys` 포함) 100% PASS 완결.
+  - **문서 스펙 갱신**: `docs/ir-spec.md` 5.5절 알려진 제약 정정(보상 삭제 채택 해결) 및 새 알려진 제약(1회 시도, 재시도/스위퍼 미도입) 반영 완결.
+
 
 
 

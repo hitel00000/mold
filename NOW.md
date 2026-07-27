@@ -22,7 +22,7 @@
 
 ## 현재 상태 (2026-07-26 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, 및 **Plan 계층 문서 스펙 갱신 완결 (`docs/ir-spec.md`, `docs/resource-guide.md` 파이프라인 3단계 구조 & FK 파생 골든 패리티 가이드 반영 완결)**  
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결 (`docs/ir-spec.md`, `docs/resource-guide.md` 반영 완결)**, 및 **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결 (`codegen/cloudflare` D1 hard delete ➔ R2 보상 삭제 Direction C 적용 & Miniflare 100% PASS 완결)**  
 👉 **Post-MVP: 다음 세션 백로그 확정 (PostgreSQL/MySQL Adapter 등)**
 
 ---
@@ -42,7 +42,6 @@
 
 1. [x] ~~**Cloudflare Workers TS Codegen 기능 확장 및 후속 리뷰 결함 수정 (Auth / View / Blob)**~~ (완료: Auth 헤더 우회 제거, PBKDF2 해싱 및 /login 검증, 1-Step Multipart Create & Atomic Rollback, HTML Sanitizer 보강, SQL 리터럴 홑따옴표 수정, Miniflare V8 Isolate 8대 시나리오 실측 100% PASS 완결)
 2. [x] ~~**문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**~~ (완료: Plan 계층 3단계 계층 구조 1.5절 신설, FK 파생 필드의 NormalizeFields & Nullable: true 골든 패리티 서술, Section 7 결정 사항 채택, resource-guide.md belongs_to FK 자동 파생 팁 추가 완료)
-3. 👉 **후보 (a) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
+3. [x] ~~**Cloudflare R2 Multi-Blob Orphan 객체 동기 보상 삭제 (Direction C)**~~ (완료: N번째 blob 업로드 실패 시 D1 hard delete ➔ R2 보상 삭제 순서 정렬, `BLOB_ORPHAN_CLEANUP_FAILED` 명시적 보고 및 SakePost Miniflare 실측 시나리오 1·2 100% PASS 완료)
+4. 👉 **후보 (a) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
    - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장.
-4. 📝 **참고 항목 (알려진 제약 추적 - 다중 Blob 롤백 시 R2 Orphan 객체 보상)**:
-   - **내용**: 하나의 리소스에 2개 이상의 blob 필드가 존재하는 경우, 두 번째 이후 blob 업로드 실패 시 D1 레코드는 물리적 hard delete로 롤백되나 앞서 R2에 저장된 첫 번째 blob 객체는 orphan 상태로 남음 (`docs/ir-spec.md` 5.5절 명시). 마세라티 원칙에 따라 실제 다중 blob 리소스가 프로덕션에 등장했을 때 트랜잭션 보상(compensating deletion) 구현 검토.
