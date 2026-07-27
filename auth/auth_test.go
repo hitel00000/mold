@@ -681,8 +681,8 @@ func TestSessionManager_CreateSessionForUser(t *testing.T) {
 		t.Fatalf("failed creating SessionManager: %v", err)
 	}
 
-	// 1. Create session for user ID without user table record (defaults to role 'user')
-	token1, exp1, err := sm.CreateSessionForUser(context.Background(), 101)
+	// 1. Create session for user ID without explicit role (defaults to role 'user')
+	token1, exp1, err := sm.CreateSessionForUser(context.Background(), 101, "")
 	if err != nil {
 		t.Fatalf("failed CreateSessionForUser for ID 101: %v", err)
 	}
@@ -698,11 +698,8 @@ func TestSessionManager_CreateSessionForUser(t *testing.T) {
 		t.Errorf("unexpected session data: userID=%v, role=%s", sess1.UserID, sess1.Role)
 	}
 
-	// 2. Create session for user ID with explicit role in "users" table
-	_, _ = rawDB.Exec(`CREATE TABLE IF NOT EXISTS "users" ("id" INTEGER PRIMARY KEY, "role" TEXT NOT NULL);`)
-	_, _ = rawDB.Exec(`INSERT INTO "users" ("id", "role") VALUES (202, 'admin');`)
-
-	token2, _, err := sm.CreateSessionForUser(context.Background(), 202)
+	// 2. Create session for user ID with explicit 'admin' role passed directly
+	token2, _, err := sm.CreateSessionForUser(context.Background(), 202, "admin")
 	if err != nil {
 		t.Fatalf("failed CreateSessionForUser for ID 202: %v", err)
 	}

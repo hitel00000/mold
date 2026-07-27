@@ -76,18 +76,12 @@ func (sm *SessionManager) CreateSession(ctx context.Context, userID any, usernam
 	return sess, nil
 }
 
-// CreateSessionForUser creates a session token for an authenticated user ID bypassing password verification.
-// If the user record exists in "users" table, it populates role; otherwise defaults to "user" role.
-func (sm *SessionManager) CreateSessionForUser(ctx context.Context, userID int64) (string, time.Time, error) {
+// CreateSessionForUser creates a session token for an authenticated user ID and role bypassing password verification.
+// It removes any hardcoded DB schema assumptions in adherence to the single source of truth philosophy and Maserati principle.
+func (sm *SessionManager) CreateSessionForUser(ctx context.Context, userID int64, role string) (string, time.Time, error) {
 	username := fmt.Sprintf("user_%d", userID)
-	role := "user"
-
-	// Best-effort lookup of user details from "users" table
-	querySQL := `SELECT "role" FROM "users" WHERE "id" = ?;`
-	var userRole string
-	err := sm.db.QueryRowContext(ctx, querySQL, userID).Scan(&userRole)
-	if err == nil && userRole != "" {
-		role = userRole
+	if role == "" {
+		role = "user"
 	}
 
 	sess, err := sm.CreateSession(ctx, userID, username, role)
