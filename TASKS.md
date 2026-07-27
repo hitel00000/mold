@@ -190,5 +190,14 @@
     6. *Miniflare 실측 검증 8대 시나리오 100% PASS*: 로컬 Miniflare V8 Isolate 및 D1/R2 버킷을 동적으로 구동하여 8개 실측 시나리오(401 Unauthorized, 404 Not Found, 403 Cross-user access, 403 Role escalation, PBKDF2 D1 Query & Login, Detail View XSS Sanitization, Blob 1-Step Create/R2 Download/Delete, Cross-user Blob Upload 403) 100% 통과 확인.
   - **상세 회고**: 상세 분석, 발견된 5대 문제 패턴, 2대 근본 원인 및 5대 예방 체크리스트는 [Cloudflare Codegen 리뷰 회고 문서](docs/retrospectives/cloudflare-codegen-review.md) 참조.
 
+- [x] **Task 4.3: [문서 스펙] Plan 계층 문서 스펙 (`docs/ir-spec.md`, `docs/resource-guide.md`) 반영 및 드리프트 해소 완결**
+  - **작업 내용**: 코드 상에 실구현 완결된 3단계 계층 구조(`resource.NormalizeFields()` Layer 0 ➔ `plan.Build()` Layer 1 ➔ Target Packages Layer 2) 및 파생 FK 필드의 `Nullable: true` 골든 패리티 서술을 `docs/ir-spec.md`에 반영하고, `docs/resource-guide.md`에 `belongs_to` FK 자동 파생 팁을 명시하여 문서와 코드 간 드리프트 100% 해소.
+  - **완료 반영 항목**:
+    1. `docs/ir-spec.md` Section 1.5 실행 파이프라인 계층 (Layer 0/1/2) 신설.
+    2. `docs/ir-spec.md` Section 3 `NormalizeFields()` 및 파생 FK 필드의 `Nullable: true` 골든 패리티 서술 추가.
+    3. `docs/ir-spec.md` Section 7 Plan 계층 도입 및 3단계 파이프라인 채택 결정 사항 추가.
+    4. `docs/resource-guide.md` Section 4 `belongs_to` 연관 관계의 자동 외래키(FK) 필드 파생 안내 팁 반영.
+
+
 
 
