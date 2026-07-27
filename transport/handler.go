@@ -250,6 +250,10 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
 		}
+		if isUniqueConstraintError(err) {
+			WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("unique constraint failed: %v", err), nil)
+			return
+		}
 		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
 		return
 	}
@@ -396,6 +400,10 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
 		}
+		if isUniqueConstraintError(err) {
+			WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("unique constraint failed: %v", err), nil)
+			return
+		}
 		WriteError(w, http.StatusBadRequest, "INVALID_INPUT", err.Error(), nil)
 		return
 	}
@@ -468,6 +476,14 @@ func isFKConstraintError(err error) bool {
 	}
 	errStr := err.Error()
 	return strings.Contains(errStr, "FOREIGN KEY constraint failed")
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "UNIQUE constraint failed") || (strings.Contains(errStr, "SQLITE_CONSTRAINT") && strings.Contains(errStr, "UNIQUE"))
 }
 
 func (rt *Router) extractSession(req *http.Request) *auth.Session {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hitel00000/mold/adapters/sqlite"
@@ -381,5 +382,93 @@ func TestTransport_MultipartFormGoldenSnapshot(t *testing.T) {
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created for multipart comment creation, got %d", resp.StatusCode)
+	}
+}
+
+func TestRouter_UniqueTogether_E2E(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_unique_together_e2e.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	recTagRes := &resource.Resource{
+		Name:          "RecordTag",
+		Table:         "record_tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "tag_id"},
+			},
+		},
+	}
+
+	ctx := t.Context()
+	if err := store.EnsureSchema(ctx, recTagRes); err != nil {
+		t.Fatalf("failed to ensure schema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(recTagRes, store)
+	router := transport.NewRouter(reg)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	payload1 := `{"sake_record_id": 1, "tag_id": 10}`
+
+	// 1. First creation -> 201 Created
+	resp1, err := ts.Client().Post(ts.URL+"/api/record_tags", "application/json", strings.NewReader(payload1))
+	if err != nil {
+		t.Fatalf("failed to send post: %v", err)
+	}
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created on first insert, got %d", resp1.StatusCode)
+	}
+
+	// 2. Second creation with duplicate combination -> 400 Bad Request
+	resp2, err := ts.Client().Post(ts.URL+"/api/record_tags", "application/json", strings.NewReader(payload1))
+	if err != nil {
+		t.Fatalf("failed to send duplicate post: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on duplicate unique_together insert, got %d", resp2.StatusCode)
+	}
+
+	var errEnvelope transport.ErrorEnvelope
+	if err := json.NewDecoder(resp2.Body).Decode(&errEnvelope); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if errEnvelope.Error.Code != "INVALID_INPUT" {
+		t.Errorf("expected error code INVALID_INPUT, got '%s'", errEnvelope.Error.Code)
+	}
+
+	// 3. Soft delete record 1 -> DELETE /api/record_tags/1
+	reqDel, _ := http.NewRequest("DELETE", ts.URL+"/api/record_tags/1", nil)
+	respDel, err := ts.Client().Do(reqDel)
+	if err != nil {
+		t.Fatalf("failed to send delete request: %v", err)
+	}
+	defer respDel.Body.Close()
+	if respDel.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK on soft delete, got %d", respDel.StatusCode)
+	}
+
+	// 4. Third creation after soft delete -> 201 Created (Partial Unique Index working)
+	resp3, err := ts.Client().Post(ts.URL+"/api/record_tags", "application/json", strings.NewReader(payload1))
+	if err != nil {
+		t.Fatalf("failed to send post after soft delete: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created on insert after soft delete, got %d", resp3.StatusCode)
 	}
 }
