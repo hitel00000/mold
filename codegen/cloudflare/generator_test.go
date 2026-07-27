@@ -598,4 +598,18 @@ fields:
 	if !strings.Contains(out.IndexTS, "const file_attachment_file = formData.get('attachment_file');") {
 		t.Errorf("expected IndexTS to contain attachment_file form extraction, got:\n%s", out.IndexTS)
 	}
+
+	// Verify compensating deletion and error code codegen
+	if !strings.Contains(out.IndexTS, "const uploadedBlobKeys: string[] = [];") {
+		t.Errorf("expected IndexTS to declare uploadedBlobKeys tracking array")
+	}
+	if !strings.Contains(out.IndexTS, "uploadedBlobKeys.push(key);") {
+		t.Errorf("expected IndexTS to push key to uploadedBlobKeys")
+	}
+	if !strings.Contains(out.IndexTS, "await c.env.BUCKET.delete(key);") {
+		t.Errorf("expected IndexTS to issue compensating delete for R2 orphan objects")
+	}
+	if !strings.Contains(out.IndexTS, "BLOB_ORPHAN_CLEANUP_FAILED") {
+		t.Errorf("expected IndexTS to handle BLOB_ORPHAN_CLEANUP_FAILED error code")
+	}
 }
