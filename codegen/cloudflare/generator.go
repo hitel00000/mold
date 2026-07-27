@@ -154,8 +154,12 @@ type Bindings = {
 const app = new Hono<{ Bindings: Bindings }>();
 
 // Helper for error envelope
-function writeError(c: any, status: number, code: string, message: string) {
-  return c.json({ error: { code, message } }, status);
+function writeError(c: any, status: number, code: string, message: string, details?: any) {
+  const err: any = { code, message };
+  if (details !== undefined && details !== null) {
+    Object.assign(err, details);
+  }
+  return c.json({ error: err }, status);
 }
 
 async function hashPassword(plain: string): Promise<string> {
@@ -500,35 +504,61 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		if hasBlob {
 			sb.WriteString("  if (created && formData) {\n")
+			sb.WriteString("    const uploadedBlobKeys: string[] = [];\n")
+			sb.WriteString("    let blobUploadError: any = null;\n")
 			for _, f := range p.Fields {
 				if f.Type == resource.TypeBlob && !f.Deprecated {
 					blobField := f.Name
-					sb.WriteString(fmt.Sprintf("    const file_%s = formData.get('%s');\n", blobField, blobField))
-					sb.WriteString(fmt.Sprintf("    if (file_%s !== null && file_%s !== undefined && file_%s !== '') {\n", blobField, blobField, blobField))
-					sb.WriteString(fmt.Sprintf("      let fileData_%s: any = file_%s;\n", blobField, blobField))
-					sb.WriteString(fmt.Sprintf("      let mimeType_%s = 'application/octet-stream';\n", blobField))
-					sb.WriteString(fmt.Sprintf("      let ext_%s = '';\n", blobField))
-					sb.WriteString(fmt.Sprintf("      if (typeof file_%s === 'object') {\n", blobField))
-					sb.WriteString(fmt.Sprintf("        mimeType_%s = (file_%s as any).type || mimeType_%s;\n", blobField, blobField, blobField))
-					sb.WriteString(fmt.Sprintf("        if ((file_%s as any).name) { ext_%s = (file_%s as any).name.substring((file_%s as any).name.lastIndexOf('.')); }\n", blobField, blobField, blobField, blobField))
-					sb.WriteString(fmt.Sprintf("        if (typeof (file_%s as any).stream === 'function') { fileData_%s = (file_%s as any).stream(); }\n", blobField, blobField, blobField))
-					sb.WriteString("      }\n")
-					sb.WriteString(fmt.Sprintf("      const key = `blobs/%s/${created.id}/%s_${Date.now()}${ext_%s}`;\n", table, blobField, blobField))
-					sb.WriteString("      try {\n")
-					sb.WriteString(fmt.Sprintf("        await c.env.BUCKET.put(key, fileData_%s, { httpMetadata: { contentType: mimeType_%s } });\n", blobField, blobField))
-					sb.WriteString(fmt.Sprintf("        await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = ? WHERE id = ?').bind(key, created.id).run();\n", table, blobField))
-					sb.WriteString(fmt.Sprintf("        created['%s'] = key;\n", blobField))
-					sb.WriteString("      } catch (err) {\n")
+					sb.WriteString("    if (!blobUploadError) {\n")
+					sb.WriteString(fmt.Sprintf("      const file_%s = formData.get('%s');\n", blobField, blobField))
+					sb.WriteString(fmt.Sprintf("      if (file_%s !== null && file_%s !== undefined && file_%s !== '') {\n", blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("        let fileData_%s: any = file_%s;\n", blobField, blobField))
+					sb.WriteString(fmt.Sprintf("        let mimeType_%s = 'application/octet-stream';\n", blobField))
+					sb.WriteString(fmt.Sprintf("        let ext_%s = '';\n", blobField))
+					sb.WriteString(fmt.Sprintf("        if (typeof file_%s === 'object') {\n", blobField))
+					sb.WriteString(fmt.Sprintf("          mimeType_%s = (file_%s as any).type || mimeType_%s;\n", blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("          if ((file_%s as any).name) { ext_%s = (file_%s as any).name.substring((file_%s as any).name.lastIndexOf('.')); }\n", blobField, blobField, blobField, blobField))
+					sb.WriteString(fmt.Sprintf("          if (typeof (file_%s as any).stream === 'function') { fileData_%s = (file_%s as any).stream(); }\n", blobField, blobField, blobField))
+					sb.WriteString("        }\n")
+					sb.WriteString(fmt.Sprintf("        const key = `blobs/%s/${created.id}/%s_${Date.now()}${ext_%s}`;\n", table, blobField, blobField))
 					sb.WriteString("        try {\n")
-					sb.WriteString(fmt.Sprintf("          await c.env.DB.prepare('DELETE FROM \"%s\" WHERE id = ?').bind(created.id).run();\n", table))
-					sb.WriteString("          return writeError(c, 500, 'BLOB_STORE_FAILED', 'failed uploading blob; record creation rolled back');\n")
-					sb.WriteString("        } catch (rollbackErr) {\n")
-					sb.WriteString("          return writeError(c, 500, 'BLOB_STORE_FAILED_RECORD_PRESERVED', 'failed uploading blob and failed rolling back record');\n")
+					sb.WriteString(fmt.Sprintf("          await c.env.BUCKET.put(key, fileData_%s, { httpMetadata: { contentType: mimeType_%s } });\n", blobField, blobField))
+					sb.WriteString("          uploadedBlobKeys.push(key);\n")
+					sb.WriteString(fmt.Sprintf("          await c.env.DB.prepare('UPDATE \"%s\" SET \"%s\" = ? WHERE id = ?').bind(key, created.id).run();\n", table, blobField))
+					sb.WriteString(fmt.Sprintf("          created['%s'] = key;\n", blobField))
+					sb.WriteString("        } catch (err) {\n")
+					sb.WriteString("          blobUploadError = err;\n")
 					sb.WriteString("        }\n")
 					sb.WriteString("      }\n")
 					sb.WriteString("    }\n")
 				}
 			}
+			sb.WriteString("    if (blobUploadError) {\n")
+			sb.WriteString("      // Compensating deletion for successfully uploaded R2 blobs prior to failure.\n")
+			sb.WriteString("      // Order rationale: Complete R2 orphan cleanup before D1 hard delete to minimize\n")
+			sb.WriteString("      // the window where D1 record is gone but R2 orphan objects remain observable.\n")
+			sb.WriteString("      const failedCleanupKeys: string[] = [];\n")
+			sb.WriteString("      for (const key of uploadedBlobKeys) {\n")
+			sb.WriteString("        try {\n")
+			sb.WriteString("          await c.env.BUCKET.delete(key);\n")
+			sb.WriteString("        } catch (cleanupErr) {\n")
+			sb.WriteString("          failedCleanupKeys.push(key);\n")
+			sb.WriteString("        }\n")
+			sb.WriteString("      }\n")
+			sb.WriteString("      let d1RollbackFailed = false;\n")
+			sb.WriteString("      try {\n")
+			sb.WriteString(fmt.Sprintf("        await c.env.DB.prepare('DELETE FROM \"%s\" WHERE id = ?').bind(created.id).run();\n", table))
+			sb.WriteString("      } catch (rollbackErr) {\n")
+			sb.WriteString("        d1RollbackFailed = true;\n")
+			sb.WriteString("      }\n")
+			sb.WriteString("      if (failedCleanupKeys.length > 0) {\n")
+			sb.WriteString("        return writeError(c, 500, 'BLOB_ORPHAN_CLEANUP_FAILED', 'failed uploading blob; some R2 orphan objects could not be cleaned up', { orphan_keys: failedCleanupKeys, d1_rollback_failed: d1RollbackFailed });\n")
+			sb.WriteString("      } else if (d1RollbackFailed) {\n")
+			sb.WriteString("        return writeError(c, 500, 'BLOB_STORE_FAILED_RECORD_PRESERVED', 'failed uploading blob and failed rolling back record');\n")
+			sb.WriteString("      } else {\n")
+			sb.WriteString("        return writeError(c, 500, 'BLOB_STORE_FAILED', 'failed uploading blob; record creation rolled back');\n")
+			sb.WriteString("      }\n")
+			sb.WriteString("    }\n")
 			sb.WriteString("  }\n")
 		}
 
