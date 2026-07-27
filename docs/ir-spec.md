@@ -326,3 +326,7 @@ Authorization: (세션 쿠키, role: admin 필요)
 * [x] **Plan 계층 (`plan` 패키지) 도입 및 3단계 파이프라인 수렴**  
   **결정**: `resource.NormalizeFields()` (Layer 0) ➔ `plan.Build()` (Layer 1) ➔ Target Packages (Layer 2) 3단계 단방향 계층 구조를 채택하고, 9개 타깃(SQLite DDL, Transport Sanitize/Multipart, View Form/Widget, Record Validation, Cloudflare Codegen DDL/Validation/Bind)의 필드 루프 및 FK 파생 로직을 단일 수렴 지점으로 이관 완료함.  
   **근거**: Target 패키지마다 반복되던 `switch f.Type` 및 `KindBelongsTo` 루프 파편화를 원천 차단하고, `resource` ➔ `plan` ➔ `resource` 순환 참조(`import cycle`) 오류 포착 시 `NormalizeFields()`를 Layer 0 IR 원천 유틸로 승격시켜 단방향 컴파일 계층을 완성함.
+
+* [x] **복합 Unique Constraint (`constraints.unique_together`) 스펙 채택**  
+  **결정**: N:M 관계를 전용 relation kind 대신 명시적 Join Resource로 표현하고 외부 OAuth 사용자 식별을 지원하기 위해, Resource 최상위 노드에 `constraints.unique_together` 문법 스펙을 채택함.  
+  **근거**: `has_and_belongs_to_many` 같은 전용 relation kind를 런타임에 추가하는 것은 런타임 개념 복잡도를 가중시킴. 명시적 Join Resource 패턴과 복합 unique 제약 조합으로 N:M과 OAuth 식별 요구사항을 기존 `has_many`/`belongs_to` 구조 위에서 단순하게 충족할 수 있음 (마세라티 원칙 및 단일 소스 오브 트루스 유지).
