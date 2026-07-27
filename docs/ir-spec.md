@@ -177,6 +177,14 @@ auth:
 * 최소 모델: `public | authenticated | owner | role:<name>` 4종만 1차 지원
 * Field 단위 권한은 1차 스코프에서 제외 (마세라티 원칙 — 실제 필요해지면 추가)
 
+### 외부 OAuth 연동 및 세션 발급 전략 (예정된 확장 방향)
+
+Mold는 특정 OAuth Provider(Google, GitHub 등)와 직접 통신하거나 프로토콜 구현체를 코어 런타임에 내장하지 않는다 (특정 벤더 종속성 회피 원칙).
+
+* **외부 인증 처리 및 세션 발급 Escape Hatch (추가 예정)**: OAuth 토큰 교환 및 ID claim 검증은 애플리케이션 외부(예: `drink-log` 서버 코드)에서 처리하며, 검증이 끝난 후 Mold `auth`/`runtime`은 "이미 인증된 사용자 ID에 대해 세션 쿠키를 발급하는" 공개 API (가칭 `runtime.App.IssueSessionForUser` 또는 `auth.SessionManager` 레벨 동등 메서드)를 향후 별도 작업(Task 5.3)에서 제공할 예정이다.
+* **Provider 식별 정보의 IR 표현**: 소셜 계정 연동 식별 필드(`provider`, `provider_user_id`)는 새로운 semantic type을 만들지 않고 일반 `string` 필드와 [5.6 복합 Unique Constraint](#56-복합-unique-constraint-초안) (`unique_together: [[provider, provider_user_id]]`) 조합으로 지원할 예정이다.
+* **주의**: 이 절은 **향후 설계 및 확장 방향의 문서화**이며, 실제 세션 발급 API 메서드는 Task 5.3 구현 시점에 확정될 예정이다.
+
 ---
 
 ## 5.5 Blob Field (초안)
