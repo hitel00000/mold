@@ -104,17 +104,39 @@ func GenerateIndexesSQL(res *resource.Resource) []string {
 	p := plan.Build(res)
 	var indexes []string
 
-	if p == nil || !p.SoftDelete {
+	if p == nil {
 		return indexes
 	}
 
-	for _, f := range p.Fields {
-		if f.Constraints.Unique {
-			idxName := fmt.Sprintf("idx_%s_%s_unique", p.Table, f.Name)
-			idxSQL := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"("%s") WHERE "deleted_at" IS NULL;`,
-				idxName, p.Table, f.Name)
-			indexes = append(indexes, idxSQL)
+	if p.SoftDelete {
+		for _, f := range p.Fields {
+			if f.Constraints.Unique {
+				idxName := fmt.Sprintf("idx_%s_%s_unique", p.Table, f.Name)
+				idxSQL := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"("%s") WHERE "deleted_at" IS NULL;`,
+					idxName, p.Table, f.Name)
+				indexes = append(indexes, idxSQL)
+			}
 		}
+	}
+
+	for _, group := range p.UniqueTogether {
+		if len(group) == 0 {
+			continue
+		}
+		quotedCols := make([]string, 0, len(group))
+		for _, col := range group {
+			quotedCols = append(quotedCols, fmt.Sprintf(`"%s"`, col))
+		}
+		idxName := fmt.Sprintf("idx_%s_unique_%s", p.Table, strings.Join(group, "_"))
+		var idxSQL string
+		if p.SoftDelete {
+			idxSQL = fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"(%s) WHERE "deleted_at" IS NULL;`,
+				idxName, p.Table, strings.Join(quotedCols, ", "))
+		} else {
+			idxSQL = fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "%s" ON "%s"(%s);`,
+				idxName, p.Table, strings.Join(quotedCols, ", "))
+		}
+		indexes = append(indexes, idxSQL)
 	}
 
 	return indexes

@@ -59,3 +59,53 @@ func TestSQLiteSchema_RealDBExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteSchema_GenerateIndexesSQL_UniqueTogether(t *testing.T) {
+	softDeleteRes := &resource.Resource{
+		Name:       "RecordTag",
+		Table:      "record_tags",
+		SoftDelete: true,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+			{Name: "tag_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "tag_id"},
+			},
+		},
+	}
+
+	indexes := sqlite.GenerateIndexesSQL(softDeleteRes)
+	if len(indexes) != 1 {
+		t.Fatalf("expected 1 index SQL for soft_delete resource, got %d", len(indexes))
+	}
+	expectedSoftIndex := `CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_unique_sake_record_id_tag_id" ON "record_tags"("sake_record_id", "tag_id") WHERE "deleted_at" IS NULL;`
+	if indexes[0] != expectedSoftIndex {
+		t.Errorf("soft_delete unique_together DDL mismatch!\nExpected:\n%s\nGot:\n%s", expectedSoftIndex, indexes[0])
+	}
+
+	hardDeleteRes := &resource.Resource{
+		Name:       "RecordTag",
+		Table:      "record_tags",
+		SoftDelete: false,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt},
+			{Name: "tag_id", Type: resource.TypeInt},
+		},
+		Constraints: &resource.ResourceConstraints{
+			UniqueTogether: [][]string{
+				{"sake_record_id", "tag_id"},
+			},
+		},
+	}
+
+	indexesHard := sqlite.GenerateIndexesSQL(hardDeleteRes)
+	if len(indexesHard) != 1 {
+		t.Fatalf("expected 1 index SQL for hard_delete resource, got %d", len(indexesHard))
+	}
+	expectedHardIndex := `CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_unique_sake_record_id_tag_id" ON "record_tags"("sake_record_id", "tag_id");`
+	if indexesHard[0] != expectedHardIndex {
+		t.Errorf("hard_delete unique_together DDL mismatch!\nExpected:\n%s\nGot:\n%s", expectedHardIndex, indexesHard[0])
+	}
+}
