@@ -251,6 +251,44 @@ N:M과 마찬가지로, 전용 storage kind는 실제 필요성이 확인되기 
 
 ---
 
+## 5.6 복합 Unique Constraint (초안)
+
+N:M 관계를 표현하는 Join Resource(예: `RecordTag`의 `sake_record_id` + `tag_id`) 또는 소셜 로그인 계정 식별(예: `UserIdentity`의 `provider` + `provider_user_id`)처럼 **두 개 이상의 필드 조합에 대한 유일성(Uniqueness)**을 강제하기 위한 스펙이다.
+
+### Resource YAML 스펙
+
+`constraints.unique_together`는 단일 필드 하위가 아니라 Resource 최상위 노드 레벨에 정의하며, 복합 유일성을 보장할 필드명 배열의 리스트를 가진다.
+
+```yaml
+resource:
+  name: RecordTag
+  table: record_tags
+  soft_delete: true
+
+fields:
+  - name: sake_record_id
+    type: int
+  - name: tag_id
+    type: int
+
+constraints:
+  unique_together:
+    - [sake_record_id, tag_id]   # 두 컬럼 조합의 중복 생성을 차단
+```
+
+### `soft_delete: true` 결합 및 Partial Unique Index 전환 스펙
+
+* **Partial Unique Index 전환 규칙**: 단일 필드 `unique: true`와 동일하게, `soft_delete: true` 리소스에서 `unique_together`가 정의된 경우 DDL 생성 시 컬럼 레벨 `UNIQUE` 제약 대신 `deleted_at IS NULL` 조건을 가진 Partial Unique Index로 자동 전환된다.
+* **SQLite DDL 산출 스펙 (예시)**:
+  ```sql
+  CREATE UNIQUE INDEX "idx_record_tags_unique_sake_record_id_tag_id"
+  ON "record_tags" ("sake_record_id", "tag_id")
+  WHERE "deleted_at" IS NULL;
+  ```
+* **효과**: soft-delete 마킹된 레코드(`deleted_at IS NOT NULL`)와의 무결성 충돌 없이 동일한 연결/조합을 다시 생성(re-create)할 수 있도록 보장한다.
+
+---
+
 ## 6. Reload 트리거 (지난 논의 반영)
 
 ```
