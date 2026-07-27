@@ -97,11 +97,23 @@ Mold는 11가지 Primitive / Semantic Type을 지원한다.
 
 Mold는 전용 `has_and_belongs_to_many` 관계 타입을 만들지 않고, **명시적 Join Resource와 복합 Unique 제약(`constraints.unique_together`)** 조합으로 N:M 관계를 정의한다.
 
+> [!IMPORTANT]
+> **Join Resource에서의 FK `nullable: false` 명시 필수성**:
+> `belongs_to` 단독 선언 시 파생 FK 필드는 `nullable: true`로 기본 생성되나, Join Resource에서는 부모/자식 외래키 없이 레코드가 존재해서는 안 되며, SQL/SQLite 제약상 `NULL` 조합이 `unique_together` 유일성 검증을 우회하는 구멍을 막기 위해 **`fields` 목록에 FK 컬럼을 명시하고 `nullable: false`를 지정해야 한다.**
+
 ```yaml
 resource:
   name: RecordTag
   table: record_tags
   soft_delete: true
+
+fields:
+  - name: sake_record_id
+    type: int
+    nullable: false
+  - name: tag_id
+    type: int
+    nullable: false
 
 relations:
   - name: record
@@ -204,10 +216,10 @@ AI 에이전트는 Resource YAML을 작성/수정할 때 아래의 **잘못된 �
 
 ### 패턴 6: N:M 관계를 새 relation kind로 표현하려는 시도
 
-> **위험성**: `has_and_belongs_to_many` 같은 미지원 relation kind를 사용하면 스키마 로드 검증 단계에서 실패함. N:M 관계는 항상 명시적 Join Resource(두 대상에 대한 `belongs_to` + `constraints.unique_together`)로 작성해야 함.
+> **위험성**: `has_and_belongs_to_many` 같은 미지원 relation kind를 사용하면 스키마 로드 검증 단계에서 실패함. N:M 관계는 항상 명시적 Join Resource(두 대상에 대한 `belongs_to` + `constraints.unique_together` + FK `nullable: false`)로 작성해야 함.
 
 | ❌ Bad (잘못된 설정) | ✅ Good (올바른 설정) |
 | :--- | :--- |
-| ```yaml<br>relations:<br>  - name: tags<br>    kind: has_and_belongs_to_many # ❌ 미지원 relation kind!<br>    target: Tag<br>``` | ```yaml<br># RecordTag.yaml (명시적 Join Resource)<br>resource:<br>  name: RecordTag<br><br>relations:<br>  - name: record<br>    kind: belongs_to<br>    target: SakeRecord<br>    foreign_key: sake_record_id<br>  - name: tag<br>    kind: belongs_to<br>    target: Tag<br>    foreign_key: tag_id<br><br>constraints:<br>  unique_together:<br>    - [sake_record_id, tag_id] # ✅ 복합 unique로 중복 연결 차단<br>``` |
+| ```yaml<br>relations:<br>  - name: tags<br>    kind: has_and_belongs_to_many # ❌ 미지원 relation kind!<br>    target: Tag<br>``` | ```yaml<br># RecordTag.yaml (명시적 Join Resource)<br>resource:<br>  name: RecordTag<br><br>fields:<br>  - name: sake_record_id<br>    type: int<br>    nullable: false   # ✅ FK nullability 우회 차단<br>  - name: tag_id<br>    type: int<br>    nullable: false<br><br>relations:<br>  - name: record<br>    kind: belongs_to<br>    target: SakeRecord<br>    foreign_key: sake_record_id<br>  - name: tag<br>    kind: belongs_to<br>    target: Tag<br>    foreign_key: tag_id<br><br>constraints:<br>  unique_together:<br>    - [sake_record_id, tag_id] # ✅ 복합 unique로 중복 연결 차단<br>``` |
 
 ---
