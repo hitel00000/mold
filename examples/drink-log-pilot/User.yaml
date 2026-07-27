@@ -1,0 +1,34 @@
+resource:
+  name: User
+  table: users
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: email
+    type: email
+    nullable: true
+  - name: provider
+    type: string
+    nullable: false
+  - name: provider_user_id
+    type: string
+    nullable: false
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    constraints:
+      values: ["admin", "user"]
+
+constraints:
+  unique_together:
+    - [provider, provider_user_id]
+
+auth:
+  ownership_field: id
+  permissions:
+    create: public
+    read: authenticated
+    update: owner
+    delete: role:admin
