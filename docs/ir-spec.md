@@ -117,6 +117,12 @@ fields:
 * `constraints`: type별로 허용되는 키가 다름 (min/max, min_length/max_length, pattern, unique, values)
 * `deprecated`, `deprecated_since`: append-only 필드 폐기용. `deprecated: true`인 필드는 CRUD API 응답/Form에서 제외되지만 컬럼은 유지됨.
 
+### 파생 FK 필드 정규화 (`resource.NormalizeFields()`) 및 Golden DDL Parity
+
+* **암묵적 FK 필드 확장**: `relations` 노드에 `belongs_to` 관계(`rel.Kind == KindBelongsTo`)가 선언되고 외래키 이름(`rel.ForeignKey`)이 지정된 경우, `fields` 목록에 해당 FK 필드를 중복 기재하지 않더라도 `res.NormalizeFields()`를 통해 단일 `[]Field` 슬라이스로 자동 확장된다.
+* **Golden DDL Parity (파생 FK의 `Nullable: true`)**: `NormalizeFields()`에 의해 자동 파생되는 FK 필드는 `Type: TypeInt`, `Nullable: true`로 기본 생성된다 (`Field{Name: rel.ForeignKey, Type: TypeInt, Nullable: true}`). 이는 DDL 생성 및 Record Validation 시 명시적 필드 미작성 FK 컬럼이 `"post_id" INTEGER` (NULL 허용)로 일관되게 처리되도록 보장하기 위한 골든 패리티 보정 규칙이다.
+* **중복 방지 (Deduplication)**: YAML 작성자가 `fields`에 FK 컬럼(예: `post_id`)을 명시적으로 선언한 경우, `NormalizeFields()`는 `fieldMap`을 통해 이를 감지하고 중복 필드를 생성하지 않으며 명시적 필드 정의를 그대로 유지한다.
+
 ---
 
 ## 4. Relation
