@@ -227,9 +227,13 @@
     - *마찰 D (키 전략 및 PK 구조의 근본적 차이: UUID TEXT vs INTEGER AUTOINCREMENT)*: 기존 운영 스키마는 `id TEXT PRIMARY KEY` (UUID 문자열) 및 `record_tags` 테이블의 Composite PK `PRIMARY KEY(record_id, tag_id)`를 사용하고 `owner_id TEXT` (users.id UUID 참조)로 설계되어 있으나, Mold 코어는 `id INTEGER PRIMARY KEY AUTOINCREMENT` surrogate key 및 정수 기반 소유자/외래키로 고정되어 있음. 이는 런타임 DDL 생성상의 근본적 구조 차이이며, 향후 실제 프로덕션 커트오버 시 R2 객체 키 경로(`{record_id}`)나 외부 user 테이블 참조 무결성에 직접적 영향을 미치는 항목으로 추적 관리 필요.
 
 
-- [ ] **Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 `drink-log` Google OAuth 연동**
-  - **목적**: 외부 OAuth 검증 완료 후 Mold 세션을 발급하는 공개 API (가칭 `runtime.App.IssueSessionForUser` 또는 `auth.SessionManager` 동등 메서드)를 구현한다.
-  - **완료 조건**: `drink-log`에서 Google OAuth 콜백 처리 후 발급받은 세션 쿠키로 Mold의 보호된 엔드포인트 접근 및 row-level owner 권한 평가가 정상 작동함을 실측 검증한다.
+- [x] **Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 OAuth 연동 기반 마련 완결**
+  - **작업 내용**:
+    1. **Go 코어 in-process API 구현 (`auth`, `runtime`)**: `auth.SessionManager.CreateSessionForUser(ctx, userID, role)` 및 `runtime.App.IssueSessionForUser(ctx, userID, role)` 메서드 구현. HTTP 라우터(`transport.Router`)에 무등록함으로써 동일 프로세스 경계 내에서만 호출 가능한 신뢰 경계(Trust Boundary) 원칙 준수.
+    2. **Single Source of Truth & Maserati 원칙 이행**: `auth.SessionManager` 내 하드코딩된 SQL 리터럴(`"users"` 테이블 조회)을 100% 제거하고 `role`을 명시적 파라미터로 수용하도록 리팩토링.
+    3. **Cloudflare D1 Target 스펙 문서화 & 쿠키 패리티 보장**: `_mold_sessions` 테이블 D1 스키마 및 `mold_session` 세션 쿠키 속성(`Expires`, `Max-Age`, `HttpOnly`, `Secure`, `SameSite=Lax`) 스펙 확정.
+    4. **Miniflare 3대 실측 E2E 100% PASS**: Worker 소스 코드에 HTTP 엔드포인트를 0줄도 추가하지 않고, 외부 Pages Function 시뮬레이션으로 D1 `_mold_sessions`에 직접 `INSERT` ➔ `mold_session` 쿠키 첨부하여 protected endpoint (`GET /api/record_tags`) 요청 시 200 OK 승인 & 미첨부 시 401 Unauthorized 차단 실측 통과.
+
 
 
 

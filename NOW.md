@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-26 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결**, **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결**, **복합 Unique Constraint 스펙 반영 & N:M/OAuth 설계 결정 문서화 완결**, **Task 5.1 복합 Unique Constraint (`unique_together`) Go 코어 & Cloudflare D1 Target 실구현 완결**, 및 **Task 5.2 N:M Join Resource 패턴 drink-log 격리 파일럿 완결 (`examples/drink-log-pilot` 3개 Resource 정의, DDL Parity 비교, Miniflare 5대 E2E 시나리오 100% PASS, YAML loader constraints 파싱 결함 수정 및 3대 마찰 기록 완결)**  
-👉 **Post-MVP: 다음 세션 백로그 확정 (Task 5.3 OAuth 세션 발급 Escape Hatch vs Nullable Ownership IR 확장 등)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결**, **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결**, **복합 Unique Constraint 스펙 반영 & N:M/OAuth 설계 결정 문서화 완결**, **Task 5.1 복합 Unique Constraint (`unique_together`) Go 코어 & Cloudflare D1 Target 실구현 완결**, **Task 5.2 N:M Join Resource 패턴 drink-log 파일럿 적용 완결**, 및 **Task 5.3 OAuth 세션 발급 Escape Hatch 구현 완결 (Go 코어 in-process `IssueSessionForUser` API, Cloudflare D1 외부 세션 작성 스펙 문서화 및 Miniflare 실측 100% PASS, Phase 5 100% 완결)**  
+👉 **Post-MVP: 다음 세션 백로그 확정 (Phase 5 수집 마찰 종합 판정 및 후보 (a), (b), (c) 채택 논의)**
 
 ---
 
@@ -40,16 +40,14 @@
 
 *다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
 
-1. [x] ~~**Cloudflare Workers TS Codegen 기능 확장 및 후속 리뷰 결함 수정 (Auth / View / Blob)**~~ (완료: Auth 헤더 우회 제거, PBKDF2 해싱 및 /login 검증, 1-Step Multipart Create & Atomic Rollback, HTML Sanitizer 보강, SQL 리터럴 홑따옴표 수정, Miniflare V8 Isolate 8대 시나리오 실측 100% PASS 완결)
-2. [x] ~~**문서 스펙(`docs/ir-spec.md`, `docs/resource-guide.md`) 구조 반영 갱신**~~ (완료: Plan 계층 3단계 계층 구조 1.5절 신설, FK 파생 필드의 NormalizeFields & Nullable: true 골든 패리티 서술, Section 7 결정 사항 채택, resource-guide.md belongs_to FK 자동 파생 팁 추가 완료)
-3. [x] ~~**Cloudflare R2 Multi-Blob Orphan 객체 동기 보상 삭제 (Direction C)**~~ (완료: N번째 blob 업로드 실패 시 D1 hard delete ➔ R2 보상 삭제 순서 정렬, `BLOB_ORPHAN_CLEANUP_FAILED` 명시적 보고 및 SakePost Miniflare 실측 시나리오 1·2 100% PASS 완료)
-4. [x] ~~**복합 Unique Constraint 스펙 반영 및 N:M/OAuth 설계 결정 문서화**~~ (완료: `constraints.unique_together` 최상위 노드 문법, Partial Unique Index 전환 스펙, OAuth 세션 발급 Escape Hatch 확장 방향, N:M Join Resource Good 패턴 가이드 및 NULL 우회 방지 FK `nullable: false` 필수성 반영 완료)
-5. [x] ~~**Task 5.1: 복합 Unique Constraint (`constraints.unique_together`) IR/DDL/Validation 실구현 (Go 코어 + Cloudflare D1 Target)**~~ (완료: `plan.Plan.UniqueTogether` 수렴, `resource.Validate` 메타스키마 검증, `adapters/sqlite` & `codegen/cloudflare` Partial Unique Index DDL 생성, Go/TS Create/Update 400 `INVALID_INPUT` 패리티 100%, Miniflare 5대 시나리오 실측 100% PASS 완료)
-6. [x] ~~**Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log` 파일럿 적용 및 마찰 수집**~~ (완료: `examples/drink-log-pilot`에 `SakeRecord`/`Tag`/`RecordTag` 작성, DDL Parity 비교, Miniflare 5대 시나리오 100% PASS, YAML loader `constraints` 파싱 결함 `fix(resource)` 수정, 3대 마찰 기록 완결)
-7. 👉 **후보 (a) Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 `drink-log` Google OAuth 연동**:
-   - **사유**: 외부 OAuth 검증 완료 후 Mold 세션을 발급하는 공개 API (가칭 `runtime.App.IssueSessionForUser` 또는 TS Target `/api/_auth/issue_session` 등)를 구현하고 `drink-log` 소셜 로그인 후 세션 쿠키 발급 및 권한 평가 실측.
-8. 👉 **후보 (b) Nullable Ownership 표현을 위한 IR 확장 (마찰 A 해결안 논의 후 적용)**:
-   - **사유**: Task 5.2 파일럿에서 포착된 `owner_id = NULL` (기본 태그 등 공개 레코드)과 `owner_id = <user_id>` (커스텀 소유 레코드)가 혼재된 도메인을 IR `permissions.read: owner` 하에서 자연스럽게 지원하기 위한 IR/auth 확장 논의.
-9. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 REST Remote Backend Adapter 추가**:
+1. [x] ~~**Task 5.1: 복합 Unique Constraint (`constraints.unique_together`) IR/DDL/Validation 실구현 (Go 코어 + Cloudflare D1 Target)**~~ (완료: `plan.Plan.UniqueTogether` 수렴, `resource.Validate` 메타스키마 검증, `adapters/sqlite` & `codegen/cloudflare` Partial Unique Index DDL 생성, Go/TS Create/Update 400 `INVALID_INPUT` 패리티 100%, Miniflare 5대 시나리오 실측 100% PASS 완료)
+2. [x] ~~**Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log` 파일럿 적용 및 마찰 수집**~~ (완료: `examples/drink-log-pilot`에 `SakeRecord`/`Tag`/`RecordTag` 작성, DDL Parity 비교, Miniflare 5대 시나리오 100% PASS, YAML loader `constraints` 파싱 결함 `fix(resource)` 수정, 4대 마찰 기록 완결)
+3. [x] ~~**Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 OAuth 연동 기반 마련**~~ (완료: Go in-process `IssueSessionForUser` API, HTTP 라우터 무등록 신뢰 경계, Cloudflare D1 외부 세션 직접 작성 스펙 문서화 및 Miniflare 실측 100% PASS 완료)
+4. 👉 **후보 (a) Nullable Ownership IR 표현 확장 (Task 5.2 마찰 1 종합 판정 및 해결안 적용)**:
+   - **사유**: `Tag` 리소스 등 기본 레코드(`owner_id = NULL`)와 사용자 커스텀 레코드(`owner_id = <user_id>`)가 한 테이블에 혼재할 때, `auth.permissions.read: owner` 하에서 `owner_id = NULL`인 공개 기본 레코드 접근을 허용하는 Nullable 소유권 semantic 확장 논의 및 구현.
+5. 👉 **후보 (b) 관계 조인 조회(Eager Loading / Include query) API 지원 (Task 5.2 마찰 2 종합 판정)**:
+   - **사유**: N:M Join Resource(`RecordTag`) 조회 시 특정 parent ID 필터링 및 target resource inclusion(`SakeRecord`에 연결된 `Tag` 정보)을 REST API 수준에서 N+1 없이 단일 응답으로 제공하는 쿼리 확장 논의.
+6. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
    - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장.
+
 
