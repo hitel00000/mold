@@ -93,6 +93,31 @@ Mold는 11가지 Primitive / Semantic Type을 지원한다.
 > **`belongs_to` 관계의 자동 외래키(FK) 필드 파생**:
 > `belongs_to` 관계를 정의할 때 `foreign_key`에 지정한 컬럼(예: `post_id`)은 Mold 런타임에서 자동으로 `int` 타입(nullable: true) 필드로 확장 처리됩니다. 따라서 YAML 작성 시 **`fields` 목록에 해당 외래키 컬럼을 별도로 중복 기재할 필요가 없습니다.** (만약 `fields`에 명시적으로 추가하더라도 중복 생성 없이 안전하게 처리됩니다).
 
+### N:M 관계 표현 패턴 (Join Resource + `unique_together`)
+
+Mold는 전용 `has_and_belongs_to_many` 관계 타입을 만들지 않고, **명시적 Join Resource와 복합 Unique 제약(`constraints.unique_together`)** 조합으로 N:M 관계를 정의한다.
+
+```yaml
+resource:
+  name: RecordTag
+  table: record_tags
+  soft_delete: true
+
+relations:
+  - name: record
+    kind: belongs_to
+    target: SakeRecord
+    foreign_key: sake_record_id
+  - name: tag
+    kind: belongs_to
+    target: Tag
+    foreign_key: tag_id
+
+constraints:
+  unique_together:
+    - [sake_record_id, tag_id]   # 동일한 record-tag 연결 중복 방지
+```
+
 ---
 
 ## 5. Auth & Permissions (인증 및 권한)
@@ -174,5 +199,15 @@ AI 에이전트는 Resource YAML을 작성/수정할 때 아래의 **잘못된 �
 | ❌ Bad (잘못된 설정) | ✅ Good (올바른 설정) |
 | :--- | :--- |
 | ```yaml<br>fields:<br>  - name: status<br>    type: enum       # ❌ values 미지정으로 로드 실패<br>``` | ```yaml<br>fields:<br>  - name: status<br>    type: enum<br>    constraints:<br>      values: ["draft", "published", "archived"]  # ✅ 필수 값 목록 지정<br>``` |
+
+---
+
+### 패턴 6: N:M 관계를 새 relation kind로 표현하려는 시도
+
+> **위험성**: `has_and_belongs_to_many` 같은 미지원 relation kind를 사용하면 스키마 로드 검증 단계에서 실패함. N:M 관계는 항상 명시적 Join Resource(두 대상에 대한 `belongs_to` + `constraints.unique_together`)로 작성해야 함.
+
+| ❌ Bad (잘못된 설정) | ✅ Good (올바른 설정) |
+| :--- | :--- |
+| ```yaml<br>relations:<br>  - name: tags<br>    kind: has_and_belongs_to_many # ❌ 미지원 relation kind!<br>    target: Tag<br>``` | ```yaml<br># RecordTag.yaml (명시적 Join Resource)<br>resource:<br>  name: RecordTag<br><br>relations:<br>  - name: record<br>    kind: belongs_to<br>    target: SakeRecord<br>    foreign_key: sake_record_id<br>  - name: tag<br>    kind: belongs_to<br>    target: Tag<br>    foreign_key: tag_id<br><br>constraints:<br>  unique_together:<br>    - [sake_record_id, tag_id] # ✅ 복합 unique로 중복 연결 차단<br>``` |
 
 ---
