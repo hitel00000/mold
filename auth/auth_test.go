@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,8 +18,10 @@ import (
 	"github.com/hitel00000/mold/adapters/sqlite"
 	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
+	"github.com/hitel00000/mold/runtime"
 	"github.com/hitel00000/mold/transport"
 	"github.com/hitel00000/mold/view"
+	"strings"
 	_ "modernc.org/sqlite"
 )
 
@@ -768,5 +771,193 @@ func TestEvaluate_NullableOwnershipMatrix(t *testing.T) {
 		})
 	}
 }
+
+func TestList_OwnerFilteringBoundaryMatrix(t *testing.T) {
+	tmpDir := t.TempDir()
+	tagYAML := `
+resource:
+  name: Tag
+  table: tags
+  schema_version: 1
+  soft_delete: true
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner
+
+fields:
+  - name: name
+    type: string
+  - name: owner_id
+    type: int
+    nullable: true
+`
+	unassignedYAML := `
+resource:
+  name: UnassignedOwnerDoc
+  table: unassigned_owner_docs
+  schema_version: 1
+
+auth:
+  ownership_field: ""
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner
+
+fields:
+  - name: title
+    type: string
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "Tag.yaml"), []byte(tagYAML), 0644); err != nil {
+		t.Fatalf("failed to write Tag.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "UnassignedOwnerDoc.yaml"), []byte(unassignedYAML), 0644); err != nil {
+		t.Fatalf("failed to write UnassignedOwnerDoc.yaml: %v", err)
+	}
+
+	dbPath := filepath.Join(tmpDir, "list_matrix.db")
+	cfg := runtime.Config{
+		ResourceDir: tmpDir,
+		DBPath:      dbPath,
+	}
+
+	app, err := runtime.New(cfg)
+	if err != nil {
+		t.Fatalf("failed initializing runtime App: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+	_, _ = app.CreateRecord(ctx, "Tag", map[string]any{"name": "System Tag (NULL)", "owner_id": nil})
+	_, _ = app.CreateRecord(ctx, "Tag", map[string]any{"name": "User 501 Tag", "owner_id": 501})
+	_, _ = app.CreateRecord(ctx, "Tag", map[string]any{"name": "User 502 Tag", "owner_id": 502})
+
+	_, _ = app.CreateRecord(ctx, "UnassignedOwnerDoc", map[string]any{"title": "Doc A"})
+	_, _ = app.CreateRecord(ctx, "UnassignedOwnerDoc", map[string]any{"title": "Doc B"})
+
+	c501, _, _ := app.IssueSessionForUser(ctx, 501, "user")
+	c502, _, _ := app.IssueSessionForUser(ctx, 502, "user")
+	cAdmin, _, _ := app.IssueSessionForUser(ctx, 999, "admin")
+
+	getCookieVal := func(cStr string) *http.Cookie {
+		if cStr == "" {
+			return nil
+		}
+		rawCookie := strings.Split(cStr, ";")[0]
+		parts := strings.SplitN(rawCookie, "=", 2)
+		return &http.Cookie{Name: parts[0], Value: parts[1]}
+	}
+
+	// Helper to make GET request and parse response
+	doGetList := func(endpoint string, cStr string) (int, map[string]any) {
+		req := httptest.NewRequest("GET", endpoint, nil)
+		if ck := getCookieVal(cStr); ck != nil {
+			req.AddCookie(ck)
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		var resMap map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &resMap)
+		return rec.Code, resMap
+	}
+
+	t.Run("1. List /api/tags / unauthenticated -> 401 Unauthorized (read: owner requires authentication)", func(t *testing.T) {
+		code, _ := doGetList("/api/tags", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", code)
+		}
+	})
+
+	t.Run("2. List /api/tags / User 501 -> Tag 1 (NULL), Tag 2 (501), total 2", func(t *testing.T) {
+		code, res := doGetList("/api/tags", c501)
+		if code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", code)
+		}
+		dataList := res["data"].([]any)
+		meta := res["meta"].(map[string]any)
+		if len(dataList) != 2 || int(meta["total"].(float64)) != 2 {
+			t.Fatalf("expected 2 records and total 2, got len=%d, total=%v", len(dataList), meta["total"])
+		}
+		ids := []string{fmt.Sprintf("%v", dataList[0].(map[string]any)["id"]), fmt.Sprintf("%v", dataList[1].(map[string]any)["id"])}
+		if ids[0] != "1" || ids[1] != "2" {
+			t.Fatalf("expected ids [1, 2], got %v", ids)
+		}
+	})
+
+	t.Run("3. List /api/tags / User 502 -> Tag 1 (NULL), Tag 3 (502), total 2", func(t *testing.T) {
+		code, res := doGetList("/api/tags", c502)
+		if code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", code)
+		}
+		dataList := res["data"].([]any)
+		meta := res["meta"].(map[string]any)
+		if len(dataList) != 2 || int(meta["total"].(float64)) != 2 {
+			t.Fatalf("expected 2 records and total 2, got len=%d, total=%v", len(dataList), meta["total"])
+		}
+		ids := []string{fmt.Sprintf("%v", dataList[0].(map[string]any)["id"]), fmt.Sprintf("%v", dataList[1].(map[string]any)["id"])}
+		if ids[0] != "1" || ids[1] != "3" {
+			t.Fatalf("expected ids [1, 3], got %v", ids)
+		}
+	})
+
+	t.Run("4. List /api/tags / admin -> Tag 1, Tag 2, Tag 3, total 3", func(t *testing.T) {
+		code, res := doGetList("/api/tags", cAdmin)
+		if code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", code)
+		}
+		dataList := res["data"].([]any)
+		meta := res["meta"].(map[string]any)
+		if len(dataList) != 3 || int(meta["total"].(float64)) != 3 {
+			t.Fatalf("expected 3 records and total 3, got len=%d, total=%v", len(dataList), meta["total"])
+		}
+	})
+
+	t.Run("5. List /api/unassigned_owner_docs / authenticated user -> all records returned (no filter)", func(t *testing.T) {
+		code, res := doGetList("/api/unassigned_owner_docs", c501)
+		if code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", code)
+		}
+		dataList := res["data"].([]any)
+		meta := res["meta"].(map[string]any)
+		if len(dataList) != 2 || int(meta["total"].(float64)) != 2 {
+			t.Fatalf("expected 2 records and total 2, got len=%d, total=%v", len(dataList), meta["total"])
+		}
+	})
+
+	t.Run("6. List /api/unassigned_owner_docs / unauthenticated user -> 401 Unauthorized", func(t *testing.T) {
+		code, _ := doGetList("/api/unassigned_owner_docs", "")
+		if code != http.StatusUnauthorized {
+			t.Fatalf("expected status 401, got %d", code)
+		}
+	})
+
+	t.Run("7. View HTML List /view/tags / User 502 -> User 501 Tag NOT rendered in HTML", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/view/tags", nil)
+		if ck := getCookieVal(c502); ck != nil {
+			req.AddCookie(ck)
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		htmlBody := rec.Body.String()
+
+		if bytes.Contains([]byte(htmlBody), []byte("User 501 Tag")) {
+			t.Fatalf("security violation: User 501 Tag rendered in User 502 View HTML!")
+		}
+		if !bytes.Contains([]byte(htmlBody), []byte("System Tag (NULL)")) || !bytes.Contains([]byte(htmlBody), []byte("User 502 Tag")) {
+			t.Fatalf("expected System Tag and User 502 Tag in View HTML, body snippet:\n%s", htmlBody)
+		}
+	})
+}
+
 
 
