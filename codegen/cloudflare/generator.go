@@ -670,7 +670,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				continue
 			}
 			setClauses = append(setClauses, fmt.Sprintf("\"%s\" = ?", f.Name))
-			updateVals = append(updateVals, fmt.Sprintf("body['%s'] !== undefined ? body['%s'] : null", f.Name, f.Name))
+			updateVals = append(updateVals, fmt.Sprintf("body['%s'] !== undefined ? body['%s'] : (existing as any)['%s']", f.Name, f.Name, f.Name))
 		}
 		if p.Timestamps {
 			setClauses = append(setClauses, "\"updated_at\" = ?")
