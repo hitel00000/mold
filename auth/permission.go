@@ -38,7 +38,8 @@ func Evaluate(sess *Session, res *resource.Resource, action ActionType, rec stor
 	permSpec := getPermissionSpec(res, action)
 
 	// 1. Check authentication credentials for non-public actions (401 Unauthorized)
-	if permSpec != "public" && permSpec != "" {
+	// Exception: when permSpec is "owner", unauthenticated requests may read records with NULL ownership_field.
+	if permSpec != "public" && permSpec != "" && permSpec != "owner" {
 		if sess == nil {
 			return http.StatusUnauthorized, false, ErrUnauthorized
 		}
@@ -72,20 +73,41 @@ func Evaluate(sess *Session, res *resource.Resource, action ActionType, rec stor
 		return http.StatusUnauthorized, false, ErrUnauthorized
 
 	case permSpec == "owner":
-		if sess == nil {
-			return http.StatusUnauthorized, false, ErrUnauthorized
-		}
 		if res.Auth == nil || res.Auth.OwnershipField == "" {
 			// If no ownership_field defined, fallback to authenticated
+			if sess == nil {
+				return http.StatusUnauthorized, false, ErrUnauthorized
+			}
 			return http.StatusOK, true, nil
 		}
 		if rec == nil {
-			// On Create action, ownership is being assigned
+			// On Create/List action without a target record
+			if sess == nil {
+				return http.StatusUnauthorized, false, ErrUnauthorized
+			}
 			return http.StatusOK, true, nil
 		}
+
 		ownerVal, exists := rec[res.Auth.OwnershipField]
 		if !exists || ownerVal == nil {
-			return http.StatusOK, true, nil
+			// Record has NULL ownership_field
+			if action == ActionRead {
+				// Read is public level for NULL ownership records
+				return http.StatusOK, true, nil
+			}
+			// Update/Delete for NULL ownership records requires admin role
+			if sess == nil {
+				return http.StatusUnauthorized, false, ErrUnauthorized
+			}
+			if sess.Role == "admin" {
+				return http.StatusOK, true, nil
+			}
+			return http.StatusForbidden, false, ErrForbidden
+		}
+
+		// Record has Non-NULL ownership_field
+		if sess == nil {
+			return http.StatusUnauthorized, false, ErrUnauthorized
 		}
 		if fmt.Sprintf("%v", ownerVal) == fmt.Sprintf("%v", sess.UserID) || sess.Role == "admin" {
 			return http.StatusOK, true, nil

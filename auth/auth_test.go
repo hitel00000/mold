@@ -713,3 +713,60 @@ func TestSessionManager_CreateSessionForUser(t *testing.T) {
 	}
 }
 
+func TestEvaluate_NullableOwnershipMatrix(t *testing.T) {
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Auth: &resource.Auth{
+			OwnershipField: "owner_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "owner",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+		},
+	}
+
+	systemRec := map[string]any{"id": 1, "name": "System Tag", "owner_id": nil}
+	user1Rec := map[string]any{"id": 2, "name": "User1 Tag", "owner_id": 501}
+
+	user1Sess := &auth.Session{ID: "sess_501", UserID: 501, Role: "user"}
+	user2Sess := &auth.Session{ID: "sess_502", UserID: 502, Role: "user"}
+	adminSess := &auth.Session{ID: "sess_admin", UserID: 999, Role: "admin"}
+
+	tests := []struct {
+		name         string
+		sess         *auth.Session
+		action       auth.ActionType
+		rec          map[string]any
+		expectedCode int
+		expectedOk   bool
+	}{
+		{"1. read / NULL / unauthenticated -> 200 OK", nil, auth.ActionRead, systemRec, http.StatusOK, true},
+		{"2. read / NULL / user -> 200 OK", user1Sess, auth.ActionRead, systemRec, http.StatusOK, true},
+		{"3. read / NULL / admin -> 200 OK", adminSess, auth.ActionRead, systemRec, http.StatusOK, true},
+		{"4. read / non-NULL / other user -> 403 Forbidden", user2Sess, auth.ActionRead, user1Rec, http.StatusForbidden, false},
+		{"5. read / non-NULL / owner -> 200 OK", user1Sess, auth.ActionRead, user1Rec, http.StatusOK, true},
+		{"6. update / NULL / unauthenticated -> 401 Unauthorized", nil, auth.ActionUpdate, systemRec, http.StatusUnauthorized, false},
+		{"7. update / NULL / user -> 403 Forbidden", user1Sess, auth.ActionUpdate, systemRec, http.StatusForbidden, false},
+		{"8. update / NULL / admin -> 200 OK", adminSess, auth.ActionUpdate, systemRec, http.StatusOK, true},
+		{"9. update / non-NULL / owner -> 200 OK", user1Sess, auth.ActionUpdate, user1Rec, http.StatusOK, true},
+		{"10. update / non-NULL / other user -> 403 Forbidden", user2Sess, auth.ActionUpdate, user1Rec, http.StatusForbidden, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, ok, _ := auth.Evaluate(tt.sess, tagRes, tt.action, tt.rec, nil)
+			if code != tt.expectedCode || ok != tt.expectedOk {
+				t.Errorf("got (code=%d, ok=%v), expected (code=%d, ok=%v)", code, ok, tt.expectedCode, tt.expectedOk)
+			}
+		})
+	}
+}
+
+
