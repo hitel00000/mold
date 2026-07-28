@@ -178,15 +178,15 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 		}
 	}
 
-	offset := (page - 1) * perPage
+	ownerFilter := buildOwnerFilter(res, sess)
 
-	records, err := store.List(req.Context(), res, storage.Query{Limit: perPage, Offset: offset})
+	records, err := store.List(req.Context(), res, storage.Query{Limit: perPage, Offset: offset, OwnerFilter: ownerFilter})
 	if err != nil {
 		vh.renderErrorPage(w, http.StatusInternalServerError, err.Error(), navItems, sess)
 		return
 	}
 
-	totalRecords, _ := store.List(req.Context(), res, storage.Query{})
+	totalRecords, _ := store.List(req.Context(), res, storage.Query{OwnerFilter: ownerFilter})
 	total := len(records)
 	if totalRecords != nil {
 		total = len(totalRecords)
@@ -594,4 +594,32 @@ func parseID(s string) any {
 		return val
 	}
 	return s
+}
+
+func buildOwnerFilter(res *resource.Resource, sess *auth.Session) *storage.OwnerFilter {
+	if res == nil || res.Auth == nil {
+		return nil
+	}
+	if res.Auth.Permissions.Read != "owner" || res.Auth.OwnershipField == "" {
+		return nil
+	}
+
+	// admin bypass
+	if sess != nil && sess.Role == "admin" {
+		return nil
+	}
+
+	if sess != nil {
+		return &storage.OwnerFilter{
+			Mode:           storage.OwnerFilterUserAndNull,
+			OwnershipField: res.Auth.OwnershipField,
+			UserID:         sess.UserID,
+		}
+	}
+
+	// Unauthenticated user
+	return &storage.OwnerFilter{
+		Mode:           storage.OwnerFilterNullOnly,
+		OwnershipField: res.Auth.OwnershipField,
+	}
 }
