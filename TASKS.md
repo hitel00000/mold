@@ -238,7 +238,8 @@
   - **작업 내용**:
     1. **Phase 1 설계 조사 & 옵션 D 채택**: IR 스키마 변경 없이 `rec[ownership_field] == NULL`일 때 read는 public 수준 통과, update/delete는 admin 전용 가딩으로 수렴하는 마세라티 원칙 부합 옵션 D 확정.
     2. **Go 런타임 & Cloudflare TS Codegen 정밀화**: `auth.Evaluate` 및 `generator.go` TS 템플릿(GET Detail, PUT Update, DELETE, Blob routes)의 조기 401 반환 유예 및 `null`/`undefined` 소유권 판정 조건식 통일 정밀화.
-    3. **Go 10대 / Miniflare 15대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 15대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete) 전수 실행 raw 로그 100% PASS 검증 완결.
+    3. **Go 10대 / Miniflare 22대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 22대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete + Blob routes) 전수 실행 raw 로그 100% PASS 검증 완결.
+    4. **부수 발견 (Partial PUT 필드 손실 버그, `ba31038`)**: Nullable Ownership 실측 중 Cloudflare TS Codegen Target의 PUT UPDATE 템플릿이 `ownership_field`뿐 아니라 payload에 생략된 모든 필드를 NULL로 덮어쓰던 결함을 발견. Go 런타임은 해당 결함이 없었음(기존 값 유지가 정상 동작). 이 리소스 전역 부분 업데이트 데이터 손실 버그를 수정하여 Go/TS 패리티를 회복함. 이번 nullable ownership 작업 스코프 밖의 일반 버그이므로 별도 회귀 검증 대상으로 기록.
 
 - [ ] **Task 5.4 (백로그): List 액션 owner 권한 필터링 미비**
   - **배경**: Phase 1 (Nullable Ownership 조사) 중 발견. `permissions.read: owner`가 지정된 리소스에서 `GET /api/{table}` (List) 액션이 소유자 무관하게 전체 레코드를 반환하는 것으로 관찰됨. Detail(Get)/Update/Delete는 레코드 단위로 owner 가딩이 적용되나 List는 현재 가딩 대상에서 빠져 있는 것으로 보임.
