@@ -328,7 +328,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("\n// LIST /api/%s\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('%s', async (c) => {\n", endpoint))
 		sb.WriteString("  const authUser = await getAuthUser(c);\n")
-		if permRead != "public" {
+		if permRead != "public" && !(permRead == "owner" && ownershipField != "") {
 			sb.WriteString("  if (!authUser) {\n")
 			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
 			sb.WriteString("  }\n")
@@ -341,17 +341,31 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		}
 
 		sb.WriteString("  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);\n")
-		sb.WriteString("  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);\n")
+		sb.WriteString("  const offset = Math.max(parseInt(c.req.query('offset') || '0', 10), 0);\n\n")
 
-		whereClause := ""
+		sb.WriteString("  const whereConds: string[] = [];\n")
 		if p.SoftDelete {
-			whereClause = " WHERE \"deleted_at\" IS NULL"
+			sb.WriteString("  whereConds.push('\"deleted_at\" IS NULL');\n")
+		}
+		sb.WriteString("  const params: any[] = [];\n")
+
+		if permRead == "owner" && ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== 'admin') {\n"))
+			sb.WriteString(fmt.Sprintf("    if (authUser) {\n"))
+			sb.WriteString(fmt.Sprintf("      whereConds.push('(\"%s\" = ? OR \"%s\" IS NULL)');\n", ownershipField, ownershipField))
+			sb.WriteString("      params.push(authUser.id);\n")
+			sb.WriteString("    } else {\n")
+			sb.WriteString(fmt.Sprintf("      whereConds.push('\"%s\" IS NULL');\n", ownershipField))
+			sb.WriteString("    }\n")
+			sb.WriteString("  }\n")
 		}
 
-		sb.WriteString(fmt.Sprintf("  const countStmt = await c.env.DB.prepare('SELECT COUNT(*) as total FROM \"%s\"%s').first<{ total: number }>();\n", table, whereClause))
+		sb.WriteString("  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';\n")
+		sb.WriteString(fmt.Sprintf("  const countSql = `SELECT COUNT(*) as total FROM \"%s\"${whereClause}`;\n", table))
+		sb.WriteString("  const countStmt = await c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>();\n")
 		sb.WriteString("  const total = countStmt ? countStmt.total : 0;\n")
-		sb.WriteString(fmt.Sprintf("  const query = 'SELECT * FROM \"%s\"%s ORDER BY id ASC LIMIT ? OFFSET ?';\n", table, whereClause))
-		sb.WriteString("  const { results } = await c.env.DB.prepare(query).bind(limit, offset).all();\n")
+		sb.WriteString(fmt.Sprintf("  const querySql = `SELECT * FROM \"%s\"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;\n", table))
+		sb.WriteString("  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();\n")
 		sb.WriteString(fmt.Sprintf("  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, %s));\n", pwdFieldsJS))
 		sb.WriteString("  return c.json({\n")
 		sb.WriteString("    data: sanitized,\n")
