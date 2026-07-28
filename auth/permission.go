@@ -82,6 +82,11 @@ func Evaluate(sess *Session, res *resource.Resource, action ActionType, rec stor
 		}
 		if rec == nil {
 			// On Create/List action without a target record
+			if action == ActionRead && res.Auth != nil && res.Auth.OwnershipField != "" {
+				// Read action on owner resource without a target record (List)
+				// Allows unauthenticated requests to pass so List query filters NULL owner records
+				return http.StatusOK, true, nil
+			}
 			if sess == nil {
 				return http.StatusUnauthorized, false, ErrUnauthorized
 			}

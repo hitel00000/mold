@@ -867,10 +867,19 @@ fields:
 		return rec.Code, resMap
 	}
 
-	t.Run("1. List /api/tags / unauthenticated -> 401 Unauthorized (read: owner requires authentication)", func(t *testing.T) {
-		code, _ := doGetList("/api/tags", "")
-		if code != http.StatusUnauthorized {
-			t.Fatalf("expected status 401, got %d", code)
+	t.Run("1. List /api/tags / unauthenticated -> Tag 1 (NULL) only, total 1", func(t *testing.T) {
+		code, res := doGetList("/api/tags", "")
+		if code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", code)
+		}
+		dataList := res["data"].([]any)
+		meta := res["meta"].(map[string]any)
+		if len(dataList) != 1 || int(meta["total"].(float64)) != 1 {
+			t.Fatalf("expected 1 record and total 1, got len=%d, total=%v", len(dataList), meta["total"])
+		}
+		rec0 := dataList[0].(map[string]any)
+		if fmt.Sprintf("%v", rec0["id"]) != "1" {
+			t.Fatalf("expected tag 1, got %v", rec0["id"])
 		}
 	})
 
