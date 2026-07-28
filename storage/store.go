@@ -17,11 +17,28 @@ var (
 // Record represents a dynamic row of resource data.
 type Record map[string]any
 
+// OwnerFilterMode specifies how owner-based record filtering should be applied in Query.
+type OwnerFilterMode int
+
+const (
+	OwnerFilterNone OwnerFilterMode = iota
+	OwnerFilterUserAndNull
+	OwnerFilterNullOnly
+)
+
+// OwnerFilter specifies owner-level row filtering options.
+type OwnerFilter struct {
+	Mode           OwnerFilterMode
+	OwnershipField string
+	UserID         int64
+}
+
 // Query specifies filtering and pagination options for List operations.
 type Query struct {
-	Filter map[string]any
-	Limit  int
-	Offset int
+	Filter      map[string]any
+	Limit       int
+	Offset      int
+	OwnerFilter *OwnerFilter
 }
 
 // Store defines the storage engine interface for Mold resources.

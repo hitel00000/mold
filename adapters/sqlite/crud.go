@@ -106,6 +106,16 @@ func (s *Store) List(ctx context.Context, res *resource.Resource, query storage.
 		querySQL += ` AND "deleted_at" IS NULL`
 	}
 
+	if query.OwnerFilter != nil && query.OwnerFilter.OwnershipField != "" {
+		switch query.OwnerFilter.Mode {
+		case storage.OwnerFilterUserAndNull:
+			querySQL += fmt.Sprintf(` AND ("%s" = ? OR "%s" IS NULL)`, query.OwnerFilter.OwnershipField, query.OwnerFilter.OwnershipField)
+			args = append(args, query.OwnerFilter.UserID)
+		case storage.OwnerFilterNullOnly:
+			querySQL += fmt.Sprintf(` AND "%s" IS NULL`, query.OwnerFilter.OwnershipField)
+		}
+	}
+
 	for k, v := range query.Filter {
 		querySQL += fmt.Sprintf(` AND "%s" = ?`, k)
 		args = append(args, v)
