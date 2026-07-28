@@ -363,7 +363,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("\n// DETAIL /api/%s/:id\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('%s/:id', async (c) => {\n", endpoint))
 		sb.WriteString("  const authUser = await getAuthUser(c);\n")
-		if permRead != "public" {
+		if permRead != "public" && !(permRead == "owner" && ownershipField != "") {
 			sb.WriteString("  if (!authUser) {\n")
 			sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
 			sb.WriteString("  }\n")
@@ -380,12 +380,18 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  }\n")
 
 		if permRead == "owner" && ownershipField != "" {
-			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (record as any)['%s'] != authUser.id) {\n", ownershipField))
-			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString(fmt.Sprintf("  const ownerVal = (record as any)['%s'];\n", ownershipField))
+			sb.WriteString("  if (ownerVal !== null && ownerVal !== undefined) {\n")
+			sb.WriteString("    if (!authUser) {\n")
+			sb.WriteString("      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+			sb.WriteString("    }\n")
+			sb.WriteString("    if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
+			sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("    }\n")
 			sb.WriteString("  }\n")
 		} else if strings.HasPrefix(permRead, "role:") {
 			role := strings.TrimPrefix(permRead, "role:")
-			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
+			sb.WriteString(fmt.Sprintf("  if (!authUser || (authUser.role !== '%s' && authUser.role !== 'admin')) {\n", role))
 			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 			sb.WriteString("  }\n")
 		}
@@ -620,7 +626,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  }\n")
 
 		if permUpdate == "owner" && ownershipField != "" {
-			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (existing as any)['%s'] != authUser.id) {\n", ownershipField))
+			sb.WriteString(fmt.Sprintf("  const ownerVal = (existing as any)['%s'];\n", ownershipField))
+			sb.WriteString("  if (ownerVal === null || ownerVal === undefined) {\n")
+			sb.WriteString("    if (authUser.role !== 'admin') {\n")
+			sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("    }\n")
+			sb.WriteString("  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
 			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 			sb.WriteString("  }\n")
 		} else if strings.HasPrefix(permUpdate, "role:") {
@@ -705,7 +716,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  }\n")
 
 		if permDelete == "owner" && ownershipField != "" {
-			sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && (existing as any)['%s'] != authUser.id) {\n", ownershipField))
+			sb.WriteString(fmt.Sprintf("  const ownerVal = (existing as any)['%s'];\n", ownershipField))
+			sb.WriteString("  if (ownerVal === null || ownerVal === undefined) {\n")
+			sb.WriteString("    if (authUser.role !== 'admin') {\n")
+			sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+			sb.WriteString("    }\n")
+			sb.WriteString("  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
 			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 			sb.WriteString("  }\n")
 		} else if strings.HasPrefix(permDelete, "role:") {
@@ -836,7 +852,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 			sb.WriteString("  }\n")
 			if permUpdate == "owner" && ownershipField != "" {
-				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && existing['%s'] != authUser.id) {\n", ownershipField))
+				sb.WriteString(fmt.Sprintf("  const ownerVal = existing['%s'];\n", ownershipField))
+				sb.WriteString("  if (ownerVal === null || ownerVal === undefined) {\n")
+				sb.WriteString("    if (authUser.role !== 'admin') {\n")
+				sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("    }\n")
+				sb.WriteString("  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
 				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 				sb.WriteString("  }\n")
 			} else if strings.HasPrefix(permUpdate, "role:") {
@@ -862,7 +883,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString(fmt.Sprintf("\n// DOWNLOAD BLOB /api/%s/:id/blob/%s\n", table, blobField))
 			sb.WriteString(fmt.Sprintf("app.get('%s/:id/blob/%s', async (c) => {\n", endpoint, blobField))
 			sb.WriteString("  const authUser = await getAuthUser(c);\n")
-			if permRead != "public" {
+			if permRead != "public" && !(permRead == "owner" && ownershipField != "") {
 				sb.WriteString("  if (!authUser) {\n")
 				sb.WriteString("    return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
 				sb.WriteString("  }\n")
@@ -873,8 +894,14 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 			sb.WriteString("  }\n")
 			if permRead == "owner" && ownershipField != "" {
-				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && record['%s'] != authUser.id) {\n", ownershipField))
-				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString(fmt.Sprintf("  const ownerVal = record['%s'];\n", ownershipField))
+				sb.WriteString("  if (ownerVal !== null && ownerVal !== undefined) {\n")
+				sb.WriteString("    if (!authUser) {\n")
+				sb.WriteString("      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+				sb.WriteString("    }\n")
+				sb.WriteString("    if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
+				sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("    }\n")
 				sb.WriteString("  }\n")
 			} else if strings.HasPrefix(permRead, "role:") {
 				role := strings.TrimPrefix(permRead, "role:")
@@ -909,7 +936,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("    return writeError(c, 404, 'NOT_FOUND', 'record not found');\n")
 			sb.WriteString("  }\n")
 			if permDelete == "owner" && ownershipField != "" {
-				sb.WriteString(fmt.Sprintf("  if (authUser && authUser.role !== 'admin' && record['%s'] != authUser.id) {\n", ownershipField))
+				sb.WriteString(fmt.Sprintf("  const ownerVal = record['%s'];\n", ownershipField))
+				sb.WriteString("  if (ownerVal === null || ownerVal === undefined) {\n")
+				sb.WriteString("    if (authUser.role !== 'admin') {\n")
+				sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+				sb.WriteString("    }\n")
+				sb.WriteString("  } else if (authUser.role !== 'admin' && ownerVal != authUser.id) {\n")
 				sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 				sb.WriteString("  }\n")
 			} else if strings.HasPrefix(permDelete, "role:") {

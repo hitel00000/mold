@@ -656,3 +656,52 @@ func TestCloudflareGenerator_UniqueTogether(t *testing.T) {
 		t.Errorf("expected IndexTS to write INVALID_INPUT error code with 400 status")
 	}
 }
+
+func TestCloudflareGenerator_NullableOwnershipTSOutput(t *testing.T) {
+	tagRes := &resource.Resource{
+		Name:          "Tag",
+		Table:         "tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Auth: &resource.Auth{
+			OwnershipField: "owner_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "owner",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	if err := reg.Register(tagRes); err != nil {
+		t.Fatalf("failed to register Tag resource: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify GET Detail does not early 401 return before fetching record when read: owner
+	if strings.Contains(out.IndexTS, "// DETAIL /api/tags/:id\napp.get('/api/tags/:id', async (c) => {\n  const authUser = await getAuthUser(c);\n  if (!authUser)") {
+		t.Errorf("expected GET Detail for owner perm with ownership_field to not early 401 return before fetching record")
+	}
+
+	// 2. Verify GET Detail checks ownerVal !== null && ownerVal !== undefined
+	if !strings.Contains(out.IndexTS, "const ownerVal = (record as any)['owner_id'];\n  if (ownerVal !== null && ownerVal !== undefined) {") {
+		t.Errorf("expected GET Detail to check ownerVal !== null for nullable ownership, got:\n%s", out.IndexTS)
+	}
+
+	// 3. Verify PUT Update checks ownerVal === null || ownerVal === undefined -> admin check
+	if !strings.Contains(out.IndexTS, "const ownerVal = (existing as any)['owner_id'];\n  if (ownerVal === null || ownerVal === undefined) {\n    if (authUser.role !== 'admin') {") {
+		t.Errorf("expected PUT Update to check ownerVal === null for admin requirement, got:\n%s", out.IndexTS)
+	}
+}
+
