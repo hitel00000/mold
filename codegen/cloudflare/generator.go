@@ -765,7 +765,24 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("\n// VIEW LIST /view/%s\n", table))
 		sb.WriteString(fmt.Sprintf("app.get('/view/%s', async (c) => {\n", table))
 		sb.WriteString("  const authUser = await getAuthUser(c);\n")
-		sb.WriteString(fmt.Sprintf("  const { results } = await c.env.DB.prepare('SELECT * FROM \"%s\"%s ORDER BY id ASC').all();\n", table, whereClause))
+		sb.WriteString("  const whereConds: string[] = [];\n")
+		if p.SoftDelete {
+			sb.WriteString("  whereConds.push('\"deleted_at\" IS NULL');\n")
+		}
+		sb.WriteString("  const params: any[] = [];\n")
+
+		if permRead == "owner" && ownershipField != "" {
+			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== 'admin') {\n"))
+			sb.WriteString(fmt.Sprintf("    if (authUser) {\n"))
+			sb.WriteString(fmt.Sprintf("      whereConds.push('(\"%s\" = ? OR \"%s\" IS NULL)');\n", ownershipField, ownershipField))
+			sb.WriteString("      params.push(authUser.id);\n")
+			sb.WriteString("    } else {\n")
+			sb.WriteString(fmt.Sprintf("      whereConds.push('\"%s\" IS NULL');\n", ownershipField))
+			sb.WriteString("    }\n")
+			sb.WriteString("  }\n")
+		}
+		sb.WriteString("  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';\n")
+		sb.WriteString(fmt.Sprintf("  const { results } = await c.env.DB.prepare(`SELECT * FROM \"%s\"${whereClause} ORDER BY id ASC`).bind(...params).all();\n", table))
 		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s List</title></head><body>`;\n", p.ResourceName))
 		sb.WriteString(fmt.Sprintf("  html += `<h1>%s List</h1>`;\n", p.ResourceName))
 		sb.WriteString(fmt.Sprintf("  html += `<a href=\"/view/%s/new\">+ New %s</a><br/><br/><table border=\"1\"><thead><tr><th>id</th>`;\n", table, p.ResourceName))

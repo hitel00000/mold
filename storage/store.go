@@ -30,7 +30,7 @@ const (
 type OwnerFilter struct {
 	Mode           OwnerFilterMode
 	OwnershipField string
-	UserID         int64
+	UserID         any
 }
 
 // Query specifies filtering and pagination options for List operations.

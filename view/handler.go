@@ -178,6 +178,7 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 		}
 	}
 
+	offset := (page - 1) * perPage
 	ownerFilter := buildOwnerFilter(res, sess)
 
 	records, err := store.List(req.Context(), res, storage.Query{Limit: perPage, Offset: offset, OwnerFilter: ownerFilter})
