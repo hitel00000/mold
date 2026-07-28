@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,3 +114,128 @@ func TestDrinkLogPilot_OAuthSessionE2E(t *testing.T) {
 		t.Errorf("expected 403 Forbidden for non-owner user, got %d: %s", wOther.Code, wOther.Body.String())
 	}
 }
+
+func TestDrinkLogPilot_NullableOwnerTagPermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	tagYamlPath := filepath.Join(tmpDir, "Tag.yaml")
+	tagYamlContent := `resource:
+  name: Tag
+  table: tags
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+    constraints:
+      unique: true
+  - name: owner_id
+    type: int
+    nullable: true
+
+auth:
+  ownership_field: owner_id
+  permissions:
+    create: authenticated
+    read: owner
+    update: owner
+    delete: owner
+`
+	if err := os.WriteFile(tagYamlPath, []byte(tagYamlContent), 0644); err != nil {
+		t.Fatalf("failed writing temporary Tag.yaml: %v", err)
+	}
+
+	dbPath := filepath.Join(tmpDir, "pilot_nullable_tag.db")
+	app, err := runtime.New(runtime.Config{
+		ResourceDir: tmpDir,
+		DBPath:      dbPath,
+	})
+	if err != nil {
+		t.Fatalf("failed initializing runtime App: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+
+	// Seed System Tag (owner_id = nil) via App.CreateRecord
+	sysTag, err := app.CreateRecord(ctx, "Tag", map[string]any{
+		"name":     "System Fruity",
+		"owner_id": nil,
+	})
+	if err != nil {
+		t.Fatalf("failed creating system tag: %v", err)
+	}
+	sysTagID := sysTag["id"]
+
+	// Seed User 501 Custom Tag (owner_id = 501)
+	userTag, err := app.CreateRecord(ctx, "Tag", map[string]any{
+		"name":     "User 501 Custom Tag",
+		"owner_id": 501,
+	})
+	if err != nil {
+		t.Fatalf("failed creating user tag: %v", err)
+	}
+	userTagID := userTag["id"]
+
+	// Issue cookies for User 501, User 502, and Admin
+	user1Cookie, _, _ := app.IssueSessionForUser(ctx, 501, "user")
+	user2Cookie, _, _ := app.IssueSessionForUser(ctx, 502, "user")
+	adminCookie, _, _ := app.IssueSessionForUser(ctx, 999, "admin")
+
+	// 1. Unauthenticated read of System Tag (owner_id = null) -> 200 OK
+	reqUnauthSys, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/tags/%v", sysTagID), nil)
+	wUnauthSys := httptest.NewRecorder()
+	app.ServeHTTP(wUnauthSys, reqUnauthSys)
+	if wUnauthSys.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for unauthenticated read of system tag, got %d: %s", wUnauthSys.Code, wUnauthSys.Body.String())
+	}
+
+	// 2. User 502 read of System Tag (owner_id = null) -> 200 OK
+	reqUser2Sys, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/tags/%v", sysTagID), nil)
+	reqUser2Sys.Header.Set("Cookie", user2Cookie)
+	wUser2Sys := httptest.NewRecorder()
+	app.ServeHTTP(wUser2Sys, reqUser2Sys)
+	if wUser2Sys.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for user2 read of system tag, got %d: %s", wUser2Sys.Code, wUser2Sys.Body.String())
+	}
+
+	// 3. User 502 read of User 501 Custom Tag (owner_id = 501) -> 403 Forbidden
+	reqUser2User1Tag, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/tags/%v", userTagID), nil)
+	reqUser2User1Tag.Header.Set("Cookie", user2Cookie)
+	wUser2User1Tag := httptest.NewRecorder()
+	app.ServeHTTP(wUser2User1Tag, reqUser2User1Tag)
+	if wUser2User1Tag.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for user2 read of user1 custom tag, got %d: %s", wUser2User1Tag.Code, wUser2User1Tag.Body.String())
+	}
+
+	// 4. User 501 read of User 501 Custom Tag -> 200 OK
+	reqUser1User1Tag, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/tags/%v", userTagID), nil)
+	reqUser1User1Tag.Header.Set("Cookie", user1Cookie)
+	wUser1User1Tag := httptest.NewRecorder()
+	app.ServeHTTP(wUser1User1Tag, reqUser1User1Tag)
+	if wUser1User1Tag.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for owner read of user1 custom tag, got %d: %s", wUser1User1Tag.Code, wUser1User1Tag.Body.String())
+	}
+
+	// 5. User 501 update of System Tag (owner_id = null) -> 403 Forbidden
+	reqUser1UpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"name":"Hacked System Tag"}`))
+	reqUser1UpdateSys.Header.Set("Content-Type", "application/json")
+	reqUser1UpdateSys.Header.Set("Cookie", user1Cookie)
+	wUser1UpdateSys := httptest.NewRecorder()
+	app.ServeHTTP(wUser1UpdateSys, reqUser1UpdateSys)
+	if wUser1UpdateSys.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for non-admin update of system tag, got %d: %s", wUser1UpdateSys.Code, wUser1UpdateSys.Body.String())
+	}
+
+	// 6. Admin update of System Tag (owner_id = null) -> 200 OK
+	reqAdminUpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"name":"Renamed System Tag"}`))
+	reqAdminUpdateSys.Header.Set("Content-Type", "application/json")
+	reqAdminUpdateSys.Header.Set("Cookie", adminCookie)
+	wAdminUpdateSys := httptest.NewRecorder()
+	app.ServeHTTP(wAdminUpdateSys, reqAdminUpdateSys)
+	if wAdminUpdateSys.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for admin update of system tag, got %d: %s", wAdminUpdateSys.Code, wAdminUpdateSys.Body.String())
+	}
+}
+
