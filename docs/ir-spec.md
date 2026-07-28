@@ -177,6 +177,10 @@ auth:
 * 최소 모델: `public | authenticated | owner | role:<name>` 4종만 1차 지원
 * Field 단위 권한은 1차 스코프에서 제외 (마세라티 원칙 — 실제 필요해지면 추가)
 
+### Nullable Ownership 레코드 평가 규칙
+
+`ownership_field`에 지정된 필드 값이 `NULL`인 레코드는 특정 소유자가 없는 공용/시스템 레코드로 취급된다. `permissions.read: owner`가 적용된 리소스에서 이런 레코드는 미인증 요청을 포함해 누구나 조회할 수 있다 (public과 동일하게 동작). 반면 `update`/`delete`에서 `owner`가 적용된 경우, 소유자가 없는 레코드는 `role: admin` 세션만 수정/삭제할 수 있으며 일반 인증 사용자는 403 Forbidden으로 거부된다. 이 규칙은 Go 런타임과 Cloudflare TS Codegen Target에 동일하게 적용된다.
+
 ### 외부 OAuth 연동 및 세션 발급 전략 (예정된 확장 방향)
 
 Mold는 특정 OAuth Provider(Google, GitHub 등)와 직접 통신하거나 프로토콜 구현체를 코어 런타임에 내장하지 않는다 (특정 벤더 종속성 회피 원칙).

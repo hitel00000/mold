@@ -234,6 +234,16 @@
     3. **Cloudflare D1 Target 스펙 문서화 & 쿠키 패리티 보장**: `_mold_sessions` 테이블 D1 스키마 및 `mold_session` 세션 쿠키 속성(`Expires`, `Max-Age`, `HttpOnly`, `Secure`, `SameSite=Lax`) 스펙 확정.
     4. **Miniflare 3대 실측 E2E 100% PASS**: Worker 소스 코드에 HTTP 엔드포인트를 0줄도 추가하지 않고, 외부 Pages Function 시뮬레이션으로 D1 `_mold_sessions`에 직접 `INSERT` ➔ `mold_session` 쿠키 첨부하여 protected endpoint (`GET /api/record_tags`) 요청 시 200 OK 승인 & 미첨부 시 401 Unauthorized 차단 실측 통과.
 
+- [x] **후보 (a) / Task 5.2 마찰 A: Nullable Ownership IR 표현 및 Go/TS Target 평가 엔진 패리티 완결**
+  - **작업 내용**:
+    1. **Phase 1 설계 조사 & 옵션 D 채택**: IR 스키마 변경 없이 `rec[ownership_field] == NULL`일 때 read는 public 수준 통과, update/delete는 admin 전용 가딩으로 수렴하는 마세라티 원칙 부합 옵션 D 확정.
+    2. **Go 런타임 & Cloudflare TS Codegen 정밀화**: `auth.Evaluate` 및 `generator.go` TS 템플릿(GET Detail, PUT Update, DELETE, Blob routes)의 조기 401 반환 유예 및 `null`/`undefined` 소유권 판정 조건식 통일 정밀화.
+    3. **Go 10대 / Miniflare 15대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 15대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete) 전수 실행 raw 로그 100% PASS 검증 완결.
+
+- [ ] **Task 5.4 (백로그): List 액션 owner 권한 필터링 미비**
+  - **배경**: Phase 1 (Nullable Ownership 조사) 중 발견. `permissions.read: owner`가 지정된 리소스에서 `GET /api/{table}` (List) 액션이 소유자 무관하게 전체 레코드를 반환하는 것으로 관찰됨. Detail(Get)/Update/Delete는 레코드 단위로 owner 가딩이 적용되나 List는 현재 가딩 대상에서 빠져 있는 것으로 보임.
+  - **다음 조치**: 별도 세션에서 실제 재현 여부를 먼저 실측 확인하고, 재현되면 근본 원인 분석 및 해결 방향(예: List 쿼리에 `WHERE ownership_field = ? OR ownership_field IS NULL` 자동 주입) 논의 필요. Milestone 2 회고 "조건부 로직의 경계 누락" 패턴과 유사한 계열로 의심됨.
+
 
 
 
