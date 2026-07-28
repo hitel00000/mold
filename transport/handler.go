@@ -122,10 +122,13 @@ func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *reso
 		}
 	}
 
+	ownerFilter := buildOwnerFilter(res, sess)
+
 	// Fetch page
 	q := storage.Query{
-		Limit:  limit,
-		Offset: offset,
+		Limit:       limit,
+		Offset:      offset,
+		OwnerFilter: ownerFilter,
 	}
 	records, err := store.List(req.Context(), res, q)
 	if err != nil {
@@ -134,7 +137,7 @@ func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *reso
 	}
 
 	// Fetch total count without limit/offset for pagination metadata
-	totalRecords, err := store.List(req.Context(), res, storage.Query{})
+	totalRecords, err := store.List(req.Context(), res, storage.Query{OwnerFilter: ownerFilter})
 	totalCount := len(records)
 	if err == nil {
 		totalCount = len(totalRecords)
@@ -731,4 +734,32 @@ func (rt *Router) handleBlobDelete(w http.ResponseWriter, req *http.Request, res
 
 	SanitizeRecord(res, updatedRec)
 	WriteSuccess(w, http.StatusOK, updatedRec)
+}
+
+func buildOwnerFilter(res *resource.Resource, sess *auth.Session) *storage.OwnerFilter {
+	if res == nil || res.Auth == nil {
+		return nil
+	}
+	if res.Auth.Permissions.Read != "owner" || res.Auth.OwnershipField == "" {
+		return nil
+	}
+
+	// admin bypass
+	if sess != nil && sess.Role == "admin" {
+		return nil
+	}
+
+	if sess != nil {
+		return &storage.OwnerFilter{
+			Mode:           storage.OwnerFilterUserAndNull,
+			OwnershipField: res.Auth.OwnershipField,
+			UserID:         sess.UserID,
+		}
+	}
+
+	// Unauthenticated user
+	return &storage.OwnerFilter{
+		Mode:           storage.OwnerFilterNullOnly,
+		OwnershipField: res.Auth.OwnershipField,
+	}
 }
