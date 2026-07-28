@@ -22,8 +22,8 @@
 
 ## 현재 상태 (2026-07-28 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결**, **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결**, **복합 Unique Constraint 스펙 반영 & N:M/OAuth 설계 결정 문서화 완결**, **Task 5.1 복합 Unique Constraint (`unique_together`) Go 코어 & Cloudflare D1 Target 실구현 완결**, **Task 5.2 N:M Join Resource 패턴 drink-log 파일럿 적용 완결**, **Task 5.3 OAuth 세션 발급 Escape Hatch 구현 완결**, 및 **후보 (a) Nullable Ownership IR 표현 및 Go/TS Target 평가 엔진 패리티 완결 (Go/TS 15대 시나리오 Miniflare dispatchFetch V8 Isolate real HTTP 실측 100% PASS 완료)**  
-👉 **Post-MVP: 다음 세션 백로그 확정 (후보 (b), (c), 또는 신규 Task 5.4 채택 논의)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), `runtime` 패키지 신설 및 **잔여 표면 마찰 완화 완결 (`runtime.App.CreateRecord` 초기 데이터 시딩 캡슐화로 외부 코드의 `resource`/`storage` 패키지 직접 임포트 0줄 실측)**, Phase 2 `mold dev` DX 실험 완결, Phase 4 Task 4.1 Cloudflare Workers TS+Hono+D1 Codegen 완성, **Plan 계층 (`plan` 패키지) 실구현 완결 (`resource.NormalizeFields()` Level 0 승격 + `plan.Build()` 9개 타깃 100% 단일화 수렴 및 회귀 0건 실측 완결)**, **Cloudflare Workers TS Codegen 기능 확장 & 후속 리뷰 결함 수정 완결**, **Plan 계층 문서 스펙 갱신 완결**, **Cloudflare R2 Multi-Blob Orphan 동기 보상 삭제 완결**, **복합 Unique Constraint 스펙 반영 & N:M/OAuth 설계 결정 문서화 완결**, **Task 5.1 복합 Unique Constraint (`unique_together`) Go 코어 & Cloudflare D1 Target 실구현 완결**, **Task 5.2 N:M Join Resource 패턴 drink-log 파일럿 적용 완결**, **Task 5.3 OAuth 세션 발급 Escape Hatch 구현 완결**, **후보 (a) Nullable Ownership Go/TS Target 패리티 완결**, 및 **Task 5.4 List 액션 Owner 권한 필터링 결함 해결 완결 (Go/TS 7대 시나리오 Miniflare dispatchFetch V8 Isolate real HTTP & SSR HTML View 실측 100% PASS 완료)**  
+👉 **Post-MVP: 다음 세션 백로그 확정 (후보 (b), (c) 채택 논의)**
 
 ---
 
@@ -44,11 +44,10 @@
 2. [x] ~~**Task 5.2: N:M (`record_tags`) Join Resource 패턴을 `drink-log` 파일럿 적용 및 마찰 수집**~~ (완료: `examples/drink-log-pilot`에 `SakeRecord`/`Tag`/`RecordTag` 작성, DDL Parity 비교, Miniflare 5대 시나리오 100% PASS, YAML loader `constraints` 파싱 결함 `fix(resource)` 수정, 4대 마찰 기록 완결)
 3. [x] ~~**Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 OAuth 연동 기반 마련**~~ (완료: Go in-process `IssueSessionForUser` API, HTTP 라우터 무등록 신뢰 경계, Cloudflare D1 외부 세션 직접 작성 스펙 문서화 및 Miniflare 실측 100% PASS 완료)
 4. [x] ~~**후보 (a) Nullable Ownership IR 표현 및 Go/TS Target 평가 엔진 패리티 완결**~~ (완료: IR 구조 변경 없이 옵션 D 채택, Go 런타임 & Cloudflare TS generator 템플릿 정밀화, Node/Miniflare V8 Isolate real HTTP dispatch 15대 조합 시나리오 100% PASS 완료)
-5. 👉 **후보 (b) 관계 조인 조회(Eager Loading / Include query) API 지원 (Task 5.2 마찰 2 종합 판정)**:
+5. [x] ~~**Task 5.4: List 액션 Owner 권한 필터링 결함 해결 (Go 런타임 & Cloudflare TS Target)**~~ (완료: `storage.Query`에 `OwnerFilter` 추가, SQL 레벨 `(ownership_field = ? OR ownership_field IS NULL)` 자동 주입, Go/TS API 및 SSR HTML View 7개 시나리오 Miniflare 실측 100% PASS 완료)
+6. 👉 **후보 (b) 관계 조인 조회(Eager Loading / Include query) API 지원 (Task 5.2 마찰 2 종합 판정)**:
    - **사유**: N:M Join Resource(`RecordTag`) 조회 시 특정 parent ID 필터링 및 target resource inclusion(`SakeRecord`에 연결된 `Tag` 정보)을 REST API 수준에서 N+1 없이 단일 응답으로 제공하는 쿼리 확장 논의.
-6. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+7. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
    - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장.
-7. 👉 **Task 5.4 (백로그): List 액션 owner 권한 필터링 미비 검증 및 해결**:
-   - **사유**: Phase 1 조사 중 발견. `permissions.read: owner` 리소스에서 `GET /api/{table}` (List) 액션이 소유자 필터링 없이 전체 레코드를 반환하는 패턴 재현 및 해결 방향(예: List 쿼리에 `WHERE ownership_field = ? OR ownership_field IS NULL` 자동 주입) 검토.
 
 

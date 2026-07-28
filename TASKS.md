@@ -241,9 +241,12 @@
     3. **Go 10대 / Miniflare 22대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 22대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete + Blob routes) 전수 실행 raw 로그 100% PASS 검증 완결.
     4. **부수 발견 (Partial PUT 필드 손실 버그, `ba31038`)**: Nullable Ownership 실측 중 Cloudflare TS Codegen Target의 PUT UPDATE 템플릿이 `ownership_field`뿐 아니라 payload에 생략된 모든 필드를 NULL로 덮어쓰던 결함을 발견. Go 런타임은 해당 결함이 없었음(기존 값 유지가 정상 동작). 이 리소스 전역 부분 업데이트 데이터 손실 버그를 수정하여 Go/TS 패리티를 회복함. 이번 nullable ownership 작업 스코프 밖의 일반 버그이므로 별도 회귀 검증 대상으로 기록.
 
-- [ ] **Task 5.4 (백로그): List 액션 owner 권한 필터링 미비**
-  - **배경**: Phase 1 (Nullable Ownership 조사) 중 발견. `permissions.read: owner`가 지정된 리소스에서 `GET /api/{table}` (List) 액션이 소유자 무관하게 전체 레코드를 반환하는 것으로 관찰됨. Detail(Get)/Update/Delete는 레코드 단위로 owner 가딩이 적용되나 List는 현재 가딩 대상에서 빠져 있는 것으로 보임.
-  - **다음 조치**: 별도 세션에서 실제 재현 여부를 먼저 실측 확인하고, 재현되면 근본 원인 분석 및 해결 방향(예: List 쿼리에 `WHERE ownership_field = ? OR ownership_field IS NULL` 자동 주입) 논의 필요. Milestone 2 회고 "조건부 로직의 경계 누락" 패턴과 유사한 계열로 의심됨.
+- [x] **Task 5.4: List 액션 owner 권한 필터링 결함 해결 및 Go/TS Target 완결**
+  - **작업 내용**:
+    1. **옵션 1 (Storage Query 확장 및 SQL 레벨 자동 주입) 채택**: 메모리 후처리 방식(페이지네이션 파괴)을 배제하고 `storage.Query`에 `OwnerFilter` 구조체(`Mode`, `OwnershipField`, `UserID`) 추가 및 `adapters/sqlite` `List()` 쿼리 빌더와 `countStmt` SQL 조건 자동 주입 구현.
+    2. **Transport, View, TS Codegen 삼중 적용**: `transport/handler.go` (`handleList`), `view/handler.go` (`renderList`), `codegen/cloudflare/generator.go` (API List 및 SSR HTML List View `/view/{table}`) 3개 독립 경로에 필터링 주입 및 페이지네이션 `meta.total` 수렴. (Go View와 TS SSR View가 Transport와 별도 경로였음을 포착하여 각각 동시 정밀화).
+    3. **Go 런타임 조기 401 유예 스펙 수렴 (`f8b0677`)**: `auth.Evaluate`의 `rec == nil` 분기에서 `action == ActionRead`이고 `OwnershipField != ""`인 경우 `sess == nil`이어도 조기 401을 내리지 않고 쿼리 단계로 넘어가 `WHERE ownership_field IS NULL`로 좁히도록 스펙 수렴.
+    4. **Go/TS 7대 경계 조건 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate HTTP dispatch (`mf.dispatchFetch`) 7개 시나리오 (unauth/user1/user2/admin × NULL/non-NULL × API/SSR HTML View) 전수 실행 raw 로그 100% PASS 검증 완결.
 
 
 

@@ -181,6 +181,14 @@ auth:
 
 `ownership_field`에 지정된 필드 값이 `NULL`인 레코드는 특정 소유자가 없는 공용/시스템 레코드로 취급된다. `permissions.read: owner`가 적용된 리소스에서 이런 레코드는 미인증 요청을 포함해 누구나 조회할 수 있다 (public과 동일하게 동작). 반면 `update`/`delete`에서 `owner`가 적용된 경우, 소유자가 없는 레코드는 `role: admin` 세션만 수정/삭제할 수 있으며 일반 인증 사용자는 403 Forbidden으로 거부된다. 이 규칙은 Go 런타임과 Cloudflare TS Codegen Target에 동일하게 적용된다.
 
+### List 액션의 Ownership 레코드 필터링 규칙
+
+`permissions.read: owner`가 지정된 리소스의 List 액션 (`GET /api/{table}` 및 `/view/{table}`)은 DB 쿼리 레벨에서 레코드를 자동으로 필터링한다:
+- **일반 인증 사용자 (non-admin)**: `(ownership_field = ? OR ownership_field IS NULL) AND deleted_at IS NULL` 조건이 주입되어 본인 소유 레코드와 공용/시스템 레코드(`NULL`)가 함께 반환되며, 페이지네이션 메타데이터(`meta.total`)도 해당 조건으로 정확히 집계된다.
+- **어드민 사용자 (role: admin)**: 필터링 조건이 우회되어 전체 레코드가 반환된다 (Detail/Update/Delete의 admin bypass 원칙과 일관성 유지).
+- **미인증 사용자**: `ownership_field`가 존재하는 경우 `ownership_field IS NULL AND deleted_at IS NULL` 조건으로 공용/시스템 레코드만 반환되며, `ownership_field`가 미지정된 리소스는 401 Unauthorized로 차단된다.
+- **ownership_field 미지정 리소스**: 필터링 조건이 주입되지 않으며 기존 인증 여부 확인 후 전체 목록이 반환된다.
+
 ### 외부 OAuth 연동 및 세션 발급 전략 (예정된 확장 방향)
 
 Mold는 특정 OAuth Provider(Google, GitHub 등)와 직접 통신하거나 프로토콜 구현체를 코어 런타임에 내장하지 않는다 (특정 벤더 종속성 회피 원칙).
