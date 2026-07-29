@@ -823,14 +823,58 @@ func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
 		}
 	}
 
+	// Locate miniflare in npx cache or node_modules
+	var miniflarePath string
+	npxCacheDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "npm-cache", "_npx")
+	if entries, err := os.ReadDir(npxCacheDir); err == nil {
+		for _, e := range entries {
+			candidate := filepath.Join(npxCacheDir, e.Name(), "node_modules", "miniflare", "dist", "src", "index.js")
+			if _, err := os.Stat(candidate); err == nil {
+				miniflarePath = candidate
+				break
+			}
+		}
+	}
+	if miniflarePath == "" {
+		absPath, err := filepath.Abs(filepath.Join("..", "..", "node_modules", "miniflare", "dist", "src", "index.js"))
+		if err == nil {
+			miniflarePath = absPath
+		}
+	}
+
+	miniflareURL := "file:///" + filepath.ToSlash(strings.TrimPrefix(miniflarePath, "/"))
+
+	// Locate hono in npx cache
+	var honoPath string
+	if entries, err := os.ReadDir(npxCacheDir); err == nil {
+		for _, e := range entries {
+			candidate := filepath.Join(npxCacheDir, e.Name(), "node_modules", "hono")
+			if _, err := os.Stat(candidate); err == nil {
+				honoPath = candidate
+				break
+			}
+		}
+	}
+
+	// Transpile & bundle src/index.ts to src/index.js using esbuild
+	esArgs := []string{"-y", "--package=esbuild", "--package=hono", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js"}
+	if honoPath != "" {
+		esArgs = append(esArgs, "--alias:hono="+honoPath)
+	}
+	esCmd := exec.Command("npx", esArgs...)
+	esCmd.Dir = tmpDir
+	if out, err := esCmd.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild failed: %v, log: %s", err, string(out))
+	}
+
 	runnerJS := fmt.Sprintf(`
-import { Miniflare } from "miniflare";
+import { Miniflare } from "%s";
 import fs from "node:fs";
 
 async function run() {
   const mf = new Miniflare({
     modules: true,
-    scriptPath: "./src/index.ts",
+    scriptPath: "./src/index.js",
     d1Databases: ["DB"],
     d1Persist: false,
     compatibilityFlags: ["nodejs_compat"]
@@ -838,8 +882,12 @@ async function run() {
 
   const db = await mf.getD1Database("DB");
   const schemaSQL = fs.readFileSync("./schema.sql", "utf8");
-  for (const stmt of schemaSQL.split(";").map(s => s.trim()).filter(Boolean)) {
-    await db.exec(stmt);
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
   }
 
   // Seed Tags
@@ -923,13 +971,13 @@ run().catch(err => {
   console.error(err);
   process.exit(1);
 });
-`)
+`, miniflareURL)
 
 	if err := os.WriteFile(filepath.Join(tmpDir, "test_runner.mjs"), []byte(runnerJS), 0644); err != nil {
 		t.Fatalf("failed writing test_runner.mjs: %v", err)
 	}
 
-	cmd := exec.Command("npx", "-y", "--package=miniflare", "--package=tsx", "tsx", "test_runner.mjs")
+	cmd := exec.Command("node", "test_runner.mjs")
 	cmd.Dir = tmpDir
 	outputBytes, err := cmd.CombinedOutput()
 	t.Logf("Miniflare Raw Log Output:\n%s", string(outputBytes))
