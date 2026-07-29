@@ -24,7 +24,7 @@ func (e ErrInvalidInclude) Error() string {
 // batch queries embedded targets (WHERE id IN (...)), evaluates individual ActionRead permissions,
 // filters soft-deleted target records, and embeds sanitized objects (or null) directly into records.
 func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource, records []storage.Record, includeParam string, sess *auth.Session) error {
-	if includeParam == "" || len(records) == 0 || res == nil {
+	if includeParam == "" || res == nil {
 		return nil
 	}
 
@@ -53,6 +53,10 @@ func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource,
 		}
 
 		requestedRels = append(requestedRels, relPlan)
+	}
+
+	if len(records) == 0 || len(requestedRels) == 0 {
+		return nil
 	}
 
 	for _, rel := range requestedRels {

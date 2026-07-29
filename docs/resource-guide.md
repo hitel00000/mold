@@ -130,6 +130,18 @@ constraints:
     - [sake_record_id, tag_id]   # 동일한 record-tag 연결 중복 방지
 ```
 
+### N:M Join Resource 조회 및 관계 조인 (`?include=`) 사용 가이드
+
+N:M Join Resource(예: `RecordTag`) 목록 조회 시 각 연결 레코드에 연결된 `Tag` 또는 `SakeRecord` 등의 연관 리소스 상세 정보를 단일 요청으로 함께 조회하려는 경우, 클라이언트는 `?include=` query 파라미터를 사용한다.
+
+- **조인 조회 URL 예시**:
+  - `GET /api/record_tags?include=tag` (단일 연관 리소스 내포)
+  - `GET /api/record_tags?include=tag,sake_record` (다중 연관 리소스 내포)
+  - `GET /api/record_tags/12?include=tag` (단일 상세 조회 내포)
+  - `GET /view/record_tags?include=tag` (SSR HTML View 목록 내포)
+- **제약 조건**: `belongs_to` 연관 관계만 지정 가능하며, `has_many` 관계나 존재하지 않는 연관 이름을 지정하면 `400 Bad Request` (`code: INVALID_INCLUDE`) 에러가 반환된다.
+- **보안 및 권한**: 연관 대상 레코드의 `ActionRead` 권한이 없거나, soft-delete 되었거나, FK가 `NULL`인 경우 모두 응답상에 구별 없이 `"tag": null`로 반환되어 권한 미달 레코드 유무 탐색(열거 공격)을 차단한다.
+
 ---
 
 ## 5. Auth & Permissions (인증 및 권한)

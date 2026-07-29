@@ -309,6 +309,33 @@ constraints:
 
 ---
 
+## 5.7 관계 조인 조회 (`?include=`) 스펙 (Task 5.2 마찰 B)
+
+N:M Join Resource(예: `RecordTag`) 조회 시 클라이언트가 각 연결 레코드의 대상 리소스(`Tag` 등) 상세 정보를 확인하기 위해 N+1번의 API 요청을 보내는 마찰(Friction B)을 해소하기 위한 스펙이다. REST API(`GET /api/{table}`, `GET /api/{table}/{id}`)와 SSR HTML View(`GET /view/{table}`, `GET /view/{table}/{id}`)에서 단일 요청으로 연관 대상 리소스를 동시 조인 조회하여 내포(embed) 응답할 수 있다.
+
+### 1. 스코프 제약 및 파라미터 검증
+* **`belongs_to` 관계 전용**: `?include=` query 파라미터에는 대상 리소스의 `belongs_to` 연관 관계명만 쉼표(`,`) 구분 리스트로 지정할 수 있다 (예: `?include=tag` 또는 `?include=tag,sake_record`).
+* **strict 파라미터 거부 (`INVALID_INCLUDE`)**: 존재하지 않는 관계명이거나 `has_many` 관계명이 `?include=`에 지정될 경우, 조용히 무시하지 않고 즉시 **HTTP 400 Bad Request** (`code: INVALID_INCLUDE`, message: `"invalid relation '...' for include"`) 에러를 반환한다.
+
+### 2. N+1 배치 쿼리 최적화 (`WHERE id IN (...)`)
+* 메인 레코드 목록 조회 후, 지정된 연관 리소스별로 외래 키(FK) 값들을 고유 집합으로 수집(deduplicate)한다.
+* 연관 리소스 Storage 어댑터의 `List(ctx, res, storage.Query{IDs: fkVals})` 배치 쿼리를 실행하여 단 1회의 `WHERE "id" IN (?, ?, ...)` 쿼리로 대상 레코드들을 일괄 가져온다. N개의 메인 레코드에 대해 1회의 배치 쿼리만 발생하므로 N+1 쿼리를 완전히 방지한다.
+
+### 3. 권한 평가 및 식별 불가 `null` 안전 보장 (보안 메트릭스)
+연관 대상 레코드가 개별적으로 조회되어 메인 응답에 포함(embed)될 때, 각 연관 레코드 객체는 아래 4가지 시나리오에 따라 안전하게 처리된다:
+
+| 시나리오 | 연관 대상 상태 | 반환 형태 | 비고 |
+|---------|----------------|-----------|------|
+| (a) 읽기 허용 | `ActionRead` 권한 통과 (`auth.Evaluate` OK) | `tag: { id: 1, name: "..." }` | Sanitize 적용된 객체 내포 |
+| (b) 읽기 거부 | `ActionRead` 권한 거부 (Unauthorized/Forbidden) | `tag: null` | 정보 유출 차단 |
+| (c) FK 미설정 | 메인 레코드의 FK 값이 `NULL` | `tag: null` | 정상적인 null 관계 |
+| (d) Soft-Deleted | 연관 대상 레코드가 삭제됨 (`deleted_at != null`) | `tag: null` | Soft-deleted 숨김 |
+
+* **식별 불가능성(Indistinguishability) 원칙**: 권한 거부(b), FK NULL(c), Soft-deleted(d) 3가지 경우 모두 메인 응답의 JSON/Map 상에서 동일하게 `"relation_name": null`로 직렬화되며 구조적/에러상 어떠한 차이점도 노출하지 않는다. 이를 통해 열거 공격(enumeration attack)이나 권한 미달 레코드의 존재 유무 피싱을 원천 차단한다.
+* **응답 정제 (Sanitization)**: 내포되는 연관 객체는 메인 레코드와 동일하게 `SanitizeRecord` (비밀번호 필드 제거 등)가 강제 적용된 후 포함된다.
+
+---
+
 ## 6. Reload 트리거 (지난 논의 반영)
 
 ```

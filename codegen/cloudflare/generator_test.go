@@ -929,7 +929,7 @@ run().catch(err => {
 		t.Fatalf("failed writing test_runner.mjs: %v", err)
 	}
 
-	cmd := exec.Command("npx", "--package=miniflare", "node", "test_runner.mjs")
+	cmd := exec.Command("npx", "-y", "--package=miniflare", "--package=tsx", "tsx", "test_runner.mjs")
 	cmd.Dir = tmpDir
 	outputBytes, err := cmd.CombinedOutput()
 	t.Logf("Miniflare Raw Log Output:\n%s", string(outputBytes))

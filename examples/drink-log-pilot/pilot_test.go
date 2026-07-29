@@ -2,6 +2,7 @@ package pilot_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -287,8 +288,14 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	}
 	recTagID := recTag["id"]
 
+	cookieVal, _, err := app.IssueSessionForUser(ctx, 100, "user")
+	if err != nil {
+		t.Fatalf("failed IssueSessionForUser: %v", err)
+	}
+
 	// 3. GET /api/record_tags?include=tag,sake_record
 	req, _ := http.NewRequest(http.MethodGet, "/api/record_tags?include=tag,sake_record", nil)
+	req.Header.Set("Cookie", cookieVal)
 	w := httptest.NewRecorder()
 	app.ServeHTTP(w, req)
 
@@ -316,8 +323,17 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 		t.Errorf("expected tag name 'Refresh Fruity', got %v", tagEmbed["name"])
 	}
 
+	sakeEmbed, ok := row["sake_record"].(map[string]any)
+	if !ok || sakeEmbed == nil {
+		t.Fatalf("expected embedded sake_record object, got: %v", row["sake_record"])
+	}
+	if sakeEmbed["name"] != "Dassai 23" {
+		t.Errorf("expected sake_record name 'Dassai 23', got %v", sakeEmbed["name"])
+	}
+
 	// 4. GET /api/record_tags/:id?include=tag
 	reqDetail, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/record_tags/%v?include=tag", recTagID), nil)
+	reqDetail.Header.Set("Cookie", cookieVal)
 	wDetail := httptest.NewRecorder()
 	app.ServeHTTP(wDetail, reqDetail)
 
@@ -342,6 +358,7 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 
 	// 5. Test SSR HTML View GET /view/record_tags?include=tag
 	reqViewList, _ := http.NewRequest(http.MethodGet, "/view/record_tags?include=tag", nil)
+	reqViewList.Header.Set("Cookie", cookieVal)
 	wViewList := httptest.NewRecorder()
 	app.ServeHTTP(wViewList, reqViewList)
 	if wViewList.Code != http.StatusOK {
@@ -350,6 +367,7 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 
 	// 6. Test SSR HTML View GET /view/record_tags/:id?include=tag
 	reqViewDetail, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/view/record_tags/%v?include=tag", recTagID), nil)
+	reqViewDetail.Header.Set("Cookie", cookieVal)
 	wViewDetail := httptest.NewRecorder()
 	app.ServeHTTP(wViewDetail, reqViewDetail)
 	if wViewDetail.Code != http.StatusOK {
