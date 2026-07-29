@@ -151,3 +151,39 @@ func TestCRUD_ValidationRejection(t *testing.T) {
 		t.Errorf("expected error for min_length violation on update, got nil")
 	}
 }
+
+func TestList_IDsBatchQuery(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:mem_crud_ids?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewStore(db)
+	res := &resource.Resource{
+		Name:  "Item",
+		Table: "items",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+	}
+	if err := store.EnsureSchema(ctx, res); err != nil {
+		t.Fatalf("EnsureSchema failed: %v", err)
+	}
+
+	rec1, _ := store.Create(ctx, res, storage.Record{"name": "Item 1"})
+	rec2, _ := store.Create(ctx, res, storage.Record{"name": "Item 2"})
+	_, _ = store.Create(ctx, res, storage.Record{"name": "Item 3"})
+
+	list, err := store.List(ctx, res, storage.Query{
+		IDs: []any{rec1["id"], rec2["id"]},
+	})
+	if err != nil {
+		t.Fatalf("List with IDs failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(list))
+	}
+}
+

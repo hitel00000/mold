@@ -116,6 +116,15 @@ func (s *Store) List(ctx context.Context, res *resource.Resource, query storage.
 		}
 	}
 
+	if len(query.IDs) > 0 {
+		placeholders := make([]string, len(query.IDs))
+		for i, idVal := range query.IDs {
+			placeholders[i] = "?"
+			args = append(args, idVal)
+		}
+		querySQL += fmt.Sprintf(` AND "id" IN (%s)`, strings.Join(placeholders, ", "))
+	}
+
 	for k, v := range query.Filter {
 		querySQL += fmt.Sprintf(` AND "%s" = ?`, k)
 		args = append(args, v)

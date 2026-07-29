@@ -35,6 +35,7 @@ type OwnerFilter struct {
 
 // Query specifies filtering and pagination options for List operations.
 type Query struct {
+	IDs         []any
 	Filter      map[string]any
 	Limit       int
 	Offset      int
