@@ -276,6 +276,136 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
 app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 `)
 
+	resourceMap := make(map[string]*resource.Resource)
+	for _, res := range resources {
+		resourceMap[res.Name] = res
+		resourceMap[res.Table] = res
+	}
+
+	sb.WriteString("\nconst relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {\n")
+	for _, res := range resources {
+		p := plan.Build(res)
+		if p == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("  '%s': {\n", p.Table))
+		for _, rel := range p.Relations {
+			targetRes := resourceMap[rel.Target]
+			targetTable := rel.Target
+			targetPermRead := "public"
+			targetOwnershipField := ""
+			targetSoftDelete := false
+			var targetPwdFields []string
+
+			if targetRes != nil {
+				targetTable = targetRes.Table
+				targetSoftDelete = targetRes.SoftDelete
+				if targetRes.Auth != nil {
+					targetOwnershipField = targetRes.Auth.OwnershipField
+					if targetRes.Auth.Permissions.Read != "" {
+						targetPermRead = targetRes.Auth.Permissions.Read
+					}
+				}
+				targetPlan := plan.Build(targetRes)
+				if targetPlan != nil {
+					for _, f := range targetPlan.Fields {
+						if f.Type == resource.TypePassword {
+							targetPwdFields = append(targetPwdFields, f.Name)
+						}
+					}
+				}
+			}
+
+			pwdJS := "[]"
+			if len(targetPwdFields) > 0 {
+				quoted := make([]string, len(targetPwdFields))
+				for i, name := range targetPwdFields {
+					quoted[i] = fmt.Sprintf("'%s'", name)
+				}
+				pwdJS = "[" + strings.Join(quoted, ", ") + "]"
+			}
+
+			sb.WriteString(fmt.Sprintf("    '%s': { kind: '%s', targetTable: '%s', fk: '%s', permRead: '%s', ownershipField: '%s', softDelete: %t, pwdFields: %s },\n",
+				rel.Name, rel.Kind, targetTable, rel.ForeignKey, targetPermRead, targetOwnershipField, targetSoftDelete, pwdJS))
+		}
+		sb.WriteString("  },\n")
+	}
+	sb.WriteString("};\n\n")
+
+	sb.WriteString(`async function processIncludes(c: any, currentTable: string, records: any[], includeStr: string | undefined, authUser: AuthUser | null): Promise<any> {
+  if (!includeStr || records.length === 0) return null;
+  const currentRels = relMetadata[currentTable] || {};
+  const items = includeStr.split(',').map(s => s.trim()).filter(Boolean);
+
+  const validRels: Array<{ name: string; info: any }> = [];
+  for (const item of items) {
+    const info = currentRels[item];
+    if (!info || info.kind !== 'belongs_to') {
+      return writeError(c, 400, 'INVALID_INCLUDE', ` + "`" + `invalid relation '${item}' for include` + "`" + `);
+    }
+    validRels.push({ name: item, info });
+  }
+
+  for (const rel of validRels) {
+    const fkCol = rel.info.fk;
+    const targetTable = rel.info.targetTable;
+    const fkVals = Array.from(new Set(records.map(r => r[fkCol]).filter(v => v !== null && v !== undefined && v !== '')));
+
+    for (const r of records) {
+      r[rel.name] = null;
+    }
+
+    if (fkVals.length === 0) continue;
+
+    const placeholders = fkVals.map(() => '?').join(', ');
+    const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
+    const sql = ` + "`" + `SELECT * FROM "${targetTable}" WHERE id IN (${placeholders})${softCond}` + "`" + `;
+    const { results } = await c.env.DB.prepare(sql).bind(...fkVals).all();
+
+    const targetMap = new Map<any, any>();
+    for (const tRec of (results || []) as any[]) {
+      const idVal = tRec.id;
+      if (idVal === null || idVal === undefined) continue;
+
+      let allowed = true;
+      if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
+        const ownerVal = tRec[rel.info.ownershipField];
+        if (ownerVal !== null && ownerVal !== undefined) {
+          if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+            allowed = false;
+          }
+        }
+      } else if (rel.info.permRead.startsWith('role:')) {
+        const role = rel.info.permRead.substring(5);
+        if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
+          allowed = false;
+        }
+      } else if (rel.info.permRead === 'authenticated') {
+        if (!authUser) {
+          allowed = false;
+        }
+      }
+
+      if (allowed) {
+        targetMap.set(idVal, sanitizeRecord(tRec, rel.info.pwdFields));
+      }
+    }
+
+    for (const r of records) {
+      const fkVal = r[fkCol];
+      if (fkVal !== null && fkVal !== undefined && targetMap.has(fkVal)) {
+        r[rel.name] = targetMap.get(fkVal);
+      } else {
+        r[rel.name] = null;
+      }
+    }
+  }
+
+  return null;
+}
+
+`)
+
 	for _, res := range resources {
 		p := plan.Build(res)
 		if p == nil {
@@ -367,6 +497,8 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("  const querySql = `SELECT * FROM \"%s\"${whereClause} ORDER BY id ASC LIMIT ? OFFSET ?`;\n", table))
 		sb.WriteString("  const { results } = await c.env.DB.prepare(querySql).bind(...params, limit, offset).all();\n")
 		sb.WriteString(fmt.Sprintf("  const sanitized = (results || []).map((r: any) => sanitizeRecord(r, %s));\n", pwdFieldsJS))
+		sb.WriteString(fmt.Sprintf("  const incErr = await processIncludes(c, '%s', sanitized, c.req.query('include'), authUser);\n", table))
+		sb.WriteString("  if (incErr) return incErr;\n")
 		sb.WriteString("  return c.json({\n")
 		sb.WriteString("    data: sanitized,\n")
 		sb.WriteString("    meta: { total, limit, offset }\n")
@@ -410,7 +542,10 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("  }\n")
 		}
 
-		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(record, %s) });\n", pwdFieldsJS))
+		sb.WriteString(fmt.Sprintf("  const sanitized = sanitizeRecord(record, %s);\n", pwdFieldsJS))
+		sb.WriteString(fmt.Sprintf("  const incErr = await processIncludes(c, '%s', [sanitized], c.req.query('include'), authUser);\n", table))
+		sb.WriteString("  if (incErr) return incErr;\n")
+		sb.WriteString("  return c.json({ data: sanitized });\n")
 		sb.WriteString("});\n")
 
 		// 3. POST /api/{table} (Create)
@@ -783,6 +918,9 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		}
 		sb.WriteString("  const whereClause = whereConds.length > 0 ? ' WHERE ' + whereConds.join(' AND ') : '';\n")
 		sb.WriteString(fmt.Sprintf("  const { results } = await c.env.DB.prepare(`SELECT * FROM \"%s\"${whereClause} ORDER BY id ASC`).bind(...params).all();\n", table))
+		sb.WriteString(fmt.Sprintf("  const viewRecs = (results || []) as any[];\n"))
+		sb.WriteString(fmt.Sprintf("  const incErr = await processIncludes(c, '%s', viewRecs, c.req.query('include'), authUser);\n", table))
+		sb.WriteString("  if (incErr) return incErr;\n")
 		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s List</title></head><body>`;\n", p.ResourceName))
 		sb.WriteString(fmt.Sprintf("  html += `<h1>%s List</h1>`;\n", p.ResourceName))
 		sb.WriteString(fmt.Sprintf("  html += `<a href=\"/view/%s/new\">+ New %s</a><br/><br/><table border=\"1\"><thead><tr><th>id</th>`;\n", table, p.ResourceName))
@@ -793,7 +931,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString(fmt.Sprintf("  html += `<th>%s</th>`;\n", f.Name))
 		}
 		sb.WriteString("  html += `<th>Actions</th></tr></thead><tbody>`;\n")
-		sb.WriteString("  for (const row of (results || [])) {\n")
+		sb.WriteString("  for (const row of viewRecs) {\n")
 		sb.WriteString("    html += `<tr><td>${(row as any).id}</td>`;\n")
 		for _, f := range p.Fields {
 			if f.Deprecated || f.Type == resource.TypePassword {
@@ -846,6 +984,9 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  const id = c.req.param('id');\n")
 		sb.WriteString(fmt.Sprintf("  const record = await c.env.DB.prepare('SELECT * FROM \"%s\" WHERE id = ?%s').bind(id).first<any>();\n", table, softCond))
 		sb.WriteString("  if (!record) return c.html('<h1>404 Not Found</h1>', 404);\n")
+		sb.WriteString("  const authUser = await getAuthUser(c);\n")
+		sb.WriteString(fmt.Sprintf("  const incErr = await processIncludes(c, '%s', [record], c.req.query('include'), authUser);\n", table))
+		sb.WriteString("  if (incErr) return incErr;\n")
 		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s Detail</title></head><body><h1>%s #${id}</h1><dl>`;\n", p.ResourceName, p.ResourceName))
 		for _, f := range p.Fields {
 			if f.Deprecated || f.Type == resource.TypePassword {
