@@ -1,0 +1,257 @@
+package transport_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	"github.com/hitel00000/mold/adapters/sqlite"
+	"github.com/hitel00000/mold/auth"
+	"github.com/hitel00000/mold/resource"
+	"github.com/hitel00000/mold/storage"
+	"github.com/hitel00000/mold/transport"
+)
+
+func TestInclude_ValidationAndErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_val.db")
+	store, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+		Relations: []resource.Relation{
+			{Name: "record_tags", Kind: resource.KindHasMany, Target: "RecordTag", ForeignKey: "tag_id"},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	ctx := context.Background()
+	_ = store.EnsureSchema(ctx, tagRes)
+	_ = store.EnsureSchema(ctx, recordTagRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, store)
+	reg.Register(recordTagRes, store)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+	client := ts.Client()
+
+	// 1. Non-existent relation specified in ?include=
+	resp, err := client.Get(ts.URL + "/api/record_tags?include=non_existent")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for non_existent include, got %d", resp.StatusCode)
+	}
+	var errEnv struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&errEnv)
+	resp.Body.Close()
+	if errEnv.Error.Code != "INVALID_INCLUDE" {
+		t.Errorf("expected code INVALID_INCLUDE, got %s", errEnv.Error.Code)
+	}
+	if !bytes.Contains([]byte(errEnv.Error.Message), []byte("non_existent")) {
+		t.Errorf("expected error message to contain 'non_existent', got %s", errEnv.Error.Message)
+	}
+
+	// 2. has_many relation specified in ?include=
+	resp, err = client.Get(ts.URL + "/api/tags?include=record_tags")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for has_many include, got %d", resp.StatusCode)
+	}
+	json.NewDecoder(resp.Body).Decode(&errEnv)
+	resp.Body.Close()
+	if errEnv.Error.Code != "INVALID_INCLUDE" {
+		t.Errorf("expected code INVALID_INCLUDE for has_many, got %s", errEnv.Error.Code)
+	}
+}
+
+func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_matrix.db")
+	store, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	// Target resource with owner read permissions
+	tagRes := &resource.Resource{
+		Name:       "Tag",
+		Table:      "tags",
+		SoftDelete: true,
+		Auth: &resource.Auth{
+			OwnershipField: "owner_id",
+			Permissions: resource.Permissions{
+				Read: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+		},
+	}
+
+	// Main resource with belongs_to relation
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	ctx := context.Background()
+	_ = store.EnsureSchema(ctx, tagRes)
+	_ = store.EnsureSchema(ctx, recordTagRes)
+
+	// Create Tags for 4 scenarios:
+	// (a) Read allowed: owner_id = NULL (public read)
+	tagA, _ := store.Create(ctx, tagRes, storage.Record{"name": "Public Tag A", "owner_id": nil})
+	// (b) Read denied: owner_id = 999 (owned by user 999)
+	tagB, _ := store.Create(ctx, tagRes, storage.Record{"name": "Private Tag B", "owner_id": 999})
+	// (c) FK is NULL
+	// (d) Soft-deleted tag
+	tagD, _ := store.Create(ctx, tagRes, storage.Record{"name": "Deleted Tag D", "owner_id": nil})
+	_ = store.SoftDelete(ctx, tagRes, tagD["id"])
+
+	// Create RecordTags corresponding to scenarios (a), (b), (c), (d)
+	recA, _ := store.Create(ctx, recordTagRes, storage.Record{"tag_id": tagA["id"]})
+	recB, _ := store.Create(ctx, recordTagRes, storage.Record{"tag_id": tagB["id"]})
+	recC, _ := store.Create(ctx, recordTagRes, storage.Record{"tag_id": nil})
+	recD, _ := store.Create(ctx, recordTagRes, storage.Record{"tag_id": tagD["id"]})
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, store)
+	reg.Register(recordTagRes, store)
+
+	sm, err := auth.NewSessionManager(store.DB())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	router := transport.NewRouter(reg)
+	router.SetSessionManager(sm)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	client := ts.Client()
+
+	// Query List with ?include=tag as unauthenticated user
+	req, _ := http.NewRequest("GET", ts.URL+"/api/record_tags?include=tag", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var listResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&listResp)
+	resp.Body.Close()
+
+	if len(listResp.Data) != 4 {
+		t.Fatalf("expected 4 records, got %d", len(listResp.Data))
+	}
+
+	recMap := make(map[int64]map[string]any)
+	for _, item := range listResp.Data {
+		idVal := int64(item["id"].(float64))
+		recMap[idVal] = item
+	}
+
+	// Scenario (a): Read allowed -> tag object filled
+	itemA := recMap[int64(recA["id"].(int64))]
+	if itemA["tag"] == nil {
+		t.Errorf("scenario (a): expected tag object filled, got null")
+	} else {
+		tagObj := itemA["tag"].(map[string]any)
+		if tagObj["name"] != "Public Tag A" {
+			t.Errorf("scenario (a): expected tag name 'Public Tag A', got %v", tagObj["name"])
+		}
+	}
+
+	// Scenario (b): Read denied -> null
+	itemB := recMap[int64(recB["id"].(int64))]
+	if itemB["tag"] != nil {
+		t.Errorf("scenario (b): expected tag to be null due to permission denied, got %v", itemB["tag"])
+	}
+
+	// Scenario (c): FK null -> null
+	itemC := recMap[int64(recC["id"].(int64))]
+	if itemC["tag"] != nil {
+		t.Errorf("scenario (c): expected tag to be null due to FK null, got %v", itemC["tag"])
+	}
+
+	// Scenario (d): Target soft-deleted -> null
+	itemD := recMap[int64(recD["id"].(int64))]
+	if itemD["tag"] != nil {
+		t.Errorf("scenario (d): expected tag to be null due to target soft-delete, got %v", itemD["tag"])
+	}
+
+	// Verify security property: (b), (c), and (d) all return "tag": null without structural differentiation
+	if itemB["tag"] != itemC["tag"] || itemC["tag"] != itemD["tag"] {
+		t.Errorf("security violation: scenarios (b), (c), (d) are structurally distinguishable")
+	}
+
+	// Test Detail endpoint for scenario (a) and (b)
+	respA, _ := client.Get(ts.URL + fmt.Sprintf("/api/record_tags/%v?include=tag", recA["id"]))
+	var detailA struct {
+		Data map[string]any `json:"data"`
+	}
+	json.NewDecoder(respA.Body).Decode(&detailA)
+	respA.Body.Close()
+	if detailA.Data["tag"] == nil {
+		t.Errorf("detail (a): expected tag filled, got null")
+	}
+
+	respB, _ := client.Get(ts.URL + fmt.Sprintf("/api/record_tags/%v?include=tag", recB["id"]))
+	var detailB struct {
+		Data map[string]any `json:"data"`
+	}
+	json.NewDecoder(respB.Body).Decode(&detailB)
+	respB.Body.Close()
+	if detailB.Data["tag"] != nil {
+		t.Errorf("detail (b): expected tag null when read denied, got %v", detailB.Data["tag"])
+	}
+}

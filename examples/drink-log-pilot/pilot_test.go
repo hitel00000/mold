@@ -239,3 +239,122 @@ auth:
 	}
 }
 
+func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
+	resDir := filepath.Join("..", "drink-log-pilot")
+	dbPath := filepath.Join(t.TempDir(), "pilot_include_e2e.db")
+
+	cfg := runtime.Config{
+		ResourceDir: resDir,
+		DBPath:      dbPath,
+	}
+
+	app, err := runtime.New(cfg)
+	if err != nil {
+		t.Fatalf("failed initializing runtime App: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+
+	// 1. Create Tag and SakeRecord
+	tag, err := app.CreateRecord(ctx, "Tag", map[string]any{
+		"name": "Refresh Fruity",
+	})
+	if err != nil {
+		t.Fatalf("failed creating Tag: %v", err)
+	}
+	tagID := tag["id"]
+
+	sake, err := app.CreateRecord(ctx, "SakeRecord", map[string]any{
+		"name":          "Dassai 23",
+		"consumed_date": "2026-07-28T12:00:00Z",
+		"rating":        4.8,
+		"notes":         "Smooth & aromatic",
+		"owner_id":      100,
+	})
+	if err != nil {
+		t.Fatalf("failed creating SakeRecord: %v", err)
+	}
+	sakeID := sake["id"]
+
+	// 2. Create RecordTag Join Resource record connecting SakeRecord and Tag
+	recTag, err := app.CreateRecord(ctx, "RecordTag", map[string]any{
+		"sake_record_id": sakeID,
+		"tag_id":         tagID,
+	})
+	if err != nil {
+		t.Fatalf("failed creating RecordTag: %v", err)
+	}
+	recTagID := recTag["id"]
+
+	// 3. GET /api/record_tags?include=tag,sake_record
+	req, _ := http.NewRequest(http.MethodGet, "/api/record_tags?include=tag,sake_record", nil)
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /api/record_tags?include=tag,sake_record, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var listEnv struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &listEnv); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if len(listEnv.Data) != 1 {
+		t.Fatalf("expected 1 record_tag, got %d", len(listEnv.Data))
+	}
+
+	row := listEnv.Data[0]
+	tagEmbed, ok := row["tag"].(map[string]any)
+	if !ok || tagEmbed == nil {
+		t.Fatalf("expected embedded tag object, got: %v", row["tag"])
+	}
+	if tagEmbed["name"] != "Refresh Fruity" {
+		t.Errorf("expected tag name 'Refresh Fruity', got %v", tagEmbed["name"])
+	}
+
+	// 4. GET /api/record_tags/:id?include=tag
+	reqDetail, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/api/record_tags/%v?include=tag", recTagID), nil)
+	wDetail := httptest.NewRecorder()
+	app.ServeHTTP(wDetail, reqDetail)
+
+	if wDetail.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for detail with include, got %d: %s", wDetail.Code, wDetail.Body.String())
+	}
+
+	var detailEnv struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(wDetail.Body.Bytes(), &detailEnv); err != nil {
+		t.Fatalf("failed to decode detail JSON: %v", err)
+	}
+
+	detTag, ok := detailEnv.Data["tag"].(map[string]any)
+	if !ok || detTag == nil {
+		t.Fatalf("expected detail embedded tag object, got: %v", detailEnv.Data["tag"])
+	}
+	if detTag["name"] != "Refresh Fruity" {
+		t.Errorf("expected detail tag name 'Refresh Fruity', got %v", detTag["name"])
+	}
+
+	// 5. Test SSR HTML View GET /view/record_tags?include=tag
+	reqViewList, _ := http.NewRequest(http.MethodGet, "/view/record_tags?include=tag", nil)
+	wViewList := httptest.NewRecorder()
+	app.ServeHTTP(wViewList, reqViewList)
+	if wViewList.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for SSR view list with include, got %d: %s", wViewList.Code, wViewList.Body.String())
+	}
+
+	// 6. Test SSR HTML View GET /view/record_tags/:id?include=tag
+	reqViewDetail, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/view/record_tags/%v?include=tag", recTagID), nil)
+	wViewDetail := httptest.NewRecorder()
+	app.ServeHTTP(wViewDetail, reqViewDetail)
+	if wViewDetail.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for SSR view detail with include, got %d: %s", wViewDetail.Code, wViewDetail.Body.String())
+	}
+}
+
+
