@@ -374,3 +374,113 @@ func toStringVal(v any) string {
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", v))
 }
+
+func TestView_RelationInclude_E2E(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_view_include.db")
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	ctx := t.Context()
+	_ = store.EnsureSchema(ctx, tagRes)
+	_ = store.EnsureSchema(ctx, recordTagRes)
+
+	tagRec, err := store.Create(ctx, tagRes, storage.Record{"name": "Ginjo Premium Tag"})
+	if err != nil {
+		t.Fatalf("failed to create tag: %v", err)
+	}
+
+	_, err = store.Create(ctx, recordTagRes, storage.Record{"tag_id": tagRec["id"]})
+	if err != nil {
+		t.Fatalf("failed to create record_tag: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, store)
+	reg.Register(recordTagRes, store)
+
+	router := transport.NewRouter(reg)
+	vh, err := view.NewViewHandler(router, nil)
+	if err != nil {
+		t.Fatalf("failed to create view handler: %v", err)
+	}
+
+	ts := httptest.NewServer(vh)
+	defer ts.Close()
+
+	// 1. SSR View List with ?include=tag
+	resp, err := ts.Client().Get(ts.URL + "/view/record_tags?include=tag")
+	if err != nil {
+		t.Fatalf("failed request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	listHtmlBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	listHtml := string(listHtmlBytes)
+
+	// Verify SSR List HTML contains table and records without error
+	if !strings.Contains(listHtml, "RecordTag List") {
+		t.Errorf("expected list HTML to render title RecordTag List, got:\n%s", listHtml)
+	}
+
+	// 2. SSR View Detail with ?include=tag
+	respDetail, err := ts.Client().Get(ts.URL + "/view/record_tags/1?include=tag")
+	if err != nil {
+		t.Fatalf("failed detail request: %v", err)
+	}
+	if respDetail.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for detail view, got %d", respDetail.StatusCode)
+	}
+	detailHtmlBytes, _ := io.ReadAll(respDetail.Body)
+	respDetail.Body.Close()
+	detailHtml := string(detailHtmlBytes)
+
+	if !strings.Contains(detailHtml, "RecordTag #1") {
+		t.Errorf("expected detail HTML to render RecordTag #1, got:\n%s", detailHtml)
+	}
+
+	// 3. Test SSR View custom template rendering embedded relation field {{.tag.name}}
+	overrides := view.NewTemplateOverrides()
+	_ = overrides.SetCustomTemplateString("record_tags", "list", `{{define "content"}}{{range .Records}}TAG:{{if .tag}}{{.tag.name}}{{end}}{{end}}{{end}}`)
+
+	vhCustom, _ := view.NewViewHandler(router, overrides)
+	tsCustom := httptest.NewServer(vhCustom)
+	defer tsCustom.Close()
+
+	respCustom, err := tsCustom.Client().Get(tsCustom.URL + "/view/record_tags?include=tag")
+	if err != nil {
+		t.Fatalf("failed custom request: %v", err)
+	}
+	defer respCustom.Body.Close()
+	customHtmlBytes, _ := io.ReadAll(respCustom.Body)
+	customHtml := string(customHtmlBytes)
+
+	if !strings.Contains(customHtml, "TAG:Ginjo Premium Tag") {
+		t.Errorf("expected custom SSR view to render embedded relation tag.name 'Ginjo Premium Tag', got: %s", customHtml)
+	}
+}

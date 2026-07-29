@@ -255,3 +255,111 @@ func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
 		t.Errorf("detail (b): expected tag null when read denied, got %v", detailB.Data["tag"])
 	}
 }
+
+type countingStore struct {
+	storage.Store
+	listCalls int
+	lastQuery storage.Query
+}
+
+func (c *countingStore) List(ctx context.Context, res *resource.Resource, q storage.Query) ([]storage.Record, error) {
+	c.listCalls++
+	c.lastQuery = q
+	return c.Store.List(ctx, res, q)
+}
+
+func TestInclude_N1Prevention_QueryCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_n1.db")
+	rawStore, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer rawStore.Close()
+
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	ctx := context.Background()
+	_ = rawStore.EnsureSchema(ctx, tagRes)
+	_ = rawStore.EnsureSchema(ctx, recordTagRes)
+
+	// Create 5 tags
+	var tagIDs []any
+	for i := 1; i <= 5; i++ {
+		tRec, _ := rawStore.Create(ctx, tagRes, storage.Record{"name": fmt.Sprintf("Tag %d", i)})
+		tagIDs = append(tagIDs, tRec["id"])
+	}
+
+	// Create 10 RecordTag rows pointing to those 5 tags
+	for i := 0; i < 10; i++ {
+		tagID := tagIDs[i%5]
+		_, _ = rawStore.Create(ctx, recordTagRes, storage.Record{"tag_id": tagID})
+	}
+
+	tagCountingStore := &countingStore{Store: rawStore}
+	recTagCountingStore := &countingStore{Store: rawStore}
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, tagCountingStore)
+	reg.Register(recordTagRes, recTagCountingStore)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Execute List request for 10 records with ?include=tag
+	resp, err := ts.Client().Get(ts.URL + "/api/record_tags?include=tag")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var listResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&listResp)
+
+	if len(listResp.Data) != 10 {
+		t.Fatalf("expected 10 records, got %d", len(listResp.Data))
+	}
+
+	// Assert N+1 prevention:
+	// Main resource List query: exactly 1 call
+	// Included relation List query: exactly 1 batch call with query.IDs = [1, 2, 3, 4, 5]
+	t.Logf("[N+1 Prevention Proof Log]")
+	t.Logf("  Main Resource (RecordTag) List Query Count: %d", recTagCountingStore.listCalls)
+	t.Logf("  Included Relation (Tag) Batch Query Count: %d", tagCountingStore.listCalls)
+	t.Logf("  Total Database List Queries executed for 10 records: %d", recTagCountingStore.listCalls+tagCountingStore.listCalls)
+	t.Logf("  Batch WHERE IN Query IDs filter parameter: %v", tagCountingStore.lastQuery.IDs)
+
+	if recTagCountingStore.listCalls > 2 {
+		t.Errorf("expected at most 2 list calls for main resource (pagination + total), got %d", recTagCountingStore.listCalls)
+	}
+	if tagCountingStore.listCalls != 1 {
+		t.Errorf("expected exactly 1 batch list call for included relation (N+1 prevented!), got %d", tagCountingStore.listCalls)
+	}
+	if len(tagCountingStore.lastQuery.IDs) != 5 {
+		t.Errorf("expected batch query IDs length to be 5, got %d", len(tagCountingStore.lastQuery.IDs))
+	}
+}
