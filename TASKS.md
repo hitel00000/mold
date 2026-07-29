@@ -241,12 +241,18 @@
     3. **Go 10대 / Miniflare 22대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 22대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete + Blob routes) 전수 실행 raw 로그 100% PASS 검증 완결.
     4. **부수 발견 (Partial PUT 필드 손실 버그, `ba31038`)**: Nullable Ownership 실측 중 Cloudflare TS Codegen Target의 PUT UPDATE 템플릿이 `ownership_field`뿐 아니라 payload에 생략된 모든 필드를 NULL로 덮어쓰던 결함을 발견. Go 런타임은 해당 결함이 없었음(기존 값 유지가 정상 동작). 이 리소스 전역 부분 업데이트 데이터 손실 버그를 수정하여 Go/TS 패리티를 회복함. 이번 nullable ownership 작업 스코프 밖의 일반 버그이므로 별도 회귀 검증 대상으로 기록.
 
-- [x] **Task 5.4: List 액션 owner 권한 필터링 결함 해결 및 Go/TS Target 완결**
-  - **작업 내용**:
-    1. **옵션 1 (Storage Query 확장 및 SQL 레벨 자동 주입) 채택**: 메모리 후처리 방식(페이지네이션 파괴)을 배제하고 `storage.Query`에 `OwnerFilter` 구조체(`Mode`, `OwnershipField`, `UserID`) 추가 및 `adapters/sqlite` `List()` 쿼리 빌더와 `countStmt` SQL 조건 자동 주입 구현.
-    2. **Transport, View, TS Codegen 삼중 적용**: `transport/handler.go` (`handleList`), `view/handler.go` (`renderList`), `codegen/cloudflare/generator.go` (API List 및 SSR HTML List View `/view/{table}`) 3개 독립 경로에 필터링 주입 및 페이지네이션 `meta.total` 수렴. (Go View와 TS SSR View가 Transport와 별도 경로였음을 포착하여 각각 동시 정밀화).
-    3. **Go 런타임 조기 401 유예 스펙 수렴 (`f8b0677`)**: `auth.Evaluate`의 `rec == nil` 분기에서 `action == ActionRead`이고 `OwnershipField != ""`인 경우 `sess == nil`이어도 조기 401을 내리지 않고 쿼리 단계로 넘어가 `WHERE ownership_field IS NULL`로 좁히도록 스펙 수렴.
     4. **Go/TS 7대 경계 조건 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate HTTP dispatch (`mf.dispatchFetch`) 7개 시나리오 (unauth/user1/user2/admin × NULL/non-NULL × API/SSR HTML View) 전수 실행 raw 로그 100% PASS 검증 완결.
+
+- [x] **Task 5.5: 관계 조인 조회 (`?include=`) API 지원 완결 (Task 5.2 마찰 B 해소)**
+  - **작업 내용**:
+    1. **N+1 방지 배치 조회**: `storage.Query.IDs []any` 필드 추가, `adapters/sqlite` `List()`에 `WHERE "id" IN (?, ...)` 배치 조건 지원 (`query.Limit == 0`이면 무제한 조회 확인).
+    2. **`transport.ProcessIncludes`**: `plan.Build(res)`의 `RelationPlan`을 그대로 재사용하여 `belongs_to` 관계만 허용, 존재하지 않거나 `has_many`인 관계 지정 시 `400 INVALID_INCLUDE` 즉시 거부. REST API List/Detail 양쪽에 통합.
+    3. **개별 권한 평가 및 식별 불가 `null` 보장**: embed 대상 레코드마다 `auth.Evaluate(ActionRead, ...)` 개별 평가, 권한 거부/FK NULL/soft-deleted 3가지 케이스를 응답에서 `null`로 동일하게 처리하여 정보 유출(열거 공격) 차단.
+    4. **`normalizeIDKey`**: DB 드라이버 및 JSON 왕복 과정에서 발생 가능한 수치 타입(`int`/`int32`/`int64`/`float64`) 불일치로 인한 map lookup 실패를 방지.
+    5. **SSR View 적용**: `view/handler.go`의 `renderList`/`renderDetail`에서 `transport.ProcessIncludes` 재사용 (View 전용 별도 권한 로직 신설 없음).
+    6. **Cloudflare TS Codegen 적용**: `relMetadata` 레지스트리 및 `processIncludes` 비동기 헬퍼로 D1 `WHERE id IN (...)` 배치 조회, Go 런타임과 동일한 4-시나리오 규칙 적용.
+  - **실측 검증**: Go `httptest` 실 HTTP dispatch 4-시나리오((a) 허용/(b) 권한거부/(c) FK NULL/(d) soft-deleted) raw JSON 100% PASS, 30개 FK 대량 배치 0% truncation 실측, Cloudflare Miniflare V8 Isolate real HTTP dispatch 4-시나리오 100% PASS, `go test ./...` 전 패키지(9개) fresh PASS.
+  - **문서 갱신**: `docs/ir-spec.md` 5.7절(`?include=` 스펙, 보안 메트릭스 표) 및 `docs/resource-guide.md`(사용 가이드) 반영 완료.
 
 
 
