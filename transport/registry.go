@@ -42,6 +42,22 @@ func (r *Registry) Lookup(table string) (ResourceEntry, bool) {
 	return entry, exists
 }
 
+// LookupResource finds a ResourceEntry by resource name or table name.
+func (r *Registry) LookupResource(nameOrTable string) (ResourceEntry, bool) {
+	if r == nil {
+		return ResourceEntry{}, false
+	}
+	if entry, ok := r.entries[nameOrTable]; ok {
+		return entry, true
+	}
+	for _, entry := range r.entries {
+		if entry.Resource != nil && (entry.Resource.Name == nameOrTable || entry.Resource.Table == nameOrTable) {
+			return entry, true
+		}
+	}
+	return ResourceEntry{}, false
+}
+
 // Entries returns a copy of all registered table entries for iteration.
 func (r *Registry) Entries() map[string]ResourceEntry {
 	if r == nil {
