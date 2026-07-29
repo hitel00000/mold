@@ -3,9 +3,11 @@ package cloudflare_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -704,4 +706,237 @@ func TestCloudflareGenerator_NullableOwnershipTSOutput(t *testing.T) {
 		t.Errorf("expected PUT Update to check ownerVal === null for admin requirement, got:\n%s", out.IndexTS)
 	}
 }
+
+func TestCloudflareGenerator_IncludeQuery(t *testing.T) {
+	tagRes := &resource.Resource{
+		Name:          "Tag",
+		Table:         "tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+		Relations: []resource.Relation{
+			{Name: "record_tags", Kind: resource.KindHasMany, Target: "RecordTag", ForeignKey: "tag_id"},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:          "RecordTag",
+		Table:         "record_tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	_ = reg.Register(tagRes)
+	_ = reg.Register(recordTagRes)
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// 1. Verify relMetadata generation in TS
+	if !strings.Contains(out.IndexTS, "const relMetadata: Record<string, Record<string,") {
+		t.Errorf("expected IndexTS to contain relMetadata definition")
+	}
+	if !strings.Contains(out.IndexTS, "'tag': { kind: 'belongs_to', targetTable: 'tags', fk: 'tag_id'") {
+		t.Errorf("expected IndexTS to contain tag belongs_to relation metadata, got:\n%s", out.IndexTS)
+	}
+
+	// 2. Verify processIncludes helper function in TS
+	if !strings.Contains(out.IndexTS, "async function processIncludes(c: any, currentTable: string, records: any[], includeStr: string | undefined, authUser: AuthUser | null): Promise<any>") {
+		t.Errorf("expected IndexTS to contain processIncludes helper")
+	}
+	if !strings.Contains(out.IndexTS, "return writeError(c, 400, 'INVALID_INCLUDE'") {
+		t.Errorf("expected IndexTS to return INVALID_INCLUDE for invalid relation")
+	}
+
+	// 3. Verify processIncludes invocation in List and Detail handlers
+	if !strings.Contains(out.IndexTS, "await processIncludes(c, 'record_tags', sanitized, c.req.query('include'), authUser)") {
+		t.Errorf("expected IndexTS to invoke processIncludes in List handler")
+	}
+}
+
+func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
+	tagRes := &resource.Resource{
+		Name:          "Tag",
+		Table:         "tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Auth: &resource.Auth{
+			OwnershipField: "owner_id",
+			Permissions: resource.Permissions{
+				Read: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "record_tags", Kind: resource.KindHasMany, Target: "RecordTag", ForeignKey: "tag_id"},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:          "RecordTag",
+		Table:         "record_tags",
+		SchemaVersion: 1,
+		SoftDelete:    true,
+		Fields: []resource.Field{
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	_ = reg.Register(tagRes)
+	_ = reg.Register(recordTagRes)
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	for relPath, content := range out.Files {
+		fullPath := filepath.Join(tmpDir, relPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("failed creating dir: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatalf("failed writing file %s: %v", relPath, err)
+		}
+	}
+
+	runnerJS := fmt.Sprintf(`
+import { Miniflare } from "miniflare";
+import fs from "node:fs";
+
+async function run() {
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: "./src/index.ts",
+    d1Databases: ["DB"],
+    d1Persist: false,
+    compatibilityFlags: ["nodejs_compat"]
+  });
+
+  const db = await mf.getD1Database("DB");
+  const schemaSQL = fs.readFileSync("./schema.sql", "utf8");
+  for (const stmt of schemaSQL.split(";").map(s => s.trim()).filter(Boolean)) {
+    await db.exec(stmt);
+  }
+
+  // Seed Tags
+  await db.exec("INSERT INTO tags (id, name, owner_id) VALUES (1, 'Public Tag 1', NULL);");
+  await db.exec("INSERT INTO tags (id, name, owner_id) VALUES (2, 'Private Tag 2', 999);");
+  await db.exec("INSERT INTO tags (id, name, owner_id, deleted_at) VALUES (4, 'Deleted Tag 4', NULL, '2026-01-01T00:00:00Z');");
+
+  // Seed RecordTags
+  await db.exec("INSERT INTO record_tags (id, tag_id) VALUES (1, 1);");
+  await db.exec("INSERT INTO record_tags (id, tag_id) VALUES (2, 2);");
+  await db.exec("INSERT INTO record_tags (id, tag_id) VALUES (3, NULL);");
+  await db.exec("INSERT INTO record_tags (id, tag_id) VALUES (4, 4);");
+
+  // 1. Test GET /api/record_tags?include=tag
+  const resList = await mf.dispatchFetch("http://localhost/api/record_tags?include=tag");
+  if (resList.status !== 200) {
+    console.error("List status failed:", resList.status);
+    process.exit(1);
+  }
+  const jsonList = await resList.json();
+  console.log("Miniflare List Response:", JSON.stringify(jsonList, null, 2));
+
+  const items = jsonList.data;
+  if (items.length !== 4) {
+    console.error("Expected 4 items, got", items.length);
+    process.exit(1);
+  }
+
+  const rec1 = items.find(i => i.id === 1);
+  const rec2 = items.find(i => i.id === 2);
+  const rec3 = items.find(i => i.id === 3);
+  const rec4 = items.find(i => i.id === 4);
+
+  if (!rec1 || !rec1.tag || rec1.tag.name !== 'Public Tag 1') {
+    console.error("Scenario A failed:", rec1);
+    process.exit(1);
+  }
+  if (!rec2 || rec2.tag !== null) {
+    console.error("Scenario B failed:", rec2);
+    process.exit(1);
+  }
+  if (!rec3 || rec3.tag !== null) {
+    console.error("Scenario C failed:", rec3);
+    process.exit(1);
+  }
+  if (!rec4 || rec4.tag !== null) {
+    console.error("Scenario D failed:", rec4);
+    process.exit(1);
+  }
+
+  // 2. Test invalid relation: ?include=invalid_rel -> 400
+  const resErr = await mf.dispatchFetch("http://localhost/api/record_tags?include=invalid_rel");
+  if (resErr.status !== 400) {
+    console.error("Expected 400 for invalid_rel, got", resErr.status);
+    process.exit(1);
+  }
+  const jsonErr = await resErr.json();
+  console.log("Miniflare Invalid Include Response:", JSON.stringify(jsonErr, null, 2));
+
+  // 3. Test has_many relation: GET /api/tags?include=record_tags -> 400
+  const resHasMany = await mf.dispatchFetch("http://localhost/api/tags?include=record_tags");
+  if (resHasMany.status !== 400) {
+    console.error("Expected 400 for has_many include, got", resHasMany.status);
+    process.exit(1);
+  }
+  const jsonHasMany = await resHasMany.json();
+  console.log("Miniflare HasMany Include Response:", JSON.stringify(jsonHasMany, null, 2));
+
+  // 4. Test SSR View GET /view/record_tags?include=tag
+  const resView = await mf.dispatchFetch("http://localhost/view/record_tags?include=tag");
+  if (resView.status !== 200) {
+    console.error("Expected 200 for SSR View, got", resView.status);
+    process.exit(1);
+  }
+
+  console.log("Miniflare 4-scenario include tests 100%% PASS!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
+`)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "test_runner.mjs"), []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing test_runner.mjs: %v", err)
+	}
+
+	cmd := exec.Command("npx", "--package=miniflare", "node", "test_runner.mjs")
+	cmd.Dir = tmpDir
+	outputBytes, err := cmd.CombinedOutput()
+	t.Logf("Miniflare Raw Log Output:\n%s", string(outputBytes))
+	if err != nil {
+		t.Fatalf("Miniflare test runner failed: %v", err)
+	}
+}
+
+
 
