@@ -122,7 +122,7 @@ func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource,
 			}
 
 			sanitized := SanitizeRecord(targetEntry.Resource, tRec)
-			targetMap[idVal] = sanitized
+			targetMap[normalizeIDKey(idVal)] = sanitized
 		}
 
 		// 5. Attach embedded target object (or null) to each parent record
@@ -130,7 +130,7 @@ func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource,
 			if rec == nil {
 				continue
 			}
-			fkVal := rec[fkField]
+			fkVal := normalizeIDKey(rec[fkField])
 			if fkVal != nil {
 				if embedded, ok := targetMap[fkVal]; ok && embedded != nil {
 					rec[rel.Name] = embedded
@@ -144,4 +144,22 @@ func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource,
 	}
 
 	return nil
+}
+
+func normalizeIDKey(v any) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case int:
+		return int64(val)
+	case int32:
+		return int64(val)
+	case int64:
+		return val
+	case float64:
+		return int64(val)
+	default:
+		return v
+	}
 }

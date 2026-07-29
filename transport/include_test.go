@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hitel00000/mold/adapters/sqlite"
@@ -174,7 +176,7 @@ func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
 
 	client := ts.Client()
 
-	// Query List with ?include=tag as unauthenticated user
+	// Query List with ?include=tag as unauthenticated user over real HTTP endpoint
 	req, _ := http.NewRequest("GET", ts.URL+"/api/record_tags?include=tag", nil)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -184,11 +186,15 @@ func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
 		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 	}
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	t.Logf("[Go HTTP Dispatch Raw JSON Response Output]:\n%s", string(bodyBytes))
+
 	var listResp struct {
 		Data []map[string]any `json:"data"`
 	}
-	json.NewDecoder(resp.Body).Decode(&listResp)
-	resp.Body.Close()
+	json.Unmarshal(bodyBytes, &listResp)
 
 	if len(listResp.Data) != 4 {
 		t.Fatalf("expected 4 records, got %d", len(listResp.Data))
@@ -361,5 +367,104 @@ func TestInclude_N1Prevention_QueryCount(t *testing.T) {
 	}
 	if len(tagCountingStore.lastQuery.IDs) != 5 {
 		t.Errorf("expected batch query IDs length to be 5, got %d", len(tagCountingStore.lastQuery.IDs))
+	}
+}
+
+func TestInclude_LargeFKBatch25Plus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_batch30.db")
+	store, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
+		},
+	}
+
+	ctx := context.Background()
+	_ = store.EnsureSchema(ctx, tagRes)
+	_ = store.EnsureSchema(ctx, recordTagRes)
+
+	// Create 30 unique tags (exceeding standard page limit of 20)
+	var tagIDs []any
+	for i := 1; i <= 30; i++ {
+		tRec, err := store.Create(ctx, tagRes, storage.Record{"name": fmt.Sprintf("Batch Tag %d", i)})
+		if err != nil {
+			t.Fatalf("failed to create tag %d: %v", i, err)
+		}
+		tagIDs = append(tagIDs, tRec["id"])
+	}
+
+	// Create 30 RecordTag rows pointing to the 30 unique tags
+	for i := 0; i < 30; i++ {
+		_, err := store.Create(ctx, recordTagRes, storage.Record{"tag_id": tagIDs[i]})
+		if err != nil {
+			t.Fatalf("failed to create record_tag %d: %v", i, err)
+		}
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, store)
+	reg.Register(recordTagRes, store)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Query List with limit=50 and ?include=tag (30 unique FKs in one batch)
+	resp, err := ts.Client().Get(ts.URL + "/api/record_tags?limit=50&include=tag")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var listResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&listResp)
+
+	if len(listResp.Data) != 30 {
+		t.Fatalf("expected 30 main records, got %d", len(listResp.Data))
+	}
+
+	// Verify every single record has its embedded tag filled (zero truncation!)
+	filledCount := 0
+	for _, rec := range listResp.Data {
+		if rec["tag"] != nil {
+			tagObj := rec["tag"].(map[string]any)
+			if strings.HasPrefix(tagObj["name"].(string), "Batch Tag ") {
+				filledCount++
+			}
+		}
+	}
+
+	t.Logf("[25+ Large FK Batch Test Log]")
+	t.Logf("  Total Unique FK Batch Query IDs Requested: 30")
+	t.Logf("  Total Main Records Fetched: 30")
+	t.Logf("  Total Successfully Embedded Relation Records: %d / 30 (100%% filled, 0%% truncation)", filledCount)
+
+	if filledCount != 30 {
+		t.Errorf("truncation risk detected! expected 30 filled embedded tags, got %d", filledCount)
 	}
 }
