@@ -194,6 +194,14 @@ func (vh *ViewHandler) renderList(w http.ResponseWriter, req *http.Request, res 
 	}
 
 	sanitizedRecords := transport.SanitizeRecordList(res, records)
+	includeParam := req.URL.Query().Get("include")
+	if includeParam != "" {
+		if err := transport.ProcessIncludes(req.Context(), vh.router.CurrentRegistry(), res, sanitizedRecords, includeParam, sess); err != nil {
+			vh.renderErrorPage(w, http.StatusBadRequest, err.Error(), navItems, sess)
+			return
+		}
+	}
+
 	widgets := BuildFormFields(res, nil, false)
 
 	totalPages := (total + perPage - 1) / perPage
@@ -244,6 +252,16 @@ func (vh *ViewHandler) renderDetail(w http.ResponseWriter, req *http.Request, re
 	}
 
 	sanitized := transport.SanitizeRecord(res, rec)
+
+	includeParam := req.URL.Query().Get("include")
+	if includeParam != "" {
+		recs := []storage.Record{sanitized}
+		if err := transport.ProcessIncludes(req.Context(), vh.router.CurrentRegistry(), res, recs, includeParam, sess); err != nil {
+			vh.renderErrorPage(w, http.StatusBadRequest, err.Error(), navItems, sess)
+			return
+		}
+	}
+
 	widgets := BuildFormFields(res, nil, false)
 
 	data := PageData{
