@@ -7,14 +7,13 @@ PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
 -- ============================================================================
--- 1. MIGRATION STEP 1: users Table Migration
+-- 1. STEP 1: Create users_new and Map Data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_user_map" (
     "old_id" TEXT PRIMARY KEY,
     "new_id" INTEGER NOT NULL
 );
 
--- Create new users table
 CREATE TABLE IF NOT EXISTS "users_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
     "legacy_id" TEXT UNIQUE,
@@ -23,13 +22,12 @@ CREATE TABLE IF NOT EXISTS "users_new" (
     "email" TEXT,
     "display_name" TEXT,
     "avatar_url" TEXT,
-    "last_login_at" TEXT NOT NULL,
+    "last_login_at" TEXT,
     "role" TEXT CHECK ("role" IN ('admin', 'user')) NOT NULL DEFAULT 'user',
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL
 );
 
--- Migrate users data and populate mapping
 INSERT INTO "users_new" ("legacy_id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", "role", "created_at", "updated_at")
 SELECT "id", "provider", "provider_user_id", "email", "display_name", "avatar_url", "last_login_at", COALESCE("role", 'user'), "created_at", COALESCE("updated_at", "created_at")
 FROM "users" ORDER BY "created_at" ASC;
@@ -40,12 +38,9 @@ SELECT "legacy_id", "id" FROM "users_new";
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_provider_provider_user_id_unique" ON "users_new"("provider", "provider_user_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_legacy_id_unique" ON "users_new"("legacy_id");
 
-DROP TABLE "users";
-ALTER TABLE "users_new" RENAME TO "users";
-
 
 -- ============================================================================
--- 2. MIGRATION STEP 2: tags Table Migration
+-- 2. STEP 2: Create tags_new and Map Data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_tag_map" (
     "old_id" TEXT PRIMARY KEY,
@@ -66,7 +61,6 @@ CREATE TABLE IF NOT EXISTS "tags_new" (
     FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE RESTRICT
 );
 
--- Migrate tags data
 INSERT INTO "tags_new" ("legacy_id", "slug", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at")
 SELECT 
     t."id",
@@ -89,12 +83,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_owner_id_drink_type_tag_group_label_
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_slug_unique" ON "tags_new"("slug");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_legacy_id_unique" ON "tags_new"("legacy_id");
 
-DROP TABLE "tags";
-ALTER TABLE "tags_new" RENAME TO "tags";
-
 
 -- ============================================================================
--- 3. MIGRATION STEP 3: sake_records Table Migration
+-- 3. STEP 3: Create sake_records_new and Map Data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_sake_map" (
     "old_id" TEXT PRIMARY KEY,
@@ -150,12 +141,9 @@ SELECT "legacy_id", "id" FROM "sake_records_new";
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sake_records_legacy_id_unique" ON "sake_records_new"("legacy_id");
 
-DROP TABLE "sake_records";
-ALTER TABLE "sake_records_new" RENAME TO "sake_records";
-
 
 -- ============================================================================
--- 4. MIGRATION STEP 4: sake_images Table Migration
+-- 4. STEP 4: Create sake_images_new and Map Data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "sake_images_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,12 +173,9 @@ ORDER BY i."created_at" ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sake_images_legacy_id_unique" ON "sake_images_new"("legacy_id");
 
-DROP TABLE "sake_images";
-ALTER TABLE "sake_images_new" RENAME TO "sake_images";
-
 
 -- ============================================================================
--- 5. MIGRATION STEP 5: record_tags Table Migration
+-- 5. STEP 5: Create record_tags_new and Map Data
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "record_tags_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,15 +197,22 @@ ORDER BY rt."created_at" ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_sake_record_id_tag_id_unique" ON "record_tags_new"("sake_record_id", "tag_id");
 
-DROP TABLE "record_tags";
-ALTER TABLE "record_tags_new" RENAME TO "record_tags";
-
 
 -- ============================================================================
--- 6. MIGRATION STEP 6: Invalidate OAuth Sessions & Cleanup Mapping Tables
+-- 6. STEP 6: Drop Legacy Tables in Reverse Dependency Order & Rename New Tables
 -- ============================================================================
--- Invalidate legacy oauth_sessions table
+DROP TABLE IF EXISTS "record_tags";
+DROP TABLE IF EXISTS "sake_images";
+DROP TABLE IF EXISTS "sake_records";
+DROP TABLE IF EXISTS "tags";
+DROP TABLE IF EXISTS "users";
 DROP TABLE IF EXISTS "oauth_sessions";
+
+ALTER TABLE "users_new" RENAME TO "users";
+ALTER TABLE "tags_new" RENAME TO "tags";
+ALTER TABLE "sake_records_new" RENAME TO "sake_records";
+ALTER TABLE "sake_images_new" RENAME TO "sake_images";
+ALTER TABLE "record_tags_new" RENAME TO "record_tags";
 
 -- Mold Session Table initialization
 CREATE TABLE IF NOT EXISTS "_mold_sessions" (
