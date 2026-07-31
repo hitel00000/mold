@@ -2,6 +2,8 @@
 -- Production D1 Migration Script for Drink-Log Service
 -- Option C: INTEGER AUTOINCREMENT PK + Legacy UUID Preservation + R2 Key Preservation
 
+PRAGMA foreign_keys = OFF;
+
 BEGIN TRANSACTION;
 
 -- ============================================================================
@@ -235,3 +237,5 @@ DROP TABLE IF EXISTS "_tmp_tag_map";
 DROP TABLE IF EXISTS "_tmp_sake_map";
 
 COMMIT;
+
+PRAGMA foreign_keys = ON;

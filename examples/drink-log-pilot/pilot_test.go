@@ -159,10 +159,11 @@ auth:
 
 	ctx := context.Background()
 
-	// Seed System Tag (owner_id = nil) via App.CreateRecord
+	// Seed System Default Tag (owner_id = null)
 	sysTag, err := app.CreateRecord(ctx, "Tag", map[string]any{
-		"name":     "System Fruity",
-		"owner_id": nil,
+		"tag_group": "taste",
+		"label":     "System Fruity",
+		"owner_id":  nil,
 	})
 	if err != nil {
 		t.Fatalf("failed creating system tag: %v", err)
@@ -171,8 +172,9 @@ auth:
 
 	// Seed User 501 Custom Tag (owner_id = 501)
 	userTag, err := app.CreateRecord(ctx, "Tag", map[string]any{
-		"name":     "User 501 Custom Tag",
-		"owner_id": 501,
+		"tag_group": "taste",
+		"label":     "User 501 Custom Tag",
+		"owner_id":  501,
 	})
 	if err != nil {
 		t.Fatalf("failed creating user tag: %v", err)
@@ -220,7 +222,7 @@ auth:
 	}
 
 	// 5. User 501 update of System Tag (owner_id = null) -> 403 Forbidden
-	reqUser1UpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"name":"Hacked System Tag"}`))
+	reqUser1UpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"label":"Hacked System Tag"}`))
 	reqUser1UpdateSys.Header.Set("Content-Type", "application/json")
 	reqUser1UpdateSys.Header.Set("Cookie", user1Cookie)
 	wUser1UpdateSys := httptest.NewRecorder()
@@ -230,7 +232,7 @@ auth:
 	}
 
 	// 6. Admin update of System Tag (owner_id = null) -> 200 OK
-	reqAdminUpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"name":"Renamed System Tag"}`))
+	reqAdminUpdateSys, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%v", sysTagID), strings.NewReader(`{"label":"Renamed System Tag"}`))
 	reqAdminUpdateSys.Header.Set("Content-Type", "application/json")
 	reqAdminUpdateSys.Header.Set("Cookie", adminCookie)
 	wAdminUpdateSys := httptest.NewRecorder()
@@ -259,7 +261,8 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 
 	// 1. Create Tag and SakeRecord
 	tag, err := app.CreateRecord(ctx, "Tag", map[string]any{
-		"name": "Refresh Fruity",
+		"tag_group": "taste",
+		"label":     "Refresh Fruity",
 	})
 	if err != nil {
 		t.Fatalf("failed creating Tag: %v", err)
