@@ -226,7 +226,6 @@
     - *마찰 C (복합 Unique 제약의 SoftDelete 마킹 후 Re-creation 및 DDL 차이)*: 기존 SQL의 `UNIQUE(record_id, tag_id)` 제약이 Mold의 SoftDelete 정책과 결합하면서 `WHERE deleted_at IS NULL`인 Partial Unique Index로 자동 전환됨. 이는 soft-deleted 레코드와 무결성 충돌 없이 re-creation을 보장하는 올바른 디자인이나, 기존 DDL과의 직접 문자열 diff 시 차이로 관찰됨.
     - *마찰 D (키 전략 및 PK 구조의 근본적 차이: UUID TEXT vs INTEGER AUTOINCREMENT)*: 기존 운영 스키마는 `id TEXT PRIMARY KEY` (UUID 문자열) 및 `record_tags` 테이블의 Composite PK `PRIMARY KEY(record_id, tag_id)`를 사용하고 `owner_id TEXT` (users.id UUID 참조)로 설계되어 있으나, Mold 코어는 `id INTEGER PRIMARY KEY AUTOINCREMENT` surrogate key 및 정수 기반 소유자/외래키로 고정되어 있음. 이는 런타임 DDL 생성상의 근본적 구조 차이이며, 향후 실제 프로덕션 커트오버 시 R2 객체 키 경로(`{record_id}`)나 외부 user 테이블 참조 무결성에 직접적 영향을 미치는 항목으로 추적 관리 필요.
 
-
 - [x] **Task 5.3: 세션 발급 Escape Hatch (`IssueSessionForUser` 등) 구현 및 OAuth 연동 기반 마련 완결**
   - **작업 내용**:
     1. **Go 코어 in-process API 구현 (`auth`, `runtime`)**: `auth.SessionManager.CreateSessionForUser(ctx, userID, role)` 및 `runtime.App.IssueSessionForUser(ctx, userID, role)` 메서드 구현. HTTP 라우터(`transport.Router`)에 무등록함으로써 동일 프로세스 경계 내에서만 호출 가능한 신뢰 경계(Trust Boundary) 원칙 준수.
@@ -241,8 +240,6 @@
     3. **Go 10대 / Miniflare 22대 조합 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate real HTTP dispatch (`mf.dispatchFetch`) 22대 조합 시나리오 (unauth/user/admin × NULL/non-NULL × read/update/delete + Blob routes) 전수 실행 raw 로그 100% PASS 검증 완결.
     4. **부수 발견 (Partial PUT 필드 손실 버그, `ba31038`)**: Nullable Ownership 실측 중 Cloudflare TS Codegen Target의 PUT UPDATE 템플릿이 `ownership_field`뿐 아니라 payload에 생략된 모든 필드를 NULL로 덮어쓰던 결함을 발견. Go 런타임은 해당 결함이 없었음(기존 값 유지가 정상 동작). 이 리소스 전역 부분 업데이트 데이터 손실 버그를 수정하여 Go/TS 패리티를 회복함. 이번 nullable ownership 작업 스코프 밖의 일반 버그이므로 별도 회귀 검증 대상으로 기록.
 
-    4. **Go/TS 7대 경계 조건 실측 100% PASS**: Go 유닛 테스트 및 Node.js Miniflare V8 Isolate HTTP dispatch (`mf.dispatchFetch`) 7개 시나리오 (unauth/user1/user2/admin × NULL/non-NULL × API/SSR HTML View) 전수 실행 raw 로그 100% PASS 검증 완결.
-
 - [x] **Task 5.5: 관계 조인 조회 (`?include=`) API 지원 완결 (Task 5.2 마찰 B 해소)**
   - **작업 내용**:
     1. **N+1 방지 배치 조회**: `storage.Query.IDs []any` 필드 추가, `adapters/sqlite` `List()`에 `WHERE "id" IN (?, ...)` 배치 조건 지원 (`query.Limit == 0`이면 무제한 조회 확인).
@@ -254,8 +251,26 @@
   - **실측 검증**: Go `httptest` 실 HTTP dispatch 4-시나리오((a) 허용/(b) 권한거부/(c) FK NULL/(d) soft-deleted) raw JSON 100% PASS, 30개 FK 대량 배치 0% truncation 실측, Cloudflare Miniflare V8 Isolate real HTTP dispatch 4-시나리오 100% PASS, `go test ./...` 전 패키지(9개) fresh PASS.
   - **문서 갱신**: `docs/ir-spec.md` 5.7절(`?include=` 스펙, 보안 메트릭스 표) 및 `docs/resource-guide.md`(사용 가이드) 반영 완료.
 
+### Phase 6: `drink-log` 실제 프로덕션 이관 및 코덱 Target 독립 결함 수정
 
+- [x] **Task 6.1: `drink-log` 프로덕션 이관 스크립트 작성 및 Glue 코드 E2E 실측 검증 완결**
+  - **작업 내용**:
+    1. **5개 Resource YAML 수립 (`examples/drink-log-pilot/`)**: `User.yaml`, `SakeRecord.yaml`, `SakeImage.yaml`, `Tag.yaml`, `RecordTag.yaml`. (기존 프로덕션 스키마와의 패리티를 위한 `notes`, `rating` 필드 반영 포함).
+    2. **D1 마이그레이션 SQL (`0001_drink_log_migration.sql`) 작성**:
+       - **PK 전략**: 옵션 C. 모든 테이블 `id INTEGER PRIMARY KEY AUTOINCREMENT`. 기존 UUID `id`는 `legacy_id TEXT UNIQUE` 컬럼으로 보존.
+       - **R2 키 전략**: 기존 `image_key` 및 `thumbnail_key` 문자열 값 재작성 없이 100% 보존.
+       - **`tags` 테이블**: `owner_id` Nullable Ownership 유지 (`NULL` = 기본 태그). `slug` (`type: string, unique: true, nullable: true`) 필드 추가로 `INSERT OR IGNORE INTO tags (...)` 100% Seed Idempotency 확보 및 `unique_together: [[owner_id, drink_type, tag_group, label]]` 병행.
+       - **`soft_delete` 정책**: 5개 테이블 전수 `soft_delete: true` 적용.
+       - **FK 순서 안전 마이그레이션**: `_tmp_user_map`, `_tmp_tag_map`, `_tmp_sake_map` 테이블을 활용한 INTEGER PK 재매핑, 역순 FK DROP (`record_tags` ➔ `sake_images` ➔ `sake_records` ➔ `tags` ➔ `users`) 및 단일 집합 execution 처리.
+    3. **Cloudflare Pages Function Glue 코드 4종 구현**:
+       - `functions/api/auth/google/callback.ts`: Google OAuth 성공 시 D1 `_mold_sessions`에 세션 토큰 발행 및 `mold_session` 쿠키 반환.
+       - `functions/api/sake_records/[id]/orchestrate-delete.ts`: Delete Orchestrator 함수. 세션 쿠키를 실어 `DELETE /api/sake_images/{id}/blob/image_key` ➔ `DELETE /api/sake_images/{id}/blob/thumbnail_key` ➔ `DELETE /api/sake_images/{id}` ➔ `DELETE /api/sake_records/{id}` 순차 세션 HTTP API 호출. 중간 실패 시 `500 RECORD_DELETE_PARTIAL_FAILURE` Abort, 부모 보존 및 재시도 Idempotency 보장.
+       - `functions/api/custom-tags.ts`: 태그 생성 시 trim/length 검증 및 중복 태그 시 `already_exists: true` 응답 헬퍼.
+       - `scripts/seed_tags.ts`: 22개 실제 프로덕션 한국어 기본 태그(taste 7, aroma 11, mood 4) Idempotent 시드 스크립트.
+    4. **Miniflare V8 Isolate E2E 검증 (`e2e_migration_orchestration_test.go`)**:
+       - Legacy UUID 시드 ➔ D1 마이그레이션 실행 ➔ 세션 쿠키 발급 ➔ 22개 한국어 태그 2차 재실행 idempotency ➔ Delete Orchestration 4대 시나리오 (Cross-user 403, Happy Path 청소, Partial Failure 500 Abort 및 DB 보존, Retry Idempotency) 100% CLEAN PASS.
+  - **참조 문서**: [drink-log 이관 분석 명세서 (Revision 1~10)](docs/tasks/drink-log-migration-analysis.md)
 
-
-
-
+- [x] **Task 6.2 [독립 bugfix]: Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 버그 픽스**
+  - **커밋**: `9d74c02` (`fix(codegen/cloudflare): enforce on_delete restrict at D1 DDL level`)
+  - **작업 내용**: `codegen/cloudflare/generator.go`에서 Cloudflare D1 DDL 생성 시 `FOREIGN KEY ... ON DELETE RESTRICT` 구문이 누락되어 있던 기존 패리티 버그(drink-log 이관과 독립된 Cloudflare Target 코어 버그)를 포착하여 DB 레벨에서 `RESTRICT`를 명시적으로 강제하도록 수정 및 검증 완결.
