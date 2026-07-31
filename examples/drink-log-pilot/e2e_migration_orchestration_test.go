@@ -98,12 +98,14 @@ async function run() {
   const r1_uuid = "uuid_record_1";
   const img1_uuid = "uuid_img_10";
   const img1_key = "images/" + u1_uuid + "/sake/" + r1_uuid + "/img1.jpg";
+  const thumb1_key = "images/" + u1_uuid + "/sake/" + r1_uuid + "/img1_thumb.jpg";
 
   await db.exec("INSERT INTO users VALUES ('" + u1_uuid + "', 'google', 'g_101', 'user101@example.com', 'User 101', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await db.exec("INSERT INTO users VALUES ('" + u2_uuid + "', 'google', 'g_102', 'user102@example.com', 'User 102', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES ('" + r1_uuid + "', '" + u1_uuid + "', 'sake', 'Dassai 23 Legacy', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
-  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, mime_type, file_name, created_at, updated_at) VALUES ('" + img1_uuid + "', '" + u1_uuid + "', '" + r1_uuid + "', '" + img1_key + "', 'image/jpeg', 'img1.jpg', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
+  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES ('" + img1_uuid + "', '" + u1_uuid + "', '" + r1_uuid + "', '" + img1_key + "', '" + thumb1_key + "', 'image/jpeg', 'img1.jpg', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await bucket.put(img1_key, "LEGACY_BINARY_R2_DATA");
+  await bucket.put(thumb1_key, "LEGACY_THUMBNAIL_R2_DATA");
 
   console.log("=== STEP 2: Running 0001_drink_log_migration.sql D1 Migration Script ===");
   const migSQL = fs.readFileSync("./migration.sql", "utf8");
@@ -121,13 +123,15 @@ async function run() {
   const migratedRecord = await db.prepare("SELECT * FROM sake_records WHERE legacy_id = ?").bind(r1_uuid).first();
   const migratedImage = await db.prepare("SELECT * FROM sake_images WHERE legacy_id = ?").bind(img1_uuid).first();
   const r2KeyPreserved = await bucket.get(img1_key);
+  const r2ThumbPreserved = await bucket.get(thumb1_key);
 
   console.log("Migrated User Int ID:", migratedUser.id, ", Legacy ID:", migratedUser.legacy_id);
   console.log("Migrated SakeRecord Int ID:", migratedRecord.id, ", FK owner_id:", migratedRecord.owner_id);
   console.log("Migrated SakeImage Int ID:", migratedImage.id, ", FK record_id:", migratedImage.record_id);
-  console.log("R2 Preserved Key Exists:", r2KeyPreserved !== null);
+  console.log("R2 Preserved Original Key Exists:", r2KeyPreserved !== null);
+  console.log("R2 Preserved Thumbnail Key Exists:", r2ThumbPreserved !== null);
 
-  if (typeof migratedUser.id === 'number' && migratedRecord.owner_id === migratedUser.id && migratedImage.record_id === migratedRecord.id && r2KeyPreserved !== null) {
+  if (typeof migratedUser.id === 'number' && migratedRecord.owner_id === migratedUser.id && migratedImage.record_id === migratedRecord.id && r2KeyPreserved !== null && r2ThumbPreserved !== null) {
     console.log("[EMPIRICAL MIGRATION VERIFIED]: D1 Migration Script 100% Succeeded!");
   } else {
     console.error("FAILED D1 Migration Verification");
@@ -167,7 +171,6 @@ async function run() {
       .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
   }
   const tagCount1st = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
-  console.log("1st Seed Run Total Default Tag Count:", tagCount1st);
 
   // 2nd Seed Run (Re-execution test)
   for (const tag of defaultTags) {
@@ -175,7 +178,6 @@ async function run() {
       .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
   }
   const tagCount2nd = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
-  console.log("2nd Seed Run (Re-execution) Total Default Tag Count:", tagCount2nd);
 
   if (tagCount1st === 22 && tagCount2nd === 22) {
     console.log("[EMPIRICAL SEED IDEMPOTENCY VERIFIED]: 22 Korean Default Tags Seeded Idempotently! 0 Duplicates!");
@@ -184,7 +186,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log("\n=== STEP 4: Testing Delete Orchestration 4 Scenarios ===");
+  console.log("\n=== STEP 4: Testing Delete Orchestration (image_key & thumbnail_key Session HTTP API) ===");
   const now = new Date().toISOString();
   const user1Token = "sess_user_101";
   const user2Token = "sess_user_102";
@@ -192,44 +194,71 @@ async function run() {
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user1Token + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user2Token + "', " + migratedUser2.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
 
-  // Scenario 1: Cross-user Forbidden (User2 trying to delete User1's record)
+  // 1) Cross-user Forbidden
   const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user2Token }
   });
   console.log("Scenario 1 Cross-user DELETE Status:", resCrossUser.status);
-  if (resCrossUser.status === 403) {
-    console.log("[SCENARIO 1 VERIFIED]: Cross-user deletion blocked with 403 Forbidden!");
-  } else {
-    console.error("FAILED Scenario 1");
-    process.exit(1);
-  }
 
-  // Scenario 2: Delete R2 Blob via Session HTTP API
+  // 2) Delete Original Image Blob via Session HTTP API
   const resBlobDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id + "/blob/image_key", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Scenario 2 Session HTTP R2 Blob DELETE Status:", resBlobDel.status);
+  console.log("Scenario 2 Session HTTP Original R2 Blob DELETE Status:", resBlobDel.status);
 
-  // Scenario 3: Delete SakeImage Row via Session HTTP API
+  // 3) Delete Thumbnail Image Blob via Session HTTP API
+  const resThumbDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id + "/blob/thumbnail_key", {
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
+  });
+  console.log("Scenario 3 Session HTTP Thumbnail R2 Blob DELETE Status:", resThumbDel.status);
+
+  // 4) Delete SakeImage Row via Session HTTP API
   const resImgRowDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id, {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Scenario 3 Session HTTP SakeImage Row DELETE Status:", resImgRowDel.status);
+  console.log("Scenario 4 Session HTTP SakeImage Row DELETE Status:", resImgRowDel.status);
 
-  // Scenario 4: Delete SakeRecord Parent via Session HTTP API & Verify Final Clean State
+  // 5) Delete SakeRecord Parent via Session HTTP API
   const resRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Scenario 4 Parent SakeRecord DELETE Status:", resRecordDel.status);
+  console.log("Scenario 5 Parent SakeRecord DELETE Status:", resRecordDel.status);
 
   const finalRecordCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
   const finalImageCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
 
   console.log("Final State - Record Count:", finalRecordCount, ", Image Count:", finalImageCount);
-  if (resRecordDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
-    console.log("[SCENARIO 4 VERIFIED]: Happy Path Delete Orchestration Clean Succeeded!");
+  if (resCrossUser.status === 403 && resBlobDel.status === 200 && resThumbDel.status === 200 && resRecordDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
+    console.log("[SCENARIO VERIFIED]: Happy Path Delete Orchestration (image_key + thumbnail_key) Clean Succeeded!");
   } else {
-    console.error("FAILED Scenario 4");
+    console.error("FAILED Delete Orchestration Happy Path");
+    process.exit(1);
+  }
+
+  console.log("\n=== STEP 5: Testing Partial Failure Abort & Retry Idempotency Scenarios ===");
+  // Seed Record 2 with Image 2 (Simulating Partial Failure on Image Row Delete)
+  await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES (2, " + migratedUser.id + ", 'sake', 'Fail Test Sake', '2026-07-30T00:00:00Z', '" + now + "', '" + now + "');");
+  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES (20, " + migratedUser.id + ", 2, 'img2_key', 'thumb2_key', 'image/jpeg', 'img2.jpg', '" + now + "', '" + now + "');");
+  await bucket.put("img2_key", "IMG2_DATA");
+  await bucket.put("thumb2_key", "THUMB2_DATA");
+
+  // Simulating Partial Failure: Manually delete img2_key blob, leaving image row 20 and record 2
+  await bucket.delete("img2_key");
+
+  // Call Delete Orchestration on Record 2 (Idempotent Retry over partially cleaned state)
+  const resRetryRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/2", {
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
+  });
+  console.log("Partial Failure Retry Orchestration DELETE Status:", resRetryRecordDel.status);
+
+  const finalRecord2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_records WHERE id = 2").first()).c;
+  const finalImage2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
+
+  console.log("Retry Final State - Record 2 Count:", finalRecord2Count, ", Image 20 Count:", finalImage2Count);
+  if (resRetryRecordDel.status === 200 && finalRecord2Count === 0 && finalImage2Count === 0) {
+    console.log("[EMPIRICAL ABORT & RETRY IDEMPOTENCY VERIFIED]: Mid-stage failure resolved by idempotent retry 100% cleanly!");
+  } else {
+    console.error("FAILED Partial Failure Retry Scenario");
     process.exit(1);
   }
 
@@ -254,7 +283,7 @@ run().catch(err => {
 		t.Fatalf("test failed: %v", err)
 	}
 
-	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[SCENARIO 4 VERIFIED]") {
+	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL ABORT & RETRY IDEMPOTENCY VERIFIED]") {
 		t.Fatalf("empirical verification markers not found in output:\n%s", rawOutput)
 	}
 }
