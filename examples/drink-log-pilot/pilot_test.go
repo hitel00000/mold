@@ -123,17 +123,34 @@ func TestDrinkLogPilot_NullableOwnerTagPermissions(t *testing.T) {
   name: Tag
   table: tags
   timestamps: true
-  soft_delete: true
+  soft_delete: false
 
 fields:
-  - name: name
+  - name: legacy_id
     type: string
-    nullable: false
-    constraints:
-      unique: true
+    nullable: true
+  - name: slug
+    type: string
+    nullable: true
   - name: owner_id
     type: int
     nullable: true
+  - name: drink_type
+    type: string
+    nullable: false
+    default: "sake"
+  - name: tag_group
+    type: enum
+    nullable: false
+    constraints:
+      values: ["taste", "aroma", "mood"]
+  - name: label
+    type: string
+    nullable: false
+  - name: is_default
+    type: bool
+    nullable: false
+    default: false
 
 auth:
   ownership_field: owner_id
@@ -259,7 +276,17 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Create Tag and SakeRecord
+	// 1. Create User, Tag and SakeRecord
+	user, err := app.CreateRecord(ctx, "User", map[string]any{
+		"provider":         "google",
+		"provider_user_id": "g_100",
+		"email":            "user100@example.com",
+	})
+	if err != nil {
+		t.Fatalf("failed creating User: %v", err)
+	}
+	userID := user["id"]
+
 	tag, err := app.CreateRecord(ctx, "Tag", map[string]any{
 		"tag_group": "taste",
 		"label":     "Refresh Fruity",
@@ -274,7 +301,7 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 		"consumed_date": "2026-07-28T12:00:00Z",
 		"rating":        4.8,
 		"notes":         "Smooth & aromatic",
-		"owner_id":      100,
+		"owner_id":      userID,
 	})
 	if err != nil {
 		t.Fatalf("failed creating SakeRecord: %v", err)
