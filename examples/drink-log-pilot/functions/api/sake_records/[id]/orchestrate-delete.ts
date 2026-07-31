@@ -1,5 +1,5 @@
 // Delete Orchestration Function for SakeRecord and child SakeImages
-// Guarantees Abort Contract, Session-based HTTP API calls, and Idempotent Retry
+// Guarantees Abort Contract, Session-based HTTP API calls for image_key & thumbnail_key blobs, and Idempotent Retry
 
 interface Env {
   DB: D1Database;
@@ -40,7 +40,7 @@ export async function onRequestDelete(context: { request: Request; params: { id:
   // 4. Sequential Child Images Deletion via HTTP API endpoints
   const urlOrigin = new URL(request.url).origin;
   for (const img of childImages) {
-    // Step A: Delete R2 Blob via HTTP API DELETE /api/sake_images/{id}/blob/image_key with session cookie
+    // Step A1: Delete Original R2 Blob via HTTP API DELETE /api/sake_images/{id}/blob/image_key with session cookie
     if (img.image_key) {
       const resBlobDel = await fetch(`${urlOrigin}/api/sake_images/${img.id}/blob/image_key`, {
         method: 'DELETE',
@@ -50,7 +50,20 @@ export async function onRequestDelete(context: { request: Request; params: { id:
       // Idempotent Retry: 200 OK or 404 Not Found (already deleted) is accepted as clean
       if (resBlobDel.status !== 200 && resBlobDel.status !== 404) {
         // Abort Contract: Partial failure on R2 blob deletion -> Stop and return 500!
-        return Response.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: `failed to delete blob for image ${img.id}` } }, { status: 500 });
+        return Response.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: `failed to delete image_key blob for image ${img.id}` } }, { status: 500 });
+      }
+    }
+
+    // Step A2: Delete Thumbnail R2 Blob via HTTP API DELETE /api/sake_images/{id}/blob/thumbnail_key with session cookie
+    if (img.thumbnail_key) {
+      const resThumbDel = await fetch(`${urlOrigin}/api/sake_images/${img.id}/blob/thumbnail_key`, {
+        method: 'DELETE',
+        headers: { Cookie: cookieHeader },
+      });
+
+      if (resThumbDel.status !== 200 && resThumbDel.status !== 404) {
+        // Abort Contract: Partial failure on R2 thumbnail blob deletion -> Stop and return 500!
+        return Response.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: `failed to delete thumbnail_key blob for image ${img.id}` } }, { status: 500 });
       }
     }
 
