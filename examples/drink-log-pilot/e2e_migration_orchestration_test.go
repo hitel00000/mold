@@ -194,41 +194,23 @@ async function run() {
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user1Token + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user2Token + "', " + migratedUser2.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
 
-  // 1) Cross-user Forbidden
-  const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
+  // 1) Cross-user Forbidden (User 2 calling orchestrate-delete on User 1's record)
+  const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user2Token }
   });
   console.log("Scenario 1 Cross-user DELETE Status:", resCrossUser.status);
 
-  // 2) Delete Original Image Blob via Session HTTP API
-  const resBlobDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id + "/blob/image_key", {
+  // 2) Full Delete Orchestration Call (User 1 calling orchestrate-delete)
+  const resOrchestrateDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Scenario 2 Session HTTP Original R2 Blob DELETE Status:", resBlobDel.status);
-
-  // 3) Delete Thumbnail Image Blob via Session HTTP API
-  const resThumbDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id + "/blob/thumbnail_key", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
-  });
-  console.log("Scenario 3 Session HTTP Thumbnail R2 Blob DELETE Status:", resThumbDel.status);
-
-  // 4) Delete SakeImage Row via Session HTTP API
-  const resImgRowDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id, {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
-  });
-  console.log("Scenario 4 Session HTTP SakeImage Row DELETE Status:", resImgRowDel.status);
-
-  // 5) Delete SakeRecord Parent via Session HTTP API
-  const resRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
-  });
-  console.log("Scenario 5 Parent SakeRecord DELETE Status:", resRecordDel.status);
+  console.log("Scenario 2 Delete Orchestration Status:", resOrchestrateDel.status);
 
   const finalRecordCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
   const finalImageCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
 
   console.log("Final State - Record Count:", finalRecordCount, ", Image Count:", finalImageCount);
-  if (resCrossUser.status === 403 && resBlobDel.status === 200 && resThumbDel.status === 200 && resRecordDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
+  if (resCrossUser.status === 403 && resOrchestrateDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
     console.log("[SCENARIO VERIFIED]: Happy Path Delete Orchestration (image_key + thumbnail_key) Clean Succeeded!");
   } else {
     console.error("FAILED Delete Orchestration Happy Path");
@@ -246,7 +228,7 @@ async function run() {
   await bucket.delete("img2_key");
 
   // Call Delete Orchestration on Record 2 (Idempotent Retry over partially cleaned state)
-  const resRetryRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/2", {
+  const resRetryRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
   console.log("Partial Failure Retry Orchestration DELETE Status:", resRetryRecordDel.status);
