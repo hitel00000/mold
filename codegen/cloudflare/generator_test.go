@@ -95,7 +95,8 @@ func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
     "author_id" INTEGER NOT NULL,
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
-    "deleted_at" TEXT
+    "deleted_at" TEXT,
+    FOREIGN KEY ("author_id") REFERENCES "users"("id") ON DELETE RESTRICT
 );`
 
 	expectedCommentsDDL := `CREATE TABLE IF NOT EXISTS "comments" (
@@ -105,7 +106,9 @@ func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
     "author_id" INTEGER NOT NULL,
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
-    "deleted_at" TEXT
+    "deleted_at" TEXT,
+    FOREIGN KEY ("post_id") REFERENCES "posts"("id") ON DELETE RESTRICT,
+    FOREIGN KEY ("author_id") REFERENCES "users"("id") ON DELETE RESTRICT
 );`
 
 	if !strings.Contains(output.SchemaSQL, expectedPostsDDL) {
@@ -823,55 +826,35 @@ func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
 		}
 	}
 
-	// Locate miniflare in npx cache or node_modules
-	var miniflarePath string
-	npxCacheDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "npm-cache", "_npx")
-	if entries, err := os.ReadDir(npxCacheDir); err == nil {
-		for _, e := range entries {
-			candidate := filepath.Join(npxCacheDir, e.Name(), "node_modules", "miniflare", "dist", "src", "index.js")
-			if _, err := os.Stat(candidate); err == nil {
-				miniflarePath = candidate
-				break
-			}
-		}
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
 	}
-	if miniflarePath == "" {
-		absPath, err := filepath.Abs(filepath.Join("..", "..", "node_modules", "miniflare", "dist", "src", "index.js"))
-		if err == nil {
-			miniflarePath = absPath
-		}
-	}
-
-	miniflareURL := "file:///" + filepath.ToSlash(strings.TrimPrefix(miniflarePath, "/"))
-
-	// Locate hono in npx cache
-	var honoPath string
-	if entries, err := os.ReadDir(npxCacheDir); err == nil {
-		for _, e := range entries {
-			candidate := filepath.Join(npxCacheDir, e.Name(), "node_modules", "hono")
-			if _, err := os.Stat(candidate); err == nil {
-				honoPath = candidate
-				break
-			}
-		}
+	cmdNpm.Dir = tmpDir
+	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(outBytes))
 	}
 
 	// Transpile & bundle src/index.ts to src/index.js using esbuild
-	esArgs := []string{"-y", "--package=esbuild", "--package=hono", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js"}
-	if honoPath != "" {
-		esArgs = append(esArgs, "--alias:hono="+honoPath)
+	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdEsbuild = exec.Command("npx", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
 	}
-	esCmd := exec.Command("npx", esArgs...)
-	esCmd.Dir = tmpDir
-	if out, err := esCmd.CombinedOutput(); err != nil {
-		t.Fatalf("esbuild failed: %v, log: %s", err, string(out))
+	cmdEsbuild.Dir = tmpDir
+	if outBytes, err := cmdEsbuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild failed: %v, log: %s", err, string(outBytes))
 	}
 
+	miniflareURL := filepath.ToSlash(filepath.Join(tmpDir, "node_modules", "miniflare", "dist", "src", "index.js"))
+
 	runnerJS := fmt.Sprintf(`
-import { Miniflare } from "%s";
+import { pathToFileURL } from "node:url";
 import fs from "node:fs";
 
 async function run() {
+  const miniflareModule = await import(pathToFileURL("%s").href);
+  const { Miniflare } = miniflareModule;
+
   const mf = new Miniflare({
     modules: true,
     scriptPath: "./src/index.js",
@@ -986,5 +969,145 @@ run().catch(err => {
 	}
 }
 
+// TestCloudflareCodegen_MiniflareR2KeyIndirectionEmpirical empirically proves Problem 1:
+// Integer PK in D1 does NOT require rewriting R2 object key paths.
+// Legacy UUID format R2 key ("images/{uuid-owner}/sake/{uuid-record}/{uuid-image}.jpg")
+// stored in D1's image_key column for record id=1 (INTEGER AUTOINCREMENT) is fetched successfully via Miniflare R2 binding.
+func TestCloudflareCodegen_MiniflareR2KeyIndirectionEmpirical(t *testing.T) {
+	nodePath, err := exec.LookPath("node")
+	if err != nil || nodePath == "" {
+		t.Skip("node not found in PATH, skipping Miniflare R2 key indirection empirical test")
+	}
 
+	reg := resource.NewRegistry()
+	sakeImgRes := &resource.Resource{
+		Name:       "SakeImage",
+		Table:      "sake_images",
+		Timestamps: true,
+		Fields: []resource.Field{
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "record_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "image_key", Type: resource.TypeBlob, Nullable: false},
+		},
+	}
+	reg.Register(sakeImgRes)
 
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed to generate code: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(output.PackageJSON), 0644); err != nil {
+		t.Fatalf("failed writing package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644); err != nil {
+		t.Fatalf("failed writing wrangler.jsonc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644); err != nil {
+		t.Fatalf("failed writing schema.sql: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644); err != nil {
+		t.Fatalf("failed writing index.ts: %v", err)
+	}
+
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund")
+	}
+	cmdNpm.Dir = tmpDir
+	if out, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
+	}
+
+	// Run esbuild
+	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/index.js", "--external:node:*")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdEsbuild = exec.Command("npx", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/index.js", "--external:node:*")
+	}
+	cmdEsbuild.Dir = tmpDir
+	if out, err := cmdEsbuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild bundle failed: %v\nOutput: %s", err, string(out))
+	}
+
+	miniflareURL := filepath.ToSlash(filepath.Join(tmpDir, "node_modules", "miniflare", "dist", "src", "index.js"))
+
+	runnerJS := fmt.Sprintf(`
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+async function run() {
+  const miniflareModule = await import(pathToFileURL("%s").href);
+  const { Miniflare } = miniflareModule;
+
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: "./dist/index.js",
+    d1Databases: { DB: "mold-d1" },
+    r2Buckets: { BUCKET: "mold-r2" },
+  });
+
+  const db = await mf.getD1Database("DB");
+  const bucket = await mf.getR2Bucket("BUCKET");
+  const schemaSQL = fs.readFileSync("./schema.sql", "utf8");
+
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
+  }
+
+  // Legacy UUID format R2 key path in production
+  const legacyUUIDKey = "images/usr_7f8a9b0c-1234-4567-89ab-cdef01234567/sake/rec_1a2b3c4d-5678-90ab-cdef-1234567890ab/img_9f8e7d6c-5432-10fe-dcba-9876543210fe.jpg";
+  const binaryPayload = "EMPIRICAL_R2_BINARY_IMAGE_BYTES_99999";
+
+  // 1. Seed D1 with INTEGER AUTOINCREMENT PK (id = 1) and legacy UUID image_key
+  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, created_at, updated_at) VALUES (1, 101, 202, '" + legacyUUIDKey + "', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
+
+  // 2. Put binary data directly into R2 under legacy UUID key
+  await bucket.put(legacyUUIDKey, binaryPayload);
+
+  // 3. Dispatch HTTP request to Mold TS Endpoint GET /api/sake_images/1/blob/image_key (Targeting INTEGER id=1)
+  const res = await mf.dispatchFetch("http://localhost/api/sake_images/1/blob/image_key");
+  
+  console.log("=== EMPIRICAL MINIFLARE R2 TEST RAW LOG ===");
+  console.log("HTTP Response Status:", res.status);
+  const textBody = await res.text();
+  console.log("HTTP Response Body:", textBody);
+
+  if (res.status !== 200) {
+    console.error("FAILED: Expected 200 OK, got", res.status);
+    process.exit(1);
+  }
+
+  if (textBody !== binaryPayload) {
+    console.error("FAILED: Response body mismatch. Expected", binaryPayload, "got", textBody);
+    process.exit(1);
+  }
+
+  console.log("[EMPIRICAL PROOF VERIFIED]: Mold TS Blob endpoint correctly served legacy UUID R2 key for INTEGER record id=1!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
+`, miniflareURL)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "test_runner.mjs"), []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing test_runner.mjs: %v", err)
+	}
+
+	cmd := exec.Command("node", "test_runner.mjs")
+	cmd.Dir = tmpDir
+	outputBytes, err := cmd.CombinedOutput()
+	t.Logf("Miniflare Raw Log Output:\n%s", string(outputBytes))
+	if err != nil {
+		t.Fatalf("Miniflare test runner failed: %v", err)
+	}
+}

@@ -121,6 +121,21 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 			sb.WriteString(",\n    \"deleted_at\" TEXT")
 		}
 
+		for _, rel := range p.Relations {
+			if rel.Kind == "belongs_to" && rel.ForeignKey != "" {
+				var targetTable string
+				for _, r := range resources {
+					if r.Name == rel.Target {
+						targetTable = r.Table
+						break
+					}
+				}
+				if targetTable != "" {
+					sb.WriteString(fmt.Sprintf(",\n    FOREIGN KEY (\"%s\") REFERENCES \"%s\"(\"id\") ON DELETE RESTRICT", rel.ForeignKey, targetTable))
+				}
+			}
+		}
+
 		sb.WriteString("\n);\n\n")
 
 		if p.SoftDelete {
