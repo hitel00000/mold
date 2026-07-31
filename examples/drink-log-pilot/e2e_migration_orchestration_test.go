@@ -25,7 +25,7 @@ func TestDrinkLog_E2EMigrationAndDeleteOrchestration(t *testing.T) {
 	gen := cloudflare.NewGenerator()
 	output, err := gen.Generate(reg)
 	if err != nil {
-		t.Fatalf("generation failed: %v", err)
+		t.Fatalf("generate Cloudflare Workers target failed: %v", err)
 	}
 
 	tmpDir := t.TempDir()
@@ -94,11 +94,13 @@ async function run() {
 
   // Seed Legacy Synthetic Data
   const u1_uuid = "uuid_user_101";
+  const u2_uuid = "uuid_user_102";
   const r1_uuid = "uuid_record_1";
   const img1_uuid = "uuid_img_10";
   const img1_key = "images/" + u1_uuid + "/sake/" + r1_uuid + "/img1.jpg";
 
   await db.exec("INSERT INTO users VALUES ('" + u1_uuid + "', 'google', 'g_101', 'user101@example.com', 'User 101', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
+  await db.exec("INSERT INTO users VALUES ('" + u2_uuid + "', 'google', 'g_102', 'user102@example.com', 'User 102', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES ('" + r1_uuid + "', '" + u1_uuid + "', 'sake', 'Dassai 23 Legacy', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, mime_type, file_name, created_at, updated_at) VALUES ('" + img1_uuid + "', '" + u1_uuid + "', '" + r1_uuid + "', '" + img1_key + "', 'image/jpeg', 'img1.jpg', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
   await bucket.put(img1_key, "LEGACY_BINARY_R2_DATA");
@@ -115,6 +117,7 @@ async function run() {
 
   // Verify Migration Results
   const migratedUser = await db.prepare("SELECT * FROM users WHERE legacy_id = ?").bind(u1_uuid).first();
+  const migratedUser2 = await db.prepare("SELECT * FROM users WHERE legacy_id = ?").bind(u2_uuid).first();
   const migratedRecord = await db.prepare("SELECT * FROM sake_records WHERE legacy_id = ?").bind(r1_uuid).first();
   const migratedImage = await db.prepare("SELECT * FROM sake_images WHERE legacy_id = ?").bind(img1_uuid).first();
   const r2KeyPreserved = await bucket.get(img1_key);
@@ -125,56 +128,108 @@ async function run() {
   console.log("R2 Preserved Key Exists:", r2KeyPreserved !== null);
 
   if (typeof migratedUser.id === 'number' && migratedRecord.owner_id === migratedUser.id && migratedImage.record_id === migratedRecord.id && r2KeyPreserved !== null) {
-    console.log("[EMPIRICAL MIGRATION VERIFIED]: D1 Migration Script 100% Succeeded! INTEGER PKs and R2 Keys Preserved!");
+    console.log("[EMPIRICAL MIGRATION VERIFIED]: D1 Migration Script 100% Succeeded!");
   } else {
     console.error("FAILED D1 Migration Verification");
     process.exit(1);
   }
 
-  console.log("\n=== STEP 3: Issuing Session & Testing Session Cookie Authentication ===");
-  const now = new Date().toISOString();
-  const sessToken = "sess_e2e_101";
-  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + sessToken + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
+  console.log("\n=== STEP 3: Testing 22 Default Tags Seed Idempotency ===");
+  const defaultTags = [
+    { slug: 'tag_taste_달콤함', tag_group: 'taste', label: '달콤함' },
+    { slug: 'tag_taste_깔끔함', tag_group: 'taste', label: '깔끔함' },
+    { slug: 'tag_taste_드라이함', tag_group: 'taste', label: '드라이함' },
+    { slug: 'tag_taste_산미', tag_group: 'taste', label: '산미' },
+    { slug: 'tag_taste_감칠맛', tag_group: 'taste', label: '감칠맛' },
+    { slug: 'tag_taste_묵직함', tag_group: 'taste', label: '묵직함' },
+    { slug: 'tag_taste_부드러움', tag_group: 'taste', label: '부드러움' },
+    { slug: 'tag_aroma_과일향_(사과/청포도)', tag_group: 'aroma', label: '과일향 (사과/청포도)' },
+    { slug: 'tag_aroma_과일향_(참외/멜론)', tag_group: 'aroma', label: '과일향 (참외/멜론)' },
+    { slug: 'tag_aroma_과일향_(감귤/레몬)', tag_group: 'aroma', label: '과일향 (감귤/레몬)' },
+    { slug: 'tag_aroma_과일향_(바나나)', tag_group: 'aroma', label: '과일향 (바나나)' },
+    { slug: 'tag_aroma_과일향_(열대과일)', tag_group: 'aroma', label: '과일향 (열대과일)' },
+    { slug: 'tag_aroma_꽃향', tag_group: 'aroma', label: '꽃향' },
+    { slug: 'tag_aroma_곡물향/쌀향', tag_group: 'aroma', label: '곡물향/쌀향' },
+    { slug: 'tag_aroma_유제품향/요거트', tag_group: 'aroma', label: '유제품향/요거트' },
+    { slug: 'tag_aroma_풀향/삼나무', tag_group: 'aroma', label: '풀향/삼나무' },
+    { slug: 'tag_aroma_향신료향', tag_group: 'aroma', label: '향신료향' },
+    { slug: 'tag_aroma_숙성향', tag_group: 'aroma', label: '숙성향' },
+    { slug: 'tag_mood_입문자_추천', tag_group: 'mood', label: '입문자 추천' },
+    { slug: 'tag_mood_반주/식사용', tag_group: 'mood', label: '반주/식사용' },
+    { slug: 'tag_mood_특별한_날', tag_group: 'mood', label: '특별한 날' },
+    { slug: 'tag_mood_혼술', tag_group: 'mood', label: '혼술' }
+  ];
 
-  const resFetchRec = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
-    headers: { "Cookie": "mold_session=" + sessToken }
-  });
-  console.log("Fetch SakeRecord via mold_session Cookie Status:", resFetchRec.status);
+  const nowStr = new Date().toISOString();
+  // 1st Seed Run
+  for (const tag of defaultTags) {
+    await db.prepare('INSERT OR IGNORE INTO "tags" ("slug", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, NULL, "sake", ?, ?, 1, ?, ?)')
+      .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
+  }
+  const tagCount1st = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
+  console.log("1st Seed Run Total Default Tag Count:", tagCount1st);
 
-  if (resFetchRec.status === 200) {
-    console.log("[EMPIRICAL SESSION VERIFIED]: Session issued and authenticated successfully!");
+  // 2nd Seed Run (Re-execution test)
+  for (const tag of defaultTags) {
+    await db.prepare('INSERT OR IGNORE INTO "tags" ("slug", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, NULL, "sake", ?, ?, 1, ?, ?)')
+      .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
+  }
+  const tagCount2nd = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
+  console.log("2nd Seed Run (Re-execution) Total Default Tag Count:", tagCount2nd);
+
+  if (tagCount1st === 22 && tagCount2nd === 22) {
+    console.log("[EMPIRICAL SEED IDEMPOTENCY VERIFIED]: 22 Korean Default Tags Seeded Idempotently! 0 Duplicates!");
   } else {
-    console.error("FAILED session authentication");
+    console.error("FAILED Tag Seed Idempotency Test, 1st:", tagCount1st, "2nd:", tagCount2nd);
     process.exit(1);
   }
 
-  console.log("\n=== STEP 4: Testing Delete Orchestration on Migrated Record ===");
-  // Step A: Delete Image Blob
+  console.log("\n=== STEP 4: Testing Delete Orchestration 4 Scenarios ===");
+  const now = new Date().toISOString();
+  const user1Token = "sess_user_101";
+  const user2Token = "sess_user_102";
+
+  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user1Token + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
+  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user2Token + "', " + migratedUser2.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
+
+  // Scenario 1: Cross-user Forbidden (User2 trying to delete User1's record)
+  const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user2Token }
+  });
+  console.log("Scenario 1 Cross-user DELETE Status:", resCrossUser.status);
+  if (resCrossUser.status === 403) {
+    console.log("[SCENARIO 1 VERIFIED]: Cross-user deletion blocked with 403 Forbidden!");
+  } else {
+    console.error("FAILED Scenario 1");
+    process.exit(1);
+  }
+
+  // Scenario 2: Delete R2 Blob via Session HTTP API
   const resBlobDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id + "/blob/image_key", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + sessToken }
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Delete SakeImage Blob Status:", resBlobDel.status);
+  console.log("Scenario 2 Session HTTP R2 Blob DELETE Status:", resBlobDel.status);
 
-  // Step B: Delete Image Row
+  // Scenario 3: Delete SakeImage Row via Session HTTP API
   const resImgRowDel = await mf.dispatchFetch("http://localhost/api/sake_images/" + migratedImage.id, {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + sessToken }
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Delete SakeImage Row Status:", resImgRowDel.status);
+  console.log("Scenario 3 Session HTTP SakeImage Row DELETE Status:", resImgRowDel.status);
 
-  // Step C: Delete SakeRecord
+  // Scenario 4: Delete SakeRecord Parent via Session HTTP API & Verify Final Clean State
   const resRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id, {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + sessToken }
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Delete SakeRecord Final Status:", resRecordDel.status);
+  console.log("Scenario 4 Parent SakeRecord DELETE Status:", resRecordDel.status);
 
   const finalRecordCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
   const finalImageCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
 
   console.log("Final State - Record Count:", finalRecordCount, ", Image Count:", finalImageCount);
   if (resRecordDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
-    console.log("[EMPIRICAL ORCHESTRATION VERIFIED]: Delete Orchestration on Migrated Data 100% Clean!");
+    console.log("[SCENARIO 4 VERIFIED]: Happy Path Delete Orchestration Clean Succeeded!");
   } else {
-    console.error("FAILED delete orchestration");
+    console.error("FAILED Scenario 4");
     process.exit(1);
   }
 
@@ -199,7 +254,7 @@ run().catch(err => {
 		t.Fatalf("test failed: %v", err)
 	}
 
-	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL ORCHESTRATION VERIFIED]") {
+	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[SCENARIO 4 VERIFIED]") {
 		t.Fatalf("empirical verification markers not found in output:\n%s", rawOutput)
 	}
 }
