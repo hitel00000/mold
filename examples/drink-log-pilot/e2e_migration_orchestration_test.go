@@ -32,6 +32,7 @@ func TestDrinkLog_E2EMigrationAndDeleteOrchestration(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(output.PackageJSON), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
+
 	indexTS := output.IndexTS + `
 app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
   const recordId = c.req.param('id');
@@ -51,60 +52,32 @@ app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
   const images = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE record_id = ?').bind(recordId).all();
   const childImages = images.results || [];
 
-  const urlOrigin = new URL(c.req.url).origin.replace('localhost', '127.0.0.1');
-
-  const safeDeleteBlob = async (imgId: any, blobField: string, keyVal: string) => {
-    try {
-      const res = await fetch(` + "`" + `${urlOrigin}/api/sake_images/${imgId}/blob/${blobField}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } });
-      if (res.status === 200 || res.status === 404) return true;
-    } catch (e) {
-      if (c.env.BUCKET && keyVal) {
-        await c.env.BUCKET.delete(keyVal);
-        return true;
-      }
-    }
-    return false;
-  };
-
-  const safeDeleteRow = async (imgId: any) => {
-    try {
-      const res = await fetch(` + "`" + `${urlOrigin}/api/sake_images/${imgId}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } });
-      if (res.status === 200 || res.status === 404) return true;
-    } catch (e) {
-      await c.env.DB.prepare('DELETE FROM "sake_images" WHERE id = ?').bind(imgId).run();
-      return true;
-    }
-    return false;
-  };
-
   for (const img of childImages) {
     if (img.image_key) {
-      const ok = await safeDeleteBlob(img.id, 'image_key', img.image_key);
-      if (!ok) return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
+      const resBlob = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/image_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+      if (resBlob.status !== 200 && resBlob.status !== 404) {
+        return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
+      }
     }
     if (img.thumbnail_key) {
-      const ok = await safeDeleteBlob(img.id, 'thumbnail_key', img.thumbnail_key);
-      if (!ok) return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete thumbnail_key blob for image ${img.id}` + "`" + ` } }, 500);
+      const resThumb = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/thumbnail_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+      if (resThumb.status !== 200 && resThumb.status !== 404) {
+        return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete thumbnail_key blob for image ${img.id}` + "`" + ` } }, 500);
+      }
     }
-    const rowOk = await safeDeleteRow(img.id);
-    if (!rowOk) return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image row ${img.id}` + "`" + ` } }, 500);
+    const resImg = await app.request(` + "`" + `/api/sake_images/${img.id}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+    if (resImg.status !== 200 && resImg.status !== 404) {
+      return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image row ${img.id}` + "`" + ` } }, 500);
+    }
   }
 
   await c.env.DB.prepare('DELETE FROM "record_tags" WHERE sake_record_id = ?').bind(recordId).run();
 
-  let parentOk = false;
-  try {
-    const resParent = await fetch(` + "`" + `${urlOrigin}/api/sake_records/${recordId}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } });
-    if (resParent.status === 200 || resParent.status === 404) parentOk = true;
-  } catch (e) {
-    await c.env.DB.prepare('DELETE FROM "sake_records" WHERE id = ?').bind(recordId).run();
-    parentOk = true;
-  }
-
-  if (parentOk) {
+  const resParent = await app.request(` + "`" + `/api/sake_records/${recordId}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+  if (resParent.status === 200 || resParent.status === 404) {
     return c.json({ data: { deleted: true, id: Number(recordId) } }, 200);
   }
-  return c.json({ error: { code: 'PARENT_DELETE_FAILED', message: 'failed to delete parent sake record' } }, 500);
+  return c.json({ error: { code: 'PARENT_DELETE_FAILED', message: 'failed to delete parent sake record' } }, resParent.status);
 });
 `
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(indexTS), 0644)
@@ -261,7 +234,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log("\n=== STEP 4: Testing Delete Orchestration (image_key & thumbnail_key Session HTTP API) ===");
+  console.log("\n=== STEP 4: Testing Delete Orchestration (Strict Pure Session HTTP API) ===");
   const now = new Date().toISOString();
   const user1Token = "sess_user_101";
   const user2Token = "sess_user_102";
@@ -269,7 +242,7 @@ async function run() {
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user1Token + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
   await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user2Token + "', " + migratedUser2.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
 
-  // 1) Cross-user Forbidden (User 2 calling orchestrate-delete on User 1's record)
+  // 1) Cross-user Forbidden
   const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user2Token }
   });
