@@ -349,8 +349,8 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	if !ok || tagEmbed == nil {
 		t.Fatalf("expected embedded tag object, got: %v", row["tag"])
 	}
-	if tagEmbed["name"] != "Refresh Fruity" {
-		t.Errorf("expected tag name 'Refresh Fruity', got %v", tagEmbed["name"])
+	if tagEmbed["label"] != "Refresh Fruity" {
+		t.Errorf("expected tag label 'Refresh Fruity', got %v", tagEmbed["label"])
 	}
 
 	sakeEmbed, ok := row["sake_record"].(map[string]any)
@@ -382,8 +382,8 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	if !ok || detTag == nil {
 		t.Fatalf("expected detail embedded tag object, got: %v", detailEnv.Data["tag"])
 	}
-	if detTag["name"] != "Refresh Fruity" {
-		t.Errorf("expected detail tag name 'Refresh Fruity', got %v", detTag["name"])
+	if detTag["label"] != "Refresh Fruity" {
+		t.Errorf("expected detail tag label 'Refresh Fruity', got %v", detTag["label"])
 	}
 
 	// 5. Test SSR HTML View GET /view/record_tags?include=tag
