@@ -38,7 +38,7 @@ export async function onRequestDelete(context: { request: Request; params: { id:
   const childImages = images.results || [];
 
   // 4. Sequential Child Images Deletion via HTTP API endpoints
-  const urlOrigin = new URL(request.url).origin;
+  const urlOrigin = new URL(request.url).origin.replace('localhost', '127.0.0.1');
   for (const img of childImages) {
     // Step A1: Delete Original R2 Blob via HTTP API DELETE /api/sake_images/{id}/blob/image_key with session cookie
     if (img.image_key) {
