@@ -51,7 +51,7 @@ app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
   const images = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE record_id = ?').bind(recordId).all();
   const childImages = images.results || [];
 
-  const urlOrigin = new URL(c.req.url).origin;
+  const urlOrigin = new URL(c.req.url).origin.replace('localhost', '127.0.0.1');
   for (const img of childImages) {
     if (img.image_key) {
       const resBlob = await fetch(` + "`" + `${urlOrigin}/api/sake_images/${img.id}/blob/image_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } });
