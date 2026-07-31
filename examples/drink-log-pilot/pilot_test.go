@@ -285,7 +285,16 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed creating User: %v", err)
 	}
-	userID := user["id"]
+	userIDRaw := user["id"]
+	var targetUserID int64
+	switch v := userIDRaw.(type) {
+	case int64:
+		targetUserID = v
+	case float64:
+		targetUserID = int64(v)
+	case int:
+		targetUserID = int64(v)
+	}
 
 	tag, err := app.CreateRecord(ctx, "Tag", map[string]any{
 		"tag_group": "taste",
@@ -301,7 +310,7 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 		"consumed_date": "2026-07-28T12:00:00Z",
 		"rating":        4.8,
 		"notes":         "Smooth & aromatic",
-		"owner_id":      userID,
+		"owner_id":      targetUserID,
 	})
 	if err != nil {
 		t.Fatalf("failed creating SakeRecord: %v", err)
@@ -318,7 +327,7 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	}
 	recTagID := recTag["id"]
 
-	cookieVal, _, err := app.IssueSessionForUser(ctx, 100, "user")
+	cookieVal, _, err := app.IssueSessionForUser(ctx, targetUserID, "user")
 	if err != nil {
 		t.Fatalf("failed IssueSessionForUser: %v", err)
 	}
