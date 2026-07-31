@@ -1,6 +1,6 @@
 resource:
-  name: Tag
-  table: tags
+  name: SakeImage
+  table: sake_images
   timestamps: true
   soft_delete: false
 
@@ -10,42 +10,38 @@ fields:
     nullable: true
     constraints:
       unique: true
-  - name: slug
-    type: string
-    nullable: true
-    constraints:
-      unique: true
   - name: owner_id
     type: int
+    nullable: false
+  - name: record_id
+    type: int
+    nullable: false
+  - name: image_key
+    type: blob
     nullable: true
-  - name: drink_type
+  - name: thumbnail_key
+    type: blob
+    nullable: true
+  - name: mime_type
     type: string
     nullable: false
-    default: "sake"
-  - name: tag_group
-    type: enum
-    nullable: false
-    constraints:
-      values: ["taste", "aroma", "mood"]
-  - name: label
+  - name: file_name
     type: string
     nullable: false
-    constraints:
-      min_length: 1
-  - name: is_default
-    type: bool
+  - name: display_order
+    type: int
     nullable: false
-    default: false
-
-constraints:
-  unique_together:
-    - [owner_id, drink_type, tag_group, label]
+    default: 0
 
 relations:
   - name: owner
     kind: belongs_to
     target: User
     foreign_key: owner_id
+  - name: record
+    kind: belongs_to
+    target: SakeRecord
+    foreign_key: record_id
 
 auth:
   ownership_field: owner_id

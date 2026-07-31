@@ -2,7 +2,7 @@ resource:
   name: RecordTag
   table: record_tags
   timestamps: true
-  soft_delete: true
+  soft_delete: false
 
 fields:
   - name: sake_record_id

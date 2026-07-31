@@ -2,24 +2,110 @@ resource:
   name: SakeRecord
   table: sake_records
   timestamps: true
-  soft_delete: true
+  soft_delete: false
 
 fields:
-  - name: name
+  - name: legacy_id
     type: string
-    nullable: false
-  - name: consumed_date
-    type: datetime
-    nullable: false
-  - name: rating
-    type: float
     nullable: true
-  - name: notes
-    type: text
-    nullable: true
+    constraints:
+      unique: true
   - name: owner_id
     type: int
     nullable: false
+  - name: drink_type
+    type: string
+    nullable: false
+    default: "sake"
+  - name: name
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+  - name: region
+    type: string
+    nullable: true
+  - name: brewery
+    type: string
+    nullable: true
+  - name: rice
+    type: string
+    nullable: true
+  - name: sake_type
+    type: string
+    nullable: true
+  - name: sake_meter_value
+    type: string
+    nullable: true
+  - name: abv
+    type: string
+    nullable: true
+  - name: volume
+    type: string
+    nullable: true
+  - name: price
+    type: string
+    nullable: true
+  - name: one_line_note
+    type: text
+    nullable: true
+  - name: place
+    type: string
+    nullable: true
+  - name: companions
+    type: string
+    nullable: true
+  - name: food_pairing
+    type: string
+    nullable: true
+  - name: consumed_date
+    type: datetime
+    nullable: false
+  - name: drink_again
+    type: enum
+    nullable: true
+    constraints:
+      values: ["no", "unsure", "yes"]
+  - name: sweet_dry
+    type: int
+    nullable: true
+    constraints:
+      min: 1
+      max: 5
+  - name: aroma_intensity
+    type: int
+    nullable: true
+    constraints:
+      min: 1
+      max: 3
+  - name: acidity
+    type: int
+    nullable: true
+    constraints:
+      min: 1
+      max: 3
+  - name: clean_umami
+    type: int
+    nullable: true
+    constraints:
+      min: 1
+      max: 3
+
+relations:
+  - name: owner
+    kind: belongs_to
+    target: User
+    foreign_key: owner_id
+  - name: images
+    kind: has_many
+    target: SakeImage
+    foreign_key: record_id
+    on_delete: restrict
+  - name: record_tags
+    kind: has_many
+    target: RecordTag
+    foreign_key: sake_record_id
+    on_delete: restrict
 
 auth:
   ownership_field: owner_id

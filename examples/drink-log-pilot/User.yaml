@@ -2,17 +2,31 @@ resource:
   name: User
   table: users
   timestamps: true
-  soft_delete: true
+  soft_delete: false
 
 fields:
-  - name: email
-    type: email
+  - name: legacy_id
+    type: string
     nullable: true
+    constraints:
+      unique: true
   - name: provider
     type: string
     nullable: false
   - name: provider_user_id
     type: string
+    nullable: false
+  - name: email
+    type: email
+    nullable: true
+  - name: display_name
+    type: string
+    nullable: true
+  - name: avatar_url
+    type: url
+    nullable: true
+  - name: last_login_at
+    type: datetime
     nullable: false
   - name: role
     type: enum
