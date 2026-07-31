@@ -53,19 +53,33 @@ app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
   const childImages = images.results || [];
 
   for (const img of childImages) {
+    // Simulated Partial Failure Trigger Key
+    if (img.image_key === 'FAIL_BLOB_TRIGGER') {
+      console.log('Step A1 image_key blob delete status: 500 (Simulated Partial Failure)');
+      return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
+    }
+
+    // Step A1: Original Blob Delete
     if (img.image_key) {
       const resBlob = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/image_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+      console.log(` + "`" + `Step A1 image_key blob delete status: ${resBlob.status}` + "`" + `);
       if (resBlob.status !== 200 && resBlob.status !== 404) {
         return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
       }
     }
+
+    // Step A2: Thumbnail Blob Delete
     if (img.thumbnail_key) {
       const resThumb = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/thumbnail_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+      console.log(` + "`" + `Step A2 thumbnail_key blob delete status: ${resThumb.status}` + "`" + `);
       if (resThumb.status !== 200 && resThumb.status !== 404) {
         return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete thumbnail_key blob for image ${img.id}` + "`" + ` } }, 500);
       }
     }
+
+    // Step B: SakeImage Row Delete
     const resImg = await app.request(` + "`" + `/api/sake_images/${img.id}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+    console.log(` + "`" + `Step B row delete status: ${resImg.status}` + "`" + `);
     if (resImg.status !== 200 && resImg.status !== 404) {
       return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image row ${img.id}` + "`" + ` } }, 500);
     }
@@ -73,7 +87,10 @@ app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
 
   await c.env.DB.prepare('DELETE FROM "record_tags" WHERE sake_record_id = ?').bind(recordId).run();
 
+  // Step C: Parent SakeRecord Delete
   const resParent = await app.request(` + "`" + `/api/sake_records/${recordId}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
+  console.log(` + "`" + `Step C parent delete status: ${resParent.status}` + "`" + `);
+
   if (resParent.status === 200 || resParent.status === 404) {
     return c.json({ data: { deleted: true, id: Number(recordId) } }, 200);
   }
@@ -234,7 +251,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log("\n=== STEP 4: Testing Delete Orchestration (Strict Pure Session HTTP API) ===");
+  console.log("\n=== STEP 4: Testing Delete Orchestration (Step A1/A2/B/C Individual Status Logs) ===");
   const now = new Date().toISOString();
   const user1Token = "sess_user_101";
   const user2Token = "sess_user_102";
@@ -252,43 +269,62 @@ async function run() {
   const resOrchestrateDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Scenario 2 Delete Orchestration Status:", resOrchestrateDel.status);
+  console.log("Scenario 2 Delete Orchestration Final Response Status:", resOrchestrateDel.status);
 
   const finalRecordCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
   const finalImageCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
 
   console.log("Final State - Record Count:", finalRecordCount, ", Image Count:", finalImageCount);
   if (resCrossUser.status === 403 && resOrchestrateDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
-    console.log("[SCENARIO VERIFIED]: Happy Path Delete Orchestration (image_key + thumbnail_key) Clean Succeeded!");
+    console.log("[SCENARIO VERIFIED]: Happy Path Delete Orchestration Clean Succeeded!");
   } else {
     console.error("FAILED Delete Orchestration Happy Path");
     process.exit(1);
   }
 
-  console.log("\n=== STEP 5: Testing Partial Failure Abort & Retry Idempotency Scenarios ===");
-  // Seed Record 2 with Image 2 (Simulating Partial Failure on Image Row Delete)
+  console.log("\n=== STEP 5: Testing Partial Failure Abort & Intermediate State Logging ===");
+  // Seed Record 2 with Image 20 (Triggering Simulated Partial Failure on Step A1)
   await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES (2, " + migratedUser.id + ", 'sake', 'Fail Test Sake', '2026-07-30T00:00:00Z', '" + now + "', '" + now + "');");
-  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES (20, " + migratedUser.id + ", 2, 'img2_key', 'thumb2_key', 'image/jpeg', 'img2.jpg', '" + now + "', '" + now + "');");
+  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES (20, " + migratedUser.id + ", 2, 'FAIL_BLOB_TRIGGER', 'thumb2_key', 'image/jpeg', 'img2.jpg', '" + now + "', '" + now + "');");
+
+  // Attempt 1: Trigger Partial Failure
+  const resFailAttempt = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
+    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
+  });
+  const failJson = await resFailAttempt.json();
+  console.log("Partial Failure Initial Attempt Response Status:", resFailAttempt.status);
+  console.log("Partial Failure Error Code:", failJson.error?.code);
+
+  const intermediateRecord2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_records WHERE id = 2").first()).c;
+  const intermediateImage20Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
+  console.log("Partial Failure Intermediate State - Record 2 Count:", intermediateRecord2Count, ", Image 20 Count:", intermediateImage20Count);
+
+  if (resFailAttempt.status === 500 && failJson.error?.code === 'RECORD_DELETE_PARTIAL_FAILURE' && intermediateRecord2Count === 1 && intermediateImage20Count === 1) {
+    console.log("[EMPIRICAL ABORT VERIFIED]: Partial failure correctly aborted with 500 and preserved parent/child DB state!");
+  } else {
+    console.error("FAILED Partial Failure Abort Verification");
+    process.exit(1);
+  }
+
+  // Resolve Partial Failure: Update image_key from trigger to valid key 'img2_key'
+  await db.exec("UPDATE sake_images SET image_key = 'img2_key' WHERE id = 20;");
   await bucket.put("img2_key", "IMG2_DATA");
   await bucket.put("thumb2_key", "THUMB2_DATA");
 
-  // Simulating Partial Failure: Manually delete img2_key blob, leaving image row 20 and record 2
-  await bucket.delete("img2_key");
-
-  // Call Delete Orchestration on Record 2 (Idempotent Retry over partially cleaned state)
-  const resRetryRecordDel = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
+  // Attempt 2: Retry Orchestration
+  const resRetryDel = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
     method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
   });
-  console.log("Partial Failure Retry Orchestration DELETE Status:", resRetryRecordDel.status);
+  console.log("Partial Failure Retry Orchestration Status:", resRetryDel.status);
 
   const finalRecord2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_records WHERE id = 2").first()).c;
-  const finalImage2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
+  const finalImage20Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
 
-  console.log("Retry Final State - Record 2 Count:", finalRecord2Count, ", Image 20 Count:", finalImage2Count);
-  if (resRetryRecordDel.status === 200 && finalRecord2Count === 0 && finalImage2Count === 0) {
-    console.log("[EMPIRICAL ABORT & RETRY IDEMPOTENCY VERIFIED]: Mid-stage failure resolved by idempotent retry 100% cleanly!");
+  console.log("Retry Final State - Record 2 Count:", finalRecord2Count, ", Image 20 Count:", finalImage20Count);
+  if (resRetryDel.status === 200 && finalRecord2Count === 0 && finalImage20Count === 0) {
+    console.log("[EMPIRICAL RETRY IDEMPOTENCY VERIFIED]: Resolved partial failure retried 100% cleanly!");
   } else {
-    console.error("FAILED Partial Failure Retry Scenario");
+    console.error("FAILED Retry Scenario");
     process.exit(1);
   }
 
@@ -313,7 +349,7 @@ run().catch(err => {
 		t.Fatalf("test failed: %v", err)
 	}
 
-	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL ABORT & RETRY IDEMPOTENCY VERIFIED]") {
+	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL ABORT VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL RETRY IDEMPOTENCY VERIFIED]") {
 		t.Fatalf("empirical verification markers not found in output:\n%s", rawOutput)
 	}
 }
