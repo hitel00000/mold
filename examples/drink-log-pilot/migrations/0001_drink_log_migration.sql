@@ -7,7 +7,7 @@ PRAGMA foreign_keys = OFF;
 BEGIN TRANSACTION;
 
 -- ============================================================================
--- 1. STEP 1: Create users_new and Map Data
+-- 1. STEP 1: users Table Migration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_user_map" (
     "old_id" TEXT PRIMARY KEY,
@@ -38,9 +38,12 @@ SELECT "legacy_id", "id" FROM "users_new";
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_provider_provider_user_id_unique" ON "users_new"("provider", "provider_user_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_legacy_id_unique" ON "users_new"("legacy_id");
 
+DROP TABLE IF EXISTS "users";
+ALTER TABLE "users_new" RENAME TO "users";
+
 
 -- ============================================================================
--- 2. STEP 2: Create tags_new and Map Data
+-- 2. STEP 2: tags Table Migration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_tag_map" (
     "old_id" TEXT PRIMARY KEY,
@@ -83,9 +86,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_owner_id_drink_type_tag_group_label_
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_slug_unique" ON "tags_new"("slug");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_tags_legacy_id_unique" ON "tags_new"("legacy_id");
 
+DROP TABLE IF EXISTS "tags";
+ALTER TABLE "tags_new" RENAME TO "tags";
+
 
 -- ============================================================================
--- 3. STEP 3: Create sake_records_new and Map Data
+-- 3. STEP 3: sake_records Table Migration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "_tmp_sake_map" (
     "old_id" TEXT PRIMARY KEY,
@@ -107,6 +113,8 @@ CREATE TABLE IF NOT EXISTS "sake_records_new" (
     "volume" TEXT,
     "price" TEXT,
     "one_line_note" TEXT,
+    "notes" TEXT,
+    "rating" REAL,
     "place" TEXT,
     "companions" TEXT,
     "food_pairing" TEXT,
@@ -123,13 +131,13 @@ CREATE TABLE IF NOT EXISTS "sake_records_new" (
 
 INSERT INTO "sake_records_new" (
     "legacy_id", "owner_id", "drink_type", "name", "region", "brewery", "rice", "sake_type",
-    "sake_meter_value", "abv", "volume", "price", "one_line_note", "place", "companions",
+    "sake_meter_value", "abv", "volume", "price", "one_line_note", "notes", "rating", "place", "companions",
     "food_pairing", "consumed_date", "drink_again", "sweet_dry", "aroma_intensity", "acidity",
     "clean_umami", "created_at", "updated_at"
 )
 SELECT 
     r."id", u."new_id", COALESCE(r."drink_type", 'sake'), r."name", r."region", r."brewery", r."rice", r."sake_type",
-    r."sake_meter_value", r."abv", r."volume", r."price", r."one_line_note", r."place", r."companions",
+    r."sake_meter_value", r."abv", r."volume", r."price", r."one_line_note", NULL, NULL, r."place", r."companions",
     r."food_pairing", r."consumed_date", r."drink_again", r."sweet_dry", r."aroma_intensity", r."acidity",
     r."clean_umami", r."created_at", COALESCE(r."updated_at", r."created_at")
 FROM "sake_records" r
@@ -141,9 +149,12 @@ SELECT "legacy_id", "id" FROM "sake_records_new";
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sake_records_legacy_id_unique" ON "sake_records_new"("legacy_id");
 
+DROP TABLE IF EXISTS "sake_records";
+ALTER TABLE "sake_records_new" RENAME TO "sake_records";
+
 
 -- ============================================================================
--- 4. STEP 4: Create sake_images_new and Map Data
+-- 4. STEP 4: sake_images Table Migration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "sake_images_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,9 +184,12 @@ ORDER BY i."created_at" ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sake_images_legacy_id_unique" ON "sake_images_new"("legacy_id");
 
+DROP TABLE IF EXISTS "sake_images";
+ALTER TABLE "sake_images_new" RENAME TO "sake_images";
+
 
 -- ============================================================================
--- 5. STEP 5: Create record_tags_new and Map Data
+-- 5. STEP 5: record_tags Table Migration
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS "record_tags_new" (
     "id" INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,24 +211,15 @@ ORDER BY rt."created_at" ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_record_tags_sake_record_id_tag_id_unique" ON "record_tags_new"("sake_record_id", "tag_id");
 
-
--- ============================================================================
--- 6. STEP 6: Drop Legacy Tables in Reverse Dependency Order & Rename New Tables
--- ============================================================================
 DROP TABLE IF EXISTS "record_tags";
-DROP TABLE IF EXISTS "sake_images";
-DROP TABLE IF EXISTS "sake_records";
-DROP TABLE IF EXISTS "tags";
-DROP TABLE IF EXISTS "users";
-DROP TABLE IF EXISTS "oauth_sessions";
-
-ALTER TABLE "users_new" RENAME TO "users";
-ALTER TABLE "tags_new" RENAME TO "tags";
-ALTER TABLE "sake_records_new" RENAME TO "sake_records";
-ALTER TABLE "sake_images_new" RENAME TO "sake_images";
 ALTER TABLE "record_tags_new" RENAME TO "record_tags";
 
--- Mold Session Table initialization
+
+-- ============================================================================
+-- 6. STEP 6: Invalidate OAuth Sessions & Cleanup Mapping Tables
+-- ============================================================================
+DROP TABLE IF EXISTS "oauth_sessions";
+
 CREATE TABLE IF NOT EXISTS "_mold_sessions" (
     "id" TEXT PRIMARY KEY,
     "user_id" INTEGER NOT NULL,
@@ -223,7 +228,6 @@ CREATE TABLE IF NOT EXISTS "_mold_sessions" (
     FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE
 );
 
--- Drop Temporary Mapping Tables
 DROP TABLE IF EXISTS "_tmp_user_map";
 DROP TABLE IF EXISTS "_tmp_tag_map";
 DROP TABLE IF EXISTS "_tmp_sake_map";

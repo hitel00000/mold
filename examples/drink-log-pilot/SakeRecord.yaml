@@ -49,6 +49,12 @@ fields:
   - name: one_line_note
     type: text
     nullable: true
+  - name: notes
+    type: text
+    nullable: true
+  - name: rating
+    type: float
+    nullable: true
   - name: place
     type: string
     nullable: true
