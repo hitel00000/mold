@@ -274,3 +274,62 @@
 - [x] **Task 6.2 [독립 bugfix]: Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 버그 픽스**
   - **커밋**: `9d74c02` (`fix(codegen/cloudflare): enforce on_delete restrict at D1 DDL level`)
   - **작업 내용**: `codegen/cloudflare/generator.go`에서 Cloudflare D1 DDL 생성 시 `FOREIGN KEY ... ON DELETE RESTRICT` 구문이 누락되어 있던 기존 패리티 버그(drink-log 이관과 독립된 Cloudflare Target 코어 버그)를 포착하여 DB 레벨에서 `RESTRICT`를 명시적으로 강제하도록 수정 및 검증 완결.
+
+### Phase 7: `getting-started.md` 튜토리얼 실측 중 발견된 마찰 (Field-level 권한/서버 강제 필드 부재)
+
+- [ ] **Task 7.1: [실험] Field-level 권한 부재로 인한 privilege escalation 패턴 실증 및 IR 확장 여부 판정**
+  - **배경**: `docs/getting-started.md` 튜토리얼을 직접 따라 하며 테스트 계정을 만들던 중,
+    `User.role`과 `Post.author_id` 두 곳에서 동일한 패턴의 구멍을 발견함. 둘 다
+    "클라이언트가 이 필드에 값을 넣으면 서버가 그대로 믿는다"는 문제이며,
+    `docs/ir-spec.md` 5절 "Field 단위 권한은 1차 스코프에서 제외" 결정과 직접 연결됨.
+  - **관찰된 마찰 2건**:
+    1. `User.role` + `permissions.create: public`: 누구나 `{"role": "admin"}`을
+       직접 보내 관리자 계정 생성 가능. 임시 조치로 `create: role:admin` + 별도
+       `/signup` glue 핸들러(role 서버 고정)로 우회함.
+    2. `Post.author_id` + `permissions.create: authenticated`: owner 체크는
+       update/delete에만 있고 create에는 없어서, 로그인한 사용자가 임의의
+       `author_id`를 넣어 남의 이름으로 글 작성 가능. `/posts/create` glue
+       핸들러로 우회 시도했으나, 일반 `POST /api/posts` 경로 자체를 막지 않는 한
+       완전히 닫히지 않음(View의 기본 Create 폼이 `/api/{table}`로 직접 제출하는
+       구조라 `TemplateOverrides`로 폼 action까지 같이 바꿔야 함).
+  - **실험 내용**: `unique_together`/Nullable Ownership 때처럼, 이 패턴이
+    실제로 3번째 이상 반복 관찰되면(예: 향후 다른 owner-field 리소스에서도
+    동일 이슈 재현) IR에 "서버 강제 필드"(가칭 `server_managed: true` 또는
+    `auth.ownership_field`의 create-time 자동 주입) 개념을 추가할지 검토한다.
+  - **채택 조건**: 3개 이상의 서로 다른 Resource/필드에서 이 패턴이 재현되고,
+    매번 glue 핸들러로 우회하는 비용이 IR 확장 비용보다 커질 때.
+  - **기각 조건**: glue 핸들러 패턴(signup, `/posts/create`와 동일한 방식)으로도
+    충분히 감당 가능하다고 판단될 때 — 마세라티 원칙에 따라 미해결 상태로 백로그
+    유지.
+  - **완료 조건**: 최소 하나의 명시적 판정(채택/기각)과, 기각 시 "glue 핸들러 패턴"을
+    `docs/resource-guide.md`에 공식 Good/Bad 패턴(패턴 7)으로 등재.
+
+- [ ] **Task 7.2: 세션 사용자 조회 Escape Hatch 부재 (`IssueSessionForUser`의 반대 방향)**
+  - **배경**: Task 7.1의 glue 핸들러(`/posts/create`)를 작성하려면 `*http.Request`에서
+    현재 세션의 user id를 읽어야 하는데, `runtime.App`/`auth` 패키지에 이를 위한
+    공개 API가 문서상 확인되지 않음 (`IssueSessionForUser`는 발급 방향만 존재,
+    Task 5.3).
+  - **완료 조건**: `runtime.App`에 `SessionUser(r *http.Request) (userID int64, role string, ok bool)`
+    (또는 동등한) 공개 메서드 추가 여부를 판정하고, 채택 시 `examples/quickstart/main_with_signup.go.txt`의
+    `sessionUserIDFromRequest` 스텁을 실제 구현으로 교체.
+
+- [ ] **Task 7.3: 로그인 폼 라벨 "username" → "email" 정정 (또는 TemplateOverrides 지원 확인)**
+  - **배경**: Mold의 로그인 메커니즘은 내부적으로 항상 `email` 필드를 조회 키로
+    쓰지만(`cmd/mvp_e2e_test.go`의 `loginForm.Set("username", "admin@mold.dev")`),
+    기본 로그인 템플릿의 라벨 텍스트는 "Username"으로 고정되어 있어 실사용 시
+    혼동을 유발함.
+  - **확인 필요 사항**: `view/templates.go`의 login 템플릿이 `view.TemplateOverrides`의
+    `SetCustomTemplateString(table, "login", tplStr)`으로 오버라이드 가능한지
+    (Milestone 6 회고에 `login`이 독립 템플릿 트리로 격리되어 있다는 기록은 있으나,
+    어떤 `table` 키로 등록되는지는 미확인).
+  - **완료 조건**: 오버라이드 가능하면 별도 코드 변경 없이 문서에 사용법만 추가.
+    불가능하면 기본 템플릿 라벨 텍스트 자체를 "Email"로 수정 (1줄 변경, 회귀 위험 낮음).
+
+- [ ] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화**
+  - **배경**: `AGENTS.md`에 이미 확정된 정책(destructive-only migration)이라
+    코어 변경 대상은 아니지만, `getting-started.md` 튜토리얼을 따라 하다가
+    필드 추가 후 `table posts has no column named author_id` 에러로 막히는
+    사람이 나올 것으로 예상됨 (실제로 이번 세션에서 재현됨).
+  - **완료 조건**: `docs/getting-started.md`에 "필드를 추가했는데 컬럼이 없다는
+    에러가 나면?" FAQ/트러블슈팅 섹션을 추가하여, DB 파일 삭제 또는
+    `schema_version` 증가 두 가지 선택지와 각각의 트레이드오프(데이터 손실)를 명시.
