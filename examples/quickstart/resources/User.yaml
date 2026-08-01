@@ -1,0 +1,40 @@
+resource:
+  name: User
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: email
+    type: email
+    nullable: false
+    constraints:
+      unique: true
+
+  - name: password
+    type: password
+    nullable: false
+    constraints:
+      min_length: 8
+
+  - name: name
+    type: string
+    nullable: false
+
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    constraints:
+      values: ["admin", "user"]
+
+auth:
+  # create를 public으로 열면, role 필드가 fields에 있는 한 field-level
+  # permission이 없는 현재 IR 스펙(docs/ir-spec.md 5절)에서는 누구나
+  # {"role": "admin"} 을 직접 실어 보내 관리자 계정을 만들 수 있습니다.
+  # 회원가입은 일반 public REST create가 아니라, main.go의 /signup 핸들러처럼
+  # role을 서버가 강제로 고정하는 별도 glue 코드를 통해서만 받도록 합니다.
+  permissions:
+    create: role:admin
+    read: authenticated
+    update: owner
+    delete: role:admin

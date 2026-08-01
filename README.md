@@ -20,6 +20,8 @@ Mold는 **Resource 정의(YAML) 하나로 온라인 서비스의 기본 구조�
 
 ## 2. 빠른 예시 (Quick Example)
 
+> 실제로 손으로 따라 해보고 싶다면 → [docs/getting-started.md](docs/getting-started.md)
+
 아래의 `Post.yaml` 하나만 작성하면, 백엔드 코드 수정 0줄로 모든 CRUD API, 데이터베이스 테이블, HTML 관리 UI가 즉시 생성되어 동작합니다.
 
 ```yaml
@@ -51,3 +53,5 @@ Mold는 문서를 최소한으로 유지하며, 각 문서의 역할이 엄격�
 * **[AGENTS.md](AGENTS.md)**: AI 에이전트와 사람이 함께 일할 때 준수해야 할 작업 규약
 * **[docs/ir-spec.md](docs/ir-spec.md)**: Resource IR의 강타입 구조체 명세 및 검증 규칙
 * **[docs/resource-guide.md](docs/resource-guide.md)**: Resource YAML 작성 가이드 및 Good/Bad 패턴 대조표
+* **[docs/getting-started.md](docs/getting-started.md)**: 처음 써보는 사람을 위한 5분 튜토리얼
+* **[docs/targets/cloudflare.md](docs/targets/cloudflare.md)**: 이미 Cloudflare에 배포된 서비스를 이관하는 방법
