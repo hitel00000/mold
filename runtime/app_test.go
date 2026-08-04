@@ -322,3 +322,123 @@ auth:
 	}
 }
 
+func TestApp_SessionUser(t *testing.T) {
+	docYAML := `
+resource:
+  name: Post
+  table: posts
+fields:
+  - name: title
+    type: string
+  - name: author_id
+    type: int
+auth:
+  ownership_field: author_id
+  permissions:
+    create: authenticated
+    read: public
+    update: owner
+    delete: owner
+`
+	resDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(resDir, "Post.yaml"), []byte(docYAML), 0644); err != nil {
+		t.Fatalf("failed writing Post.yaml: %v", err)
+	}
+
+	cfg := runtime.Config{
+		ResourceDir: resDir,
+		DBPath:      filepath.Join(t.TempDir(), "session_user_test.db"),
+	}
+	app, err := runtime.New(cfg)
+	if err != nil {
+		t.Fatalf("failed building app: %v", err)
+	}
+	defer app.Close()
+
+	ctx := t.Context()
+
+	// 1. Issue session cookie for user 501 with role "user"
+	cookieVal501, _, err := app.IssueSessionForUser(ctx, 501, "user")
+	if err != nil {
+		t.Fatalf("failed IssueSessionForUser: %v", err)
+	}
+
+	// 2. Issue session cookie for admin user 999 with role "admin"
+	cookieVal999, _, err := app.IssueSessionForUser(ctx, 999, "admin")
+	if err != nil {
+		t.Fatalf("failed IssueSessionForUser for admin: %v", err)
+	}
+
+	t.Run("success path with valid session cookie (user 501)", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/posts", nil)
+		req.Header.Set("Cookie", cookieVal501)
+
+		// ServeHTTP to verify normal HTTP handling
+		w := httptest.NewRecorder()
+		app.ServeHTTP(w, req)
+
+		userID, role, ok := app.SessionUser(req)
+		if !ok {
+			t.Fatalf("expected SessionUser ok == true for valid session cookie, got false")
+		}
+		if userID != 501 {
+			t.Errorf("expected userID 501, got %d", userID)
+		}
+		if role != "user" {
+			t.Errorf("expected role 'user', got %s", role)
+		}
+	})
+
+	t.Run("success path with valid admin session cookie (admin 999)", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodPost, "/posts/create", strings.NewReader(`{"title":"Glue Post"}`))
+		req.Header.Set("Cookie", cookieVal999)
+
+		userID, role, ok := app.SessionUser(req)
+		if !ok {
+			t.Fatalf("expected SessionUser ok == true for admin session, got false")
+		}
+		if userID != 999 {
+			t.Errorf("expected userID 999, got %d", userID)
+		}
+		if role != "admin" {
+			t.Errorf("expected role 'admin', got %s", role)
+		}
+	})
+
+	t.Run("unauthenticated request (no cookie)", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/posts", nil)
+
+		userID, role, ok := app.SessionUser(req)
+		if ok {
+			t.Errorf("expected ok == false for unauthenticated request, got true (userID: %d, role: %s)", userID, role)
+		}
+		if userID != 0 || role != "" {
+			t.Errorf("expected zero values for unauthenticated request, got userID=%d, role=%s", userID, role)
+		}
+	})
+
+	t.Run("invalid / malformed session cookie", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/posts", nil)
+		req.Header.Set("Cookie", "_mold_session=invalid_token_9999999999")
+
+		userID, role, ok := app.SessionUser(req)
+		if ok {
+			t.Errorf("expected ok == false for invalid session cookie, got true (userID: %d, role: %s)", userID, role)
+		}
+	})
+
+	t.Run("nil request or app handles gracefully", func(t *testing.T) {
+		userID, role, ok := app.SessionUser(nil)
+		if ok || userID != 0 || role != "" {
+			t.Errorf("expected SessionUser(nil) to return (0, '', false)")
+		}
+
+		dummyReq, _ := http.NewRequest(http.MethodGet, "/", nil)
+		var nilApp *runtime.App
+		userID, role, ok = nilApp.SessionUser(dummyReq)
+		if ok || userID != 0 || role != "" {
+			t.Errorf("expected nilApp.SessionUser to return (0, '', false)")
+		}
+	})
+}
+
