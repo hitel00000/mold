@@ -123,6 +123,19 @@ func (sm *SessionManager) GetSession(ctx context.Context, sessionID string) (*Se
 	return &sess, nil
 }
 
+// GetSessionFromRequest extracts the _mold_session cookie from the HTTP request and looks up the active Session.
+// Returns (nil, nil) if no session cookie exists or if the session has expired/is invalid.
+func (sm *SessionManager) GetSessionFromRequest(r *http.Request) (*Session, error) {
+	if sm == nil || r == nil {
+		return nil, nil
+	}
+	cookie, err := r.Cookie(SessionCookieName)
+	if err != nil || cookie == nil || cookie.Value == "" {
+		return nil, nil
+	}
+	return sm.GetSession(r.Context(), cookie.Value)
+}
+
 func (sm *SessionManager) DeleteSession(ctx context.Context, sessionID string) error {
 	deleteSQL := `DELETE FROM "_mold_sessions" WHERE "id" = ?;`
 	_, err := sm.db.ExecContext(ctx, deleteSQL, sessionID)

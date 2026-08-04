@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -245,5 +246,52 @@ func (a *App) IssueSessionForUser(ctx context.Context, userID int64, role string
 	cookieVal := fmt.Sprintf("%s=%s; Path=/; Expires=%s; Max-Age=%d; HttpOnly; Secure; SameSite=Lax",
 		auth.SessionCookieName, token, exp.UTC().Format(http.TimeFormat), maxAge)
 	return cookieVal, exp, nil
+}
+
+// SessionUser inspects the HTTP request's session cookie (_mold_session) and returns the authenticated user's ID and role.
+// This is the read-direction in-process Escape Hatch for application-level glue handlers (e.g. /posts/create, /signup)
+// to extract session identity and enforce server-side ownership fields.
+//
+// Signature & Return Values:
+// - (userID int64, role string, ok bool)
+// - Returns ok = false when the request is unauthenticated, the session cookie is missing/invalid/expired,
+//   or the user ID cannot be parsed as int64.
+// - Returns ok = true, userID, role when a valid active session exists.
+//
+// Security Rationale & Role Freshness:
+// - In-process API ONLY: This method is intentionally NOT registered as an HTTP router endpoint.
+//   It is invoked directly by trusted server-side Go handler code within the same process boundary.
+// - Session-Cached Role Resolution: Returns the role cached in the '_mold_sessions' table. This adheres to Mold's
+//   single-source-of-truth and vendor-independent identity design (supporting OAuth and non-local user sessions
+//   without mandatory table joins or unexpected DB schema couplings).
+func (a *App) SessionUser(r *http.Request) (userID int64, role string, ok bool) {
+	if a == nil || a.sessionMgr == nil || r == nil {
+		return 0, "", false
+	}
+
+	sess, err := a.sessionMgr.GetSessionFromRequest(r)
+	if err != nil || sess == nil {
+		return 0, "", false
+	}
+
+	var parsedID int64
+	switch v := sess.UserID.(type) {
+	case int64:
+		parsedID = v
+	case float64:
+		parsedID = int64(v)
+	case int:
+		parsedID = int64(v)
+	case string:
+		idVal, parseErr := strconv.ParseInt(v, 10, 64)
+		if parseErr != nil {
+			return 0, "", false
+		}
+		parsedID = idVal
+	default:
+		return 0, "", false
+	}
+
+	return parsedID, sess.Role, true
 }
 

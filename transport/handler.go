@@ -516,17 +516,7 @@ func isUniqueConstraintError(err error) bool {
 }
 
 func (rt *Router) extractSession(req *http.Request) *auth.Session {
-	if rt.sessionMgr == nil {
-		return nil
-	}
-	cookie, err := req.Cookie(auth.SessionCookieName)
-	if err != nil || cookie == nil || cookie.Value == "" {
-		return nil
-	}
-	sess, err := rt.sessionMgr.GetSession(req.Context(), cookie.Value)
-	if err != nil {
-		return nil
-	}
+	sess, _ := rt.sessionMgr.GetSessionFromRequest(req)
 	return sess
 }
 
