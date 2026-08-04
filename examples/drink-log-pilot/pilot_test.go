@@ -414,4 +414,64 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	}
 }
 
+// TestDrinkLogPilot_CREATE_OwnershipAutoInjection_HTTP demonstrates that POST /api/sake_records
+// auto-assigns owner_id from session user ID (501) and overrides client's forged owner_id (999).
+func TestDrinkLogPilot_CREATE_OwnershipAutoInjection_HTTP(t *testing.T) {
+	resDir := filepath.Join("..", "drink-log-pilot")
+	dbPath := filepath.Join(t.TempDir(), "pilot_autoinject.db")
+
+	app, err := runtime.New(runtime.Config{ResourceDir: resDir, DBPath: dbPath})
+	if err != nil {
+		t.Fatalf("failed initializing runtime App: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+	userRec, err := app.CreateRecord(ctx, "User", map[string]any{
+		"provider":         "google",
+		"provider_user_id": "g_user_501",
+		"email":            "user501@example.com",
+		"role":             "user",
+	})
+	if err != nil {
+		t.Fatalf("failed creating User record: %v", err)
+	}
+
+	userID := userRec["id"].(int64)
+
+	cookieVal, _, err := app.IssueSessionForUser(ctx, userID, "user")
+	if err != nil {
+		t.Fatalf("failed issuing session for user %d: %v", userID, err)
+	}
+
+	reqBody := fmt.Sprintf(`{"name":"Dassai 23","consumed_date":"2026-08-04T12:00:00Z","owner_id":999}`)
+	req, _ := http.NewRequest(http.MethodPost, "/api/sake_records", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookieVal)
+
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, req)
+
+	t.Logf("=== DRINK-LOG PILOT RAW HTTP REQUEST (owner_id forgery attempt) ===")
+	t.Logf("POST /api/sake_records HTTP/1.1\nCookie: %s\nContent-Type: application/json\n\n%s", cookieVal, reqBody)
+	t.Logf("=== DRINK-LOG PILOT RAW HTTP RESPONSE ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var res struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed decoding JSON: %v", err)
+	}
+
+	ownerIDVal, ok := res.Data["owner_id"]
+	if !ok || fmt.Sprintf("%v", ownerIDVal) != fmt.Sprintf("%v", userID) {
+		t.Errorf("expected owner_id to be auto-injected as %v, got: %v", userID, ownerIDVal)
+	}
+}
+
 

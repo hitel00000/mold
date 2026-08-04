@@ -1111,3 +1111,28 @@ run().catch(err => {
 		t.Fatalf("Miniflare test runner failed: %v", err)
 	}
 }
+
+// TestCloudflareGenerator_OwnershipAutoInjectionTS verifies that the generated Cloudflare TS Workers code
+// emits auto-injection of ownership_field from authUser on CREATE, ignoring client payload.
+func TestCloudflareGenerator_OwnershipAutoInjectionTS(t *testing.T) {
+	relResourceDir := filepath.Join("..", "..", "examples", "blog")
+	reg, err := resource.LoadAll(relResourceDir)
+	if err != nil {
+		t.Fatalf("failed loading blog IR: %v", err)
+	}
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	// Verify that generated TS for POST /api/posts contains ownership auto-injection
+	expectedSnippet := "if (authUser) {\n    body['author_id'] = authUser.id;\n  } else {\n    delete body['author_id'];\n  }"
+	if !strings.Contains(output.IndexTS, expectedSnippet) {
+		t.Fatalf("expected generated IndexTS to contain ownership auto-injection snippet:\n%s\ngot IndexTS:\n%s", expectedSnippet, output.IndexTS)
+	}
+
+	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS CODE SNIPPET (POST /api/posts) ===")
+	t.Logf("%s", expectedSnippet)
+}
