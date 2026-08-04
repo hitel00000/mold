@@ -297,8 +297,39 @@
     4. `examples/quickstart/`를 `basic/` (1~4절용, Post 단일) 및 `with-auth/` (5절용, User + signup + `app.SessionUser`) 서브디렉터리로 명확히 분리하고 `quickstart_test.go` E2E 실측 테스트 수립.
     5. `docs/getting-started.md` 튜토리얼 경로 및 `docs/resource-guide.md` 패턴 7 컴파일 가능 예제 코드 갱신.
 
-- [x] **Task 7.3: 로그인 폼 라벨 "Username" → "Email" 정정 완결**
-  - **작업 내용**: `view/templates.go` 내 기본 로그인 템플릿(`loginTemplate`)의 UI 라벨을 "Username" ➔ "Email"로 정정. `TemplateOverrides`는 리소스 테이블 전용이며 전역 login 템플릿 오버라이드 미지원함을 소스 독해(`renderLogin`)로 확인. `view/view_test.go`에 `TestViewHandler_RenderLogin_EmailLabel` 테스트 추가 및 PASS.
+- [ ] **Task 7.3: 로그인 폼 라벨 "username" → "email" 정정 (또는 TemplateOverrides 지원 확인)**
+  - **작업 내용**: 구현 및 테스트 작성 완료. 최종 리뷰어 승인 대기 중.
 
-- [x] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화 완결**
-  - **작업 내용**: `docs/getting-started.md`에 Section 5.2 (트러블슈팅 FAQ) 추가. DB 파일 삭제(Choice A) 및 `schema_version` 증가(Choice B - 대상 테이블만 DROP & CREATE, 타 테이블 레코드 보존) 2가지 선택지와 트레이드오프를 명시. `runtime/migration_troubleshooting_test.go`에 5대 실측 E2E 테스트(PROOF 1~5) 수립 및 PASS.
+- [ ] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화**
+  - **작업 내용**: 구현 및 트러블슈팅 FAQ 문서화 완료. 최종 리뷰어 승인 대기 중 (`migration_troubleshooting_test.go` assertion `&&`➔`||` 정정 보완 필요).
+
+### Phase 8: Ownership 자동 주입 및 Client-Writable 필드 차단 (Task 7.1 재검토)
+
+> Task 7.1(기각)에서 미처 검토하지 못했던 마찰 — glue 핸들러 전용 엔드포인트(`/signup`)가
+> 개발자 도구 없이는 접근 불가능해지는 UX 딜레마 — 이 실제로 관찰됨에 따라, field-level
+> 권한 문제를 두 개의 독립된 하위 문제(Task 8.1 / Task 8.2)로 재분리하여 등재한다.
+
+- [ ] **Task 8.1: Ownership Field CREATE-time 자동 주입 (IR 구조체 변경 없음)**
+  - **배경**: `auth.ownership_field`가 지정된 리소스의 CREATE 요청 시, 클라이언트가 payload에 소유권 필드 값을 실어 보내면 그대로 저장되는 문제가 Task 7.1에서 실증되었다 (Case 2: `Post.author_id`, Case 3: `SakeRecord.owner_id`).
+  - **제안 방향**: `auth/permission.go`의 role 필드 privilege escalation 가드와 동일한 시점에서, CREATE 액션 처리 시 `ownership_field` 값을 세션 사용자 ID로 **항상 서버가 덮어쓰도록** 확장한다. 클라이언트가 전송한 소유권 필드 값은 무시(또는 거부)한다.
+  - **기대 효과**: `Post.author_id` 위조가 REST API 레벨에서 원천 차단되어, 별도 `/posts/create` glue 핸들러 없이도 기본 `POST /api/{table}` 엔드포인트를 안전하게 노출할 수 있다.
+  - **완료 조건**:
+    - Task 7.1의 Case 2, Case 3 시나리오(타인 명의 레코드 생성 시도) 재실행 시 소유권 필드가 세션 유저 ID로 강제 덮어쓰여 위조가 불가능함을 raw HTTP 실측으로 입증.
+    - `ownership_field`가 지정되지 않은 기존 리소스 전체 회귀 없음 (`go test ./...` PASS).
+    - Cloudflare TS Codegen Target에도 동일한 소유권 자동 주입 패리티 반영 확인.
+  - **스코프 레벨**: `resource/ir.go`의 `Resource`/`Field` 구조체는 **변경하지 않는다** (기존 `ownership_field` 속성만 활용). IR 변경이 필요하다고 판단될 경우 코드를 먼저 작성하지 않고 보고할 것 (`AGENTS.md` 원칙 9).
+
+- [ ] **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**
+  - **배경**: `User.role`처럼 클라이언트가 절대 임의 지정할 수 없어야 하는 필드가 존재할 때, 현재는 (a) `permissions.create`를 좁게 잠가 기본 View 폼 자체를 닫거나, (b) `create: public`으로 열어 위험한 필드가 노출된 폼을 공개하는 두 가지 나쁜 선택지만 존재한다.
+  - **제안 방향**: 필드 단위 신규 속성(가칭 `client_writable: false`, 명칭은 설계 단계에서 재검토 가능)을 도입하여:
+    1. REST API 요청 payload에서 이 필드 입력을 무시 또는 거부.
+    2. 기본 View의 Create/Edit 폼 렌더링 시 해당 input 요소 배제.
+    3. `default` 값이 지정되어 있으면 해당 기본값 적용.
+  - **AGENTS.md 원칙 9 적용 (선 설계 후 구현)**: 이 작업은 `resource/ir.go` 및 `docs/ir-spec.md` 확장이 수반되므로 **코드를 작성하기 전에** 대안 옵션과 트레이드오프를 담은 브리핑 문서(`docs/tasks/client-writable-field-brief.md`)를 작성하여 승인을 받는다:
+    - `password` 타입의 응답 자동 은폐 특수 메커니즘과의 관계 정리
+    - Payload 입력 수신 시 "조용히 무시" vs "400 Bad Request 거부" 트레이드오프 비교
+    - 9개 Target (Go REST/View, Cloudflare TS Codegen 등) 영향성 전수 점검
+  - **완료 조건 (설계 단계)**:
+    - 옵션 A/B/C 설계 대안 및 트레이드오프 명시.
+    - `docs/philosophy.md` ⑦(마세라티 원칙) 및 `docs/ir-spec.md` 5절과의 정합성 판정.
+  - **의존 관계**: Task 8.1 완료 후 연속적으로 진행할 수 있으며, 두 Task가 결합되면 glue 핸들러 없이 기본 API만으로 완전한 보안과 UX를 제공할 수 있는지 최종 평가한다.

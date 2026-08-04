@@ -26,10 +26,8 @@
 **완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 (복합 Unique Constraint, N:M Join Resource, OAuth 세션발급 Escape Hatch, Nullable Ownership 패리티, List Owner 필터링, 관계 조인 조회 `?include=`) 완결, 및 **Phase 6 Task 6.1 `drink-log` 실제 프로덕션 이관 완결 (Option C INTEGER AUTOINCREMENT PK, R2 키 보존, `tags` `slug` + `unique_together` Idempotency, 5개 테이블 `soft_delete: true`, Delete Orchestration 세션 HTTP API Abort 계약, Miniflare E2E 6대 시나리오 100% PASS)**, **Task 6.2 [독립 bugfix] Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 픽스 완결**.  
 👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
 
-**추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` 작성 완료.
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
-**추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
-튜토리얼 검증(dogfooding) 중 발견된 마찰에 대해 **Phase 7 전수 완결 (Task 7.1 IR 확장 기각 & glue 패턴 채택, Task 7.2 SessionUser Escape Hatch, Task 7.3 Login Email 라벨 정정, Task 7.4 Destructive Migration FAQ 및 회고 docs/retrospectives/phase7-field-level-auth-and-papercuts.md 수립)**.
+튜토리얼 검증(dogfooding) 중 발견된 마찰에 대해 Task 7.1(기각), Task 7.2(SessionUser Escape Hatch) 완료. Task 7.3, 7.4 최종 리뷰어 승인 대기 중.
 
 ---
 
@@ -48,6 +46,13 @@
 
 1. [x] ~~**Task 6.1: `drink-log` 실제 프로덕션 이관 구현 및 E2E 실측 검증**~~ (완료)
 2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
-3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
-4. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장. Phase 7이 완전히 완결됨에 따라 다음 마일스톤 후보로 부상.
+3. [x] ~~**Task 7.1, 7.2: Field-level 권한 판정(기각), SessionUser Escape Hatch**~~ (완료)
+4. ⚠️ **Task 7.3, 7.4: Login Email 라벨, Destructive Migration FAQ** — 구현 및 diff 제출 완료,
+   **최종 승인 대기 중** (`migration_troubleshooting_test.go`의 PROOF 1 assertion
+   `&&`→`||` 수정 및 재실행 로그가 아직 제출되지 않음).
+5. 👉 **Task 8.1: Ownership Field CREATE-time 자동 주입 (IR 구조체 변경 없음)**:
+   - **사유**: `Post.author_id`, `SakeRecord.owner_id` 등 소유권 위조를 API 레벨에서 서버 세션 유저 ID로 자동 덮어써서 기본 `POST /api/{table}`을 안전하게 만듦. 리스크가 낮고 IR 구조체 변경이 없는 작업으로 우선 착수 권장.
+6. 👉 **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**:
+   - **사유**: `User.role` 등 클라이언트 작성 불가 필드를 기본 View 폼 및 REST payload에서 제외. IR 확장이 수반되므로 코드를 짜기 전 설계 브리핑 우선 제출 (`AGENTS.md` 원칙 9).
+7. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+   - **사유**: 다중 Storage 백엔드 확장. Phase 8 완료 후 진행.
