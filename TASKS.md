@@ -297,11 +297,11 @@
     4. `examples/quickstart/`를 `basic/` (1~4절용, Post 단일) 및 `with-auth/` (5절용, User + signup + `app.SessionUser`) 서브디렉터리로 명확히 분리하고 `quickstart_test.go` E2E 실측 테스트 수립.
     5. `docs/getting-started.md` 튜토리얼 경로 및 `docs/resource-guide.md` 패턴 7 컴파일 가능 예제 코드 갱신.
 
-- [ ] **Task 7.3: 로그인 폼 라벨 "username" → "email" 정정 (또는 TemplateOverrides 지원 확인)**
-  - **작업 내용**: 구현 및 테스트 작성 완료. 최종 리뷰어 승인 대기 중.
+- [x] **Task 7.3: 로그인 폼 라벨 "Username" → "Email" 정정 완결**
+  - **작업 내용**: `view/templates.go` 내 기본 로그인 템플릿(`loginTemplate`)의 UI 라벨을 "Username" ➔ "Email"로 정정. `TemplateOverrides`는 리소스 테이블 전용이며 전역 login 템플릿 오버라이드 미지원함을 소스 독해(`renderLogin`)로 확인. `view/view_test.go`에 `TestViewHandler_RenderLogin_EmailLabel` 테스트 추가 및 PASS.
 
-- [ ] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화**
-  - **작업 내용**: 구현 및 트러블슈팅 FAQ 문서화 완료. 최종 리뷰어 승인 대기 중 (`migration_troubleshooting_test.go` assertion `&&`➔`||` 정정 보완 필요).
+- [x] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화 완결**
+  - **작업 내용**: `docs/getting-started.md`에 Section 5.2 (트러블슈팅 FAQ) 추가. DB 파일 삭제(Choice A) 및 `schema_version` 증가(Choice B - 대상 테이블만 DROP & CREATE, 타 테이블 레코드 보존) 2가지 선택지와 트레이드오프를 명시. `runtime/migration_troubleshooting_test.go`에 5대 실측 E2E 테스트(PROOF 1~5) 수립, PROOF 1 assertion logic(`||`) 보정 완료 및 PASS.
 
 ### Phase 8: Ownership 자동 주입 및 Client-Writable 필드 차단 (Task 7.1 재검토)
 
