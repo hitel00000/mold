@@ -181,6 +181,13 @@ auth:
 
 `ownership_field`에 지정된 필드 값이 `NULL`인 레코드는 특정 소유자가 없는 공용/시스템 레코드로 취급된다. `permissions.read: owner`가 적용된 리소스에서 이런 레코드는 미인증 요청을 포함해 누구나 조회할 수 있다 (public과 동일하게 동작). 반면 `update`/`delete`에서 `owner`가 적용된 경우, 소유자가 없는 레코드는 `role: admin` 세션만 수정/삭제할 수 있으며 일반 인증 사용자는 403 Forbidden으로 거부된다. 이 규칙은 Go 런타임과 Cloudflare TS Codegen Target에 동일하게 적용된다.
 
+### CREATE-time Ownership Field 자동 주입 규칙
+
+`ownership_field`가 지정된 리소스(예: `ownership_field: author_id` 또는 `owner_id`)의 레코드 생성(CREATE) 요청 처리 시, 클라이언트가 payload에 실어 보낸 값은 무시되고 **항상 세션 사용자 ID(`sess.UserID` / `authUser.id`)로 서버가 자동 덮어쓰기**한다.
+- **인증 사용자 요청 (`sess != nil`)**: 클라이언트가 payload에 타인의 ID를 포함하여 전송하더라도(예: `author_id: 999`), 서버가 항상 로그인한 세션 사용자 ID로 덮어써서 소유권 위조를 API/View/Codegen 전체 타깃에서 원천 차단한다.
+- **미인증 요청 (`sess == nil`)**: 클라이언트가 payload에 보낸 소유권 필드 값은 제거(`NULL` / 삭제)된다. 필드가 `nullable: true`이면 DB에 `NULL` 레코드로 저장되며(공용/시스템 레코드 규칙과 일관), `nullable: false`이면 유효성 검사 실패(`400 VALIDATION_FAILED: field ... is required`)로 처리되어 미인증 사용자의 타인 소유권 명의 도용을 차단한다.
+- **특수 예외 (`ownership_field: id`)**: `User.yaml`처럼 자기 자신의 레코드 소유권을 나타내어 `ownership_field`가 `id` (INTEGER Primary Key)로 지정된 특수 케이스는 PK 자동 발급 무결성을 유지하기 위해 세션 ID 덮어쓰기 대상에서 제외된다.
+
 ### List 액션의 Ownership 레코드 필터링 규칙
 
 `permissions.read: owner`가 지정된 리소스의 List 액션 (`GET /api/{table}` 및 `/view/{table}`)은 DB 쿼리 레벨에서 레코드를 자동으로 필터링한다:
