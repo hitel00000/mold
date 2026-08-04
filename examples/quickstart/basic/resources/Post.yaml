@@ -1,0 +1,16 @@
+resource:
+  name: Post
+  timestamps: true
+  soft_delete: true
+
+fields:
+  - name: title
+    type: string
+    nullable: false
+    constraints:
+      min_length: 1
+      max_length: 200
+
+  - name: body
+    type: markdown
+    nullable: false
