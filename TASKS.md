@@ -289,11 +289,13 @@
     - **문서 등재**: `docs/resource-guide.md` 7절에 패턴 7(서버 강제 필드 권한 상승 및 glue 핸들러 패턴) 추가 완료 (`fc25bea`, `c1a1d75`).
     - **전용 테스트**: `runtime/privilege_escalation_test.go` 실측 스위트 작성 완료 (`997983a`).
 
-- [ ] **Task 7.2: 세션 사용자 조회 Escape Hatch 부재 (`IssueSessionForUser`의 반대 방향)**
-  - **배경 및 Task 7.1 연결 필수성**: Task 7.1에서 glue 핸들러 패턴(`/posts/create`, `/signup`)이 최종 확정 채택됨에 따라, 애플리케이션 핸들러에서 세션의 `user_id`를 읽어 소유권 필드(`author_id`, `owner_id`)를 고정하기 위한 `runtime.App.SessionUser(r *http.Request)` (또는 동등) 공개 API 실구현이 **필수 선행 조건**이 됨. `runtime.App`/`auth` 패키지에 이를 위한 공개 API 추가 필요 (`IssueSessionForUser`는 발급 방향만 존재, Task 5.3).
-  - **완료 조건**: `runtime.App`에 `SessionUser(r *http.Request) (userID int64, role string, ok bool)`
-    (또는 동등한) 공개 메서드 추가 여부를 판정하고, 채택 시 `examples/quickstart/main_with_signup.go.txt`의
-    `sessionUserIDFromRequest` 스텁을 실제 구현으로 교체.
+- [x] **Task 7.2: 세션 사용자 조회 Escape Hatch (`app.SessionUser`) 추가 및 quickstart 예제 재편 완결**
+  - **작업 내용**:
+    1. `auth.SessionManager.GetSessionFromRequest(r)` 신설 및 `transport.Router.extractSession` 중복 쿠키 파싱 로직 100% 제거.
+    2. `runtime.App.SessionUser(r *http.Request) (userID int64, role string, ok bool)` 공개 메서드 추가 (idiomatic `ok bool` 반환 및 `_mold_sessions` 기반 $O(1)$ session-cached role 반환).
+    3. `runtime/app_test.go`에 `TestApp_SessionUser` 유닛/E2E 테스트 5종 추가 및 PASS.
+    4. `examples/quickstart/`를 `basic/` (1~4절용, Post 단일) 및 `with-auth/` (5절용, User + signup + `app.SessionUser`) 서브디렉터리로 명확히 분리하고 `quickstart_test.go` E2E 실측 테스트 수립.
+    5. `docs/getting-started.md` 튜토리얼 경로 및 `docs/resource-guide.md` 패턴 7 컴파일 가능 예제 코드 갱신.
 
 - [ ] **Task 7.3: 로그인 폼 라벨 "username" → "email" 정정 (또는 TemplateOverrides 지원 확인)**
   - **배경**: Mold의 로그인 메커니즘은 내부적으로 항상 `email` 필드를 조회 키로
