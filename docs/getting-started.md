@@ -261,6 +261,25 @@ OAuth 콜백 glue 코드와 정확히 같은 패턴입니다 — 외부/공개 �
 그대로 통과시키지 않고, 신뢰할 수 없는 필드를 걸러내는 얇은 애플리케이션
 레이어를 하나 둡니다.
 
+### 5.2 트러블슈팅: 필드를 추가했는데 `no column named ...` 에러가 발생하는 경우
+
+`Post.yaml`에 `author_id` 필드를 추가한 뒤 기존 SQLite DB 파일이 존재하는 상태에서 레코드를 생성하면 다음과 같은 에러가 발생할 수 있습니다:
+
+```json
+{"error":{"code":"INVALID_INPUT","message":"failed to insert record into posts: SQL logic error: table posts has no column named author_id (1)"}}
+```
+
+**원인**: Mold는 빠른 프로토타이핑을 위해 **파괴적 마이그레이션(Destructive-only Migration)** 정책을 따릅니다 (`AGENTS.md` 참조). Resource YAML의 `schema_version`이 이전과 동일하면 기존 SQLite 테이블 DDL 변경 시도를 건너뛰므로, 새 필드(`author_id`) 컬럼이 테이블에 자동으로 추가되지 않습니다.
+
+이 문제를 해소하는 두 가지 선택지와 트레이드오프는 다음과 같습니다:
+
+1. **선택지 1: DB 파일 삭제 후 재기동 (가장 간단함)**
+   * **방법**: 개발용 DB 파일(`mold-quickstart.db`)을 삭제하고 앱을 재기동합니다.
+   * **트레이드오프**: 최신 스키마로 DB가 새로 개설되지만, 기존 로컬 테스트 데이터는 **전부 삭제**됩니다.
+2. **선택지 2: Resource YAML의 `schema_version` 증가 (`schema_version: 2`)**
+   * **방법**: `resources/Post.yaml` 최상위에 `schema_version: 2` (기존 1 ➔ 2)를 명시하고 앱을 재기동합니다.
+   * **트레이드오프**: Mold가 스키마 버전 변경을 감지하고 해당 리소스 테이블(`posts`)에 대해 `DROP TABLE IF EXISTS "posts"` 후 새 스키마로 재생성합니다. 다른 테이블(`users` 등)의 데이터는 보존되지만, 해당 리소스(`posts`) 테이블 내의 기존 데이터는 **파괴적으로 삭제**됩니다 (비파괴적 `ALTER TABLE` 미지원).
+
 ---
 
 ## 6. 다음으로 볼 문서
