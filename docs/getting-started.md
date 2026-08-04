@@ -256,10 +256,7 @@ Mold에 없습니다 — 어떤 필드를 받고 어떤 온보딩 흐름을 보�
    `password`/`name`만 클라이언트에서 받고 `role`은 서버가 항상
    `"user"`로 고정해서 `app.CreateRecord`를 호출한다.**
 
-전체 예제는 `examples/quickstart/main_with_signup.go.txt`에 있습니다
-(기존 `main.go`와 같은 디렉터리에 `.go`로 그대로 두면 `main` 함수가
-중복되므로, 실제로 쓸 때는 `main.go`를 이 내용으로 교체하거나 별도
-디렉터리로 옮기세요). `examples/drink-log-pilot/functions/api/auth/google/callback.ts`의
+전체 예제는 `examples/quickstart/main.go`에 있습니다. `examples/drink-log-pilot/functions/api/auth/google/callback.ts`의
 OAuth 콜백 glue 코드와 정확히 같은 패턴입니다 — 외부/공개 입력을 코어에
 그대로 통과시키지 않고, 신뢰할 수 없는 필드를 걸러내는 얇은 애플리케이션
 레이어를 하나 둡니다.

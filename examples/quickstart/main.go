@@ -119,26 +119,8 @@ func signupHandler(app *runtime.App) http.HandlerFunc {
 // identical — don't expose the generic create endpoint for this purpose;
 // force the ownership field server-side from the session instead.
 //
-// This assumes runtime.App exposes a way to read the current session user
-// from a request (e.g. app.SessionUser(r) or similar — check what your
-// checked-out runtime package actually calls this; it isn't shown in the
-// docs used to draft this file, so the exact method name here is a guess
-// and needs to be corrected against the real source).
-
-// sessionUserIDFromRequest is a STUB. I don't have runtime/auth's actual
-// source in this session, so I don't know the exact public API for reading
-// the current session's user id from an *http.Request outside of Mold's own
-// router. Options to check in your checked-out repo:
-//   - an exported helper on runtime.App or the auth package that parses the
-//     mold_session cookie and looks it up (mirrors what transport.Router
-//     already does internally for every /api/* request)
-//   - if nothing is exported, this may be a small gap worth raising as its
-//     own task, analogous to IssueSessionForUser (Task 5.3) but for the
-//     read direction
-// Left unimplemented on purpose rather than guessing a signature.
-func sessionUserIDFromRequest(r *http.Request) (int64, bool) {
-	return 0, false
-}
+// We use app.SessionUser(r) — Mold's in-process Escape Hatch for session
+// user lookup — to read the authenticated userID and role from the request.
 
 type createPostRequest struct {
 	Title string `json:"title"`
@@ -152,10 +134,7 @@ func createPostHandler(app *runtime.App) http.HandlerFunc {
 			return
 		}
 
-		// TODO: replace with the actual way to read the session user id from
-		// r in your checked-out runtime package (e.g. via the mold_session
-		// cookie + a lookup helper). Placeholder shown for illustration only.
-		userID, ok := sessionUserIDFromRequest(r)
+		userID, _, ok := app.SessionUser(r)
 		if !ok {
 			http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"login required"}}`, http.StatusUnauthorized)
 			return
