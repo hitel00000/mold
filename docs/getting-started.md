@@ -24,7 +24,7 @@ git clone https://github.com/hitel00000/mold.git
 cd mold
 ```
 
-이 튜토리얼의 완성된 예제 코드는 `examples/quickstart/`에 있습니다. 아래 단계는
+이 튜토리얼의 완성된 예제 코드는 기본 버전의 경우 `examples/quickstart/basic/`, 인증 및 회원가입/소유권 필드가 추가된 버전의 경우 `examples/quickstart/with-auth/`에 있습니다. 아래 단계는
 그 디렉터리를 처음부터 직접 만들어보는 과정입니다.
 
 ---
@@ -256,7 +256,7 @@ Mold에 없습니다 — 어떤 필드를 받고 어떤 온보딩 흐름을 보�
    `password`/`name`만 클라이언트에서 받고 `role`은 서버가 항상
    `"user"`로 고정해서 `app.CreateRecord`를 호출한다.**
 
-전체 예제는 `examples/quickstart/main.go`에 있습니다. `examples/drink-log-pilot/functions/api/auth/google/callback.ts`의
+전체 예제는 `examples/quickstart/with-auth/main.go`에 있습니다. `examples/drink-log-pilot/functions/api/auth/google/callback.ts`의
 OAuth 콜백 glue 코드와 정확히 같은 패턴입니다 — 외부/공개 입력을 코어에
 그대로 통과시키지 않고, 신뢰할 수 없는 필드를 걸러내는 얇은 애플리케이션
 레이어를 하나 둡니다.
