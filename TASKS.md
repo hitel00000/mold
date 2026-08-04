@@ -297,23 +297,8 @@
     4. `examples/quickstart/`를 `basic/` (1~4절용, Post 단일) 및 `with-auth/` (5절용, User + signup + `app.SessionUser`) 서브디렉터리로 명확히 분리하고 `quickstart_test.go` E2E 실측 테스트 수립.
     5. `docs/getting-started.md` 튜토리얼 경로 및 `docs/resource-guide.md` 패턴 7 컴파일 가능 예제 코드 갱신.
 
-- [ ] **Task 7.3: 로그인 폼 라벨 "username" → "email" 정정 (또는 TemplateOverrides 지원 확인)**
-  - **배경**: Mold의 로그인 메커니즘은 내부적으로 항상 `email` 필드를 조회 키로
-    쓰지만(`cmd/mvp_e2e_test.go`의 `loginForm.Set("username", "admin@mold.dev")`),
-    기본 로그인 템플릿의 라벨 텍스트는 "Username"으로 고정되어 있어 실사용 시
-    혼동을 유발함.
-  - **확인 필요 사항**: `view/templates.go`의 login 템플릿이 `view.TemplateOverrides`의
-    `SetCustomTemplateString(table, "login", tplStr)`으로 오버라이드 가능한지
-    (Milestone 6 회고에 `login`이 독립 템플릿 트리로 격리되어 있다는 기록은 있으나,
-    어떤 `table` 키로 등록되는지는 미확인).
-  - **완료 조건**: 오버라이드 가능하면 별도 코드 변경 없이 문서에 사용법만 추가.
-    불가능하면 기본 템플릿 라벨 텍스트 자체를 "Email"로 수정 (1줄 변경, 회귀 위험 낮음).
+- [x] **Task 7.3: 로그인 폼 라벨 "Username" → "Email" 정정 완결**
+  - **작업 내용**: `view/templates.go` 내 기본 로그인 템플릿(`loginTemplate`)의 UI 라벨을 "Username" ➔ "Email"로 정정. `TemplateOverrides`는 리소스 테이블 전용이며 전역 login 템플릿 오버라이드 미지원함을 소스 독해(`renderLogin`)로 확인. `view/view_test.go`에 `TestViewHandler_RenderLogin_EmailLabel` 테스트 추가 및 PASS.
 
-- [ ] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화**
-  - **배경**: `AGENTS.md`에 이미 확정된 정책(destructive-only migration)이라
-    코어 변경 대상은 아니지만, `getting-started.md` 튜토리얼을 따라 하다가
-    필드 추가 후 `table posts has no column named author_id` 에러로 막히는
-    사람이 나올 것으로 예상됨 (실제로 이번 세션에서 재현됨).
-  - **완료 조건**: `docs/getting-started.md`에 "필드를 추가했는데 컬럼이 없다는
-    에러가 나면?" FAQ/트러블슈팅 섹션을 추가하여, DB 파일 삭제 또는
-    `schema_version` 증가 두 가지 선택지와 각각의 트레이드오프(데이터 손실)를 명시.
+- [x] **Task 7.4 [독립 papercut]: Destructive-only migration으로 인한 로컬 개발 마찰 문서화 완결**
+  - **작업 내용**: `docs/getting-started.md`에 Section 5.2 (트러블슈팅 FAQ) 추가. DB 파일 삭제(Choice A) 및 `schema_version` 증가(Choice B - 대상 테이블만 DROP & CREATE, 타 테이블 레코드 보존) 2가지 선택지와 트레이드오프를 명시. `runtime/migration_troubleshooting_test.go`에 5대 실측 E2E 테스트(PROOF 1~5) 수립 및 PASS.

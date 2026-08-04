@@ -28,8 +28,8 @@
 
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` 작성 완료.
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
-튜토리얼 검증(dogfooding) 중 발견된 field-level 권한 부재 마찰에 대해 **Task 7.1 판정 완결 (IR 확장 기각, glue 핸들러 패턴 채택 및 docs/resource-guide.md 패턴 7 등재)**.
-glue 핸들러 확정에 따라 **Task 7.2 (세션 사용자 조회 `app.SessionUser(r)` Escape Hatch 구현 및 quickstart 예제 basic/with-auth 서브디렉터리 재편)** 완결.
+**추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
+튜토리얼 검증(dogfooding) 중 발견된 마찰에 대해 **Phase 7 전수 완결 (Task 7.1 IR 확장 기각 & glue 패턴 채택, Task 7.2 SessionUser Escape Hatch, Task 7.3 Login Email 라벨 정정, Task 7.4 Destructive Migration FAQ 및 회고 docs/retrospectives/phase7-field-level-auth-and-papercuts.md 수립)**.
 
 ---
 
@@ -48,8 +48,6 @@ glue 핸들러 확정에 따라 **Task 7.2 (세션 사용자 조회 `app.Session
 
 1. [x] ~~**Task 6.1: `drink-log` 실제 프로덕션 이관 구현 및 E2E 실측 검증**~~ (완료)
 2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
-3. [x] ~~**Task 7.1: Field-level 권한 부재 privilege escalation 패턴 실증 및 IR 확장 여부 판정**~~ (완료: IR 확장 기각, glue 핸들러 패턴 채택 및 패턴 7 등재)
-4. [x] ~~**Task 7.2: 세션 사용자 조회 Escape Hatch (`app.SessionUser(r *http.Request)`) 추가 및 quickstart 예제 basic/with-auth 재편**~~ (완료: 커밋 `c1fddff`, `07a99a8`, `edd3d19`, `2a7481b`, `c76dc7e`, `cc0661e`, `6805285`)
-5. 👉 **Task 7.3 & Task 7.4**: 로그인 폼 라벨 오정보 정정 및 Destructive migration 트러블슈팅 문서화.
-6. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장. Phase 7 대비 우선순위 낮음.
+3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
+4. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+   - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장. Phase 7이 완전히 완결됨에 따라 다음 마일스톤 후보로 부상.
