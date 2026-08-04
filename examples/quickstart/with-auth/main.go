@@ -1,22 +1,3 @@
-// Package main demonstrates how to add a public "signup" endpoint safely on
-// top of a User resource whose generic REST create permission is locked down
-// to role:admin.
-//
-// Why this file exists: Mold's IR has no field-level permission (see
-// docs/ir-spec.md, section 5: "Field 단위 권한은 1차 스코프에서 제외"). If a
-// User resource exposes a `role` field and permissions.create is `public`,
-// any anonymous client can POST {"role": "admin", ...} directly to
-// /api/users and self-elevate. The fix is to never expose the generic
-// create endpoint publicly for a resource that carries a privileged field;
-// instead, write a small application-level handler (same pattern as the
-// Google OAuth callback glue in examples/drink-log-pilot) that whitelists
-// exactly which fields it forwards to runtime.App.CreateRecord, and hardcodes
-// the rest (role: "user" here).
-//
-// NOTE: as with the rest of examples/quickstart, this has not been compiled
-// against the actual mold module in this environment. Verify method
-// signatures (runtime.App.CreateRecord, runtime.App.IssueSessionForUser,
-// runtime.App.ServeHTTP) against your checked-out repo.
 package main
 
 import (
@@ -31,7 +12,7 @@ import (
 func main() {
 	app, err := runtime.New(runtime.Config{
 		ResourceDir: "./resources",
-		DBPath:      "./mold-quickstart.db",
+		DBPath:      "./mold-quickstart-with-auth.db",
 	})
 	if err != nil {
 		log.Fatalf("failed to start Mold: %v", err)
@@ -91,9 +72,6 @@ func signupHandler(app *runtime.App) http.HandlerFunc {
 
 		userID, ok := user["id"].(int64)
 		if !ok {
-			// depending on the sqlite driver this may come back as int/float64;
-			// adjust the type switch to match runtime.App.CreateRecord's actual
-			// return type in your checked-out repo.
 			http.Error(w, `{"error":{"code":"INTERNAL_ERROR","message":"unexpected id type"}}`, http.StatusInternalServerError)
 			return
 		}
@@ -111,16 +89,7 @@ func signupHandler(app *runtime.App) http.HandlerFunc {
 	}
 }
 
-// --- Post creation: same problem, same fix -------------------------------
-//
-// Post's `author_id` field has the same gap as User's `role`: it's a plain
-// field, not a server-managed one, so a logged-in client can set
-// author_id to anyone's id when POSTing to /api/posts directly. The fix is
-// identical — don't expose the generic create endpoint for this purpose;
-// force the ownership field server-side from the session instead.
-//
-// We use app.SessionUser(r) — Mold's in-process Escape Hatch for session
-// user lookup — to read the authenticated userID and role from the request.
+// --- Post creation: force author_id from session -------------------------
 
 type createPostRequest struct {
 	Title string `json:"title"`
