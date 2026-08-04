@@ -47,8 +47,7 @@
 1. [x] ~~**Task 6.1: `drink-log` 실제 프로덕션 이관 구현 및 E2E 실측 검증**~~ (완료)
 2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
 3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
-4. 👉 **Task 8.1: Ownership Field CREATE-time 자동 주입 (IR 구조체 변경 없음)**:
-   - **사유**: `Post.author_id`, `SakeRecord.owner_id` 등 소유권 위조를 API 레벨에서 서버 세션 유저 ID로 자동 덮어써서 기본 `POST /api/{table}`을 안전하게 만듦. 리스크가 낮고 IR 구조체 변경이 없는 작업으로 우선 착수 권장.
+4. [x] ~~**Task 8.1: Ownership Field CREATE-time 자동 주입**~~ (완료: 커밋 `8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`)
 5. 👉 **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**:
    - **사유**: `User.role` 등 클라이언트 작성 불가 필드를 기본 View 폼 및 REST payload에서 제외. IR 확장이 수반되므로 코드를 짜기 전 설계 브리핑 우선 제출 (`AGENTS.md` 원칙 9).
 6. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:

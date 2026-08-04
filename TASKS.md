@@ -309,15 +309,15 @@
 > 개발자 도구 없이는 접근 불가능해지는 UX 딜레마 — 이 실제로 관찰됨에 따라, field-level
 > 권한 문제를 두 개의 독립된 하위 문제(Task 8.1 / Task 8.2)로 재분리하여 등재한다.
 
-- [ ] **Task 8.1: Ownership Field CREATE-time 자동 주입 (IR 구조체 변경 없음)**
-  - **배경**: `auth.ownership_field`가 지정된 리소스의 CREATE 요청 시, 클라이언트가 payload에 소유권 필드 값을 실어 보내면 그대로 저장되는 문제가 Task 7.1에서 실증되었다 (Case 2: `Post.author_id`, Case 3: `SakeRecord.owner_id`).
-  - **제안 방향**: `auth/permission.go`의 role 필드 privilege escalation 가드와 동일한 시점에서, CREATE 액션 처리 시 `ownership_field` 값을 세션 사용자 ID로 **항상 서버가 덮어쓰도록** 확장한다. 클라이언트가 전송한 소유권 필드 값은 무시(또는 거부)한다.
-  - **기대 효과**: `Post.author_id` 위조가 REST API 레벨에서 원천 차단되어, 별도 `/posts/create` glue 핸들러 없이도 기본 `POST /api/{table}` 엔드포인트를 안전하게 노출할 수 있다.
-  - **완료 조건**:
-    - Task 7.1의 Case 2, Case 3 시나리오(타인 명의 레코드 생성 시도) 재실행 시 소유권 필드가 세션 유저 ID로 강제 덮어쓰여 위조가 불가능함을 raw HTTP 실측으로 입증.
-    - `ownership_field`가 지정되지 않은 기존 리소스 전체 회귀 없음 (`go test ./...` PASS).
-    - Cloudflare TS Codegen Target에도 동일한 소유권 자동 주입 패리티 반영 확인.
-  - **스코프 레벨**: `resource/ir.go`의 `Resource`/`Field` 구조체는 **변경하지 않는다** (기존 `ownership_field` 속성만 활용). IR 변경이 필요하다고 판단될 경우 코드를 먼저 작성하지 않고 보고할 것 (`AGENTS.md` 원칙 9).
+- [x] **Task 8.1: Ownership Field CREATE-time 자동 주입 완결**
+  - **작업 내용**:
+    1. Go 런타임 (`transport/handler.go`, `view/handler.go`) 및 Cloudflare TS Codegen Target (`codegen/cloudflare/generator.go`) 전체에 CREATE 시점 `ownership_field` 서버 자동 덮어쓰기 로직 구현.
+    2. 세션 유저 ID(`sess.UserID`/`authUser.id`)를 자동 덮어써서 `Post.author_id`, `SakeRecord.owner_id` 등 소유권 필드 명의 도용/위조를 API/View/Codegen 전체 타깃에서 원천 차단.
+    3. 미인증 요청(`sess == nil`)의 경우 클라이언트 제출 소유권 필드를 제거(`NULL`)하여 미인증 위조 방지 및 `docs/ir-spec.md` 5절 Nullable Ownership 규칙 준수.
+    4. `ownership_field: id` (`User.yaml` 등 PK 소유권) 특수 케이스 예외 처리로 PK 자동 발급 무결성 보존.
+    5. `runtime/privilege_escalation_test.go` 5대 실측 E2E 스위트, `codegen/cloudflare` TS 생성 및 Miniflare 스위트, `examples/drink-log-pilot` E2E 테스트 전체 PASS (`8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`).
+    6. `docs/ir-spec.md` 5절에 CREATE-time 자동 주입 규칙 명세 추가.
+  - **Task 8.2와의 결합 재평가**: Task 8.1 구현 완료로 `Post.author_id` 등의 소유권 필드 위조가 기본 REST API(`POST /api/posts`) 및 HTML View 폼에서 완벽히 원천 차단됨. 이에 따라 별도 `/posts/create` glue 핸들러 없이도 기본 API만으로 안전한 소유권 주입이 가능해졌으며, `User.role` 등의 client-non-writable 필드를 다루는 Task 8.2(설계)와 결합 시 glue 핸들러 의존성을 획기적으로 줄일 수 있음을 확인.
 
 - [ ] **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**
   - **배경**: `User.role`처럼 클라이언트가 절대 임의 지정할 수 없어야 하는 필드가 존재할 때, 현재는 (a) `permissions.create`를 좁게 잠가 기본 View 폼 자체를 닫거나, (b) `create: public`으로 열어 위험한 필드가 노출된 폼을 공개하는 두 가지 나쁜 선택지만 존재한다.
