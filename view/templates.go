@@ -270,8 +270,8 @@ const loginTemplate = `
         <h2 style="margin-bottom: 1.5rem; text-align: center;">Sign In to Mold</h2>
         <form action="/login" method="POST">
             <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus placeholder="Enter your username">
+                <label for="username">Email</label>
+                <input type="text" id="username" name="username" required autofocus placeholder="Enter your email address">
             </div>
             <div class="form-group">
                 <label for="password">Password</label>

@@ -484,3 +484,51 @@ func TestView_RelationInclude_E2E(t *testing.T) {
 		t.Errorf("expected custom SSR view to render embedded relation tag.name 'Ginjo Premium Tag', got: %s", customHtml)
 	}
 }
+
+func TestViewHandler_RenderLogin_EmailLabel(t *testing.T) {
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false},
+			{Name: "password", Type: resource.TypePassword, Nullable: false},
+		},
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "login_label.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed sqlite.Open: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.EnsureSchema(t.Context(), userRes); err != nil {
+		t.Fatalf("failed EnsureSchema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(userRes, store)
+
+	router := transport.NewRouter(reg)
+	vh, err := view.NewViewHandler(router, nil)
+	if err != nil {
+		t.Fatalf("failed NewViewHandler: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "/login", nil)
+	w := httptest.NewRecorder()
+	vh.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /login, got %d", w.Code)
+	}
+
+	htmlBody := w.Body.String()
+	if !strings.Contains(htmlBody, `<label for="username">Email</label>`) {
+		t.Errorf("expected HTML to contain '<label for=\"username\">Email</label>', got:\n%s", htmlBody)
+	}
+	if !strings.Contains(htmlBody, `placeholder="Enter your email address"`) {
+		t.Errorf("expected HTML to contain email placeholder, got:\n%s", htmlBody)
+	}
+}
