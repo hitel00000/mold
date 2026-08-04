@@ -177,15 +177,15 @@ auth:
 			t.Fatalf("failed parsing response JSON: %v", err)
 		}
 
-		// Empirical proof: author_id was accepted as 999 despite session being user 100
+		// Empirical proof: author_id is auto-injected as 100 (session UserID), overriding client's forged 999
 		authorIDVal, ok := res.Data["author_id"]
-		if !ok || fmt.Sprintf("%v", authorIDVal) != "999" {
-			t.Errorf("expected created post author_id to be 999, got %v", authorIDVal)
+		if !ok || fmt.Sprintf("%v", authorIDVal) != "100" {
+			t.Errorf("expected created post author_id to be auto-injected as 100, got %v", authorIDVal)
 		}
 	})
 
-	// --- Case 3: SakeRecord.owner_id forgery (Authenticated user 101 specifying owner_id: 202) ---
-	t.Run("Case3_SakeRecordOwnerID_ForgeryAccepted", func(t *testing.T) {
+	// --- Case 3: SakeRecord.owner_id forgery prevention (Authenticated user 101 auto-overwrites owner_id to 101) ---
+	t.Run("Case3_SakeRecordOwnerID_AutoInjectedFromSession", func(t *testing.T) {
 		cookieUser101, _, err := app.IssueSessionForUser(ctx, 101, "user")
 		if err != nil {
 			t.Fatalf("failed issuing session for user 101: %v", err)
@@ -199,7 +199,7 @@ auth:
 		w := httptest.NewRecorder()
 		app.ServeHTTP(w, req)
 
-		t.Logf("=== CASE 3 RAW HTTP REQUEST (owner_id forgery) ===")
+		t.Logf("=== CASE 3 RAW HTTP REQUEST (owner_id forgery attempt) ===")
 		t.Logf("POST /api/sake_records HTTP/1.1\nCookie: %s\nContent-Type: application/json\n\n%s", cookieUser101, reqBody)
 		t.Logf("=== CASE 3 RAW HTTP RESPONSE ===")
 		t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
@@ -215,10 +215,97 @@ auth:
 			t.Fatalf("failed parsing response JSON: %v", err)
 		}
 
-		// Empirical proof: owner_id was accepted as 202 despite session being user 101
+		// Empirical proof: owner_id is auto-injected as 101 (session UserID), overriding client's forged 202
 		ownerIDVal, ok := res.Data["owner_id"]
-		if !ok || fmt.Sprintf("%v", ownerIDVal) != "202" {
-			t.Errorf("expected created sake record owner_id to be 202, got %v", ownerIDVal)
+		if !ok || fmt.Sprintf("%v", ownerIDVal) != "101" {
+			t.Errorf("expected created sake record owner_id to be auto-injected as 101, got %v", ownerIDVal)
+		}
+	})
+
+	// --- Case 4: Unauthenticated request on resource with ownership_field (Public Create) ---
+	t.Run("Case4_Unauthenticated_PublicCreate_OwnershipField_Cleared", func(t *testing.T) {
+		// Post.yaml has create: authenticated, so let's write a public create resource with ownership_field
+		pubResourceYaml := `resource:
+  name: PublicPost
+  timestamps: true
+
+fields:
+  - name: title
+    type: string
+    nullable: false
+  - name: author_id
+    type: int
+    nullable: true
+
+auth:
+  ownership_field: author_id
+  permissions:
+    create: public
+`
+		if err := os.WriteFile(filepath.Join(tmpDir, "PublicPost.yaml"), []byte(pubResourceYaml), 0644); err != nil {
+			t.Fatalf("failed writing PublicPost.yaml: %v", err)
+		}
+
+		appPub, err := runtime.New(runtime.Config{ResourceDir: tmpDir, DBPath: filepath.Join(tmpDir, "pub.db")})
+		if err != nil {
+			t.Fatalf("failed starting appPub: %v", err)
+		}
+		defer appPub.Close()
+
+		reqBody := `{"title":"Anonymous Post","author_id":888}`
+		req, _ := http.NewRequest(http.MethodPost, "/api/public_posts", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		appPub.ServeHTTP(w, req)
+
+		t.Logf("=== CASE 4 RAW HTTP REQUEST (Unauthenticated public create with author_id: 888) ===")
+		t.Logf("POST /api/public_posts HTTP/1.1\nContent-Type: application/json\n\n%s", reqBody)
+		t.Logf("=== CASE 4 RAW HTTP RESPONSE ===")
+		t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created for public create, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var res struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("failed parsing response JSON: %v", err)
+		}
+
+		// Empirical proof: unauthenticated request cleared client-supplied author_id: 888 to null
+		authorIDVal := res.Data["author_id"]
+		if authorIDVal != nil {
+			t.Errorf("expected unauthenticated author_id to be cleared to null, got: %v", authorIDVal)
+		}
+	})
+
+	// --- Case 5: User resource (ownership_field: id) special case ---
+	t.Run("Case5_UserResource_OwnershipFieldID_NotOverwritten", func(t *testing.T) {
+		reqBody := `{"email":"newuser@example.com","password":"password123","name":"New User"}`
+		req, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		app.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201 Created for user creation, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var res struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("failed parsing response JSON: %v", err)
+		}
+
+		// User id should be auto-assigned INTEGER primary key, NOT overwritten by session
+		userIDVal, ok := res.Data["id"]
+		if !ok || userIDVal == nil {
+			t.Fatalf("expected generated user id, got nil")
 		}
 	})
 }
