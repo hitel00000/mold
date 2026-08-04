@@ -327,9 +327,25 @@ func (vh *ViewHandler) handleCreateSubmit(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
-	if sess != nil && res.Auth != nil && res.Auth.OwnershipField != "" {
-		if _, exists := payload[res.Auth.OwnershipField]; !exists {
-			payload[res.Auth.OwnershipField] = sess.UserID
+	// Auto-assign ownership_field from session on CREATE (prevents client-side forgery)
+	if res.Auth != nil && res.Auth.OwnershipField != "" && res.Auth.OwnershipField != "id" {
+		if sess != nil {
+			val := sess.UserID
+			for _, f := range res.Fields {
+				if f.Name == res.Auth.OwnershipField {
+					if (f.Type == resource.TypeInt || f.Type == resource.TypeFloat) && val != nil {
+						if strVal, isStr := val.(string); isStr {
+							if parsedInt, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+								val = parsedInt
+							}
+						}
+					}
+					break
+				}
+			}
+			payload[res.Auth.OwnershipField] = val
+		} else {
+			delete(payload, res.Auth.OwnershipField)
 		}
 	}
 
