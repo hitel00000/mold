@@ -27,9 +27,8 @@
 👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
 
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` 작성 완료.
-튜토리얼을 실제로 손으로 따라가며 검증(dogfooding)하는 과정에서 field-level 권한
-부재로 인한 privilege escalation 마찰(User.role, Post.author_id) 및 부수 마찰
-3건을 발견하여 `TASKS.md` Phase 7로 등재함 (아직 미착수).
+튜토리얼 검증(dogfooding) 중 발견된 field-level 권한 부재 마찰에 대해 **Task 7.1 판정 완결 (IR 확장 기각, glue 핸들러 패턴 채택 및 docs/resource-guide.md 패턴 7 등재)**.
+glue 핸들러 확정에 따라 **Task 7.2 (세션 사용자 조회 `SessionUser` Escape Hatch)**가 최우선 필수 과제로 부상함.
 
 ---
 
@@ -48,6 +47,9 @@
 
 1. [x] ~~**Task 6.1: `drink-log` 실제 프로덕션 이관 구현 및 E2E 실측 검증**~~ (완료)
 2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
-3. 👉 **Phase 7 (Task 7.1~7.4): getting-started.md 실측 중 발견된 field-level 권한 부재 마찰 해소** — 신규 등재, 미착수. 특히 Task 7.1(IR 확장 채택/기각 판정)이 나머지 3개 Task의 방향을 결정하므로 우선순위 최상단으로 올림.
-4. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장. Phase 7 대비 우선순위 낮음 (Phase 7이 실사용 중 발견된 보안 마찰이라 우선).
+3. [x] ~~**Task 7.1: Field-level 권한 부재 privilege escalation 패턴 실증 및 IR 확장 여부 판정**~~ (완료: IR 확장 기각, glue 핸들러 패턴 채택 및 패턴 7 등재)
+4. 👉 **Task 7.2: 세션 사용자 조회 Escape Hatch (`app.SessionUser(r *http.Request)`) 추가 및 `main_with_signup.go.txt` 스텁 교체**:
+   - **사유**: Task 7.1에서 glue 핸들러 패턴이 최종 채택됨에 따라 애플리케이션 레벨에서 세션의 `user_id`를 읽는 공개 API 지원이 필수 선행 조건으로 부상함.
+5. **Task 7.3 & Task 7.4**: 로그인 폼 라벨 오정보 정정 및 Destructive migration 트러블슈팅 문서화.
+6. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+   - **사유**: `docs/philosophy.md` 마세라티 원칙에 따라 필요할 때 추가하도록 미뤄둔 다중 Storage 백엔드 확장. Phase 7 대비 우선순위 낮음.

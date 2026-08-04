@@ -277,38 +277,20 @@
 
 ### Phase 7: `getting-started.md` 튜토리얼 실측 중 발견된 마찰 (Field-level 권한/서버 강제 필드 부재)
 
-- [ ] **Task 7.1: [실험] Field-level 권한 부재로 인한 privilege escalation 패턴 실증 및 IR 확장 여부 판정**
-  - **배경**: `docs/getting-started.md` 튜토리얼을 직접 따라 하며 테스트 계정을 만들던 중,
-    `User.role`과 `Post.author_id` 두 곳에서 동일한 패턴의 구멍을 발견함. 둘 다
-    "클라이언트가 이 필드에 값을 넣으면 서버가 그대로 믿는다"는 문제이며,
-    `docs/ir-spec.md` 5절 "Field 단위 권한은 1차 스코프에서 제외" 결정과 직접 연결됨.
-  - **관찰된 마찰 2건**:
-    1. `User.role` + `permissions.create: public`: 누구나 `{"role": "admin"}`을
-       직접 보내 관리자 계정 생성 가능. 임시 조치로 `create: role:admin` + 별도
-       `/signup` glue 핸들러(role 서버 고정)로 우회함.
-    2. `Post.author_id` + `permissions.create: authenticated`: owner 체크는
-       update/delete에만 있고 create에는 없어서, 로그인한 사용자가 임의의
-       `author_id`를 넣어 남의 이름으로 글 작성 가능. `/posts/create` glue
-       핸들러로 우회 시도했으나, 일반 `POST /api/posts` 경로 자체를 막지 않는 한
-       완전히 닫히지 않음(View의 기본 Create 폼이 `/api/{table}`로 직접 제출하는
-       구조라 `TemplateOverrides`로 폼 action까지 같이 바꿔야 함).
-  - **실험 내용**: `unique_together`/Nullable Ownership 때처럼, 이 패턴이
-    실제로 3번째 이상 반복 관찰되면(예: 향후 다른 owner-field 리소스에서도
-    동일 이슈 재현) IR에 "서버 강제 필드"(가칭 `server_managed: true` 또는
-    `auth.ownership_field`의 create-time 자동 주입) 개념을 추가할지 검토한다.
-  - **채택 조건**: 3개 이상의 서로 다른 Resource/필드에서 이 패턴이 재현되고,
-    매번 glue 핸들러로 우회하는 비용이 IR 확장 비용보다 커질 때.
-  - **기각 조건**: glue 핸들러 패턴(signup, `/posts/create`와 동일한 방식)으로도
-    충분히 감당 가능하다고 판단될 때 — 마세라티 원칙에 따라 미해결 상태로 백로그
-    유지.
-  - **완료 조건**: 최소 하나의 명시적 판정(채택/기각)과, 기각 시 "glue 핸들러 패턴"을
-    `docs/resource-guide.md`에 공식 Good/Bad 패턴(패턴 7)으로 등재.
+- [x] **Task 7.1: [실험] Field-level 권한 부재로 인한 privilege escalation 패턴 실증 및 IR 확장 여부 판정 완결**
+  - **Task 7.1 완료 메모 (실측 결과, 정정 각주 및 최종 판정)**:
+    - **최종 판정**: **[기각 (Rejected)]** (glue 핸들러 우회 패턴 유지, IR 확장 기각).
+    - **배경 정정 각주 (오류 관찰 성찰)**: 원래 배경 서술 중 *"누구나 `role: admin`을 직접 보내 관리자 계정 생성 가능"*은 실측 결과 **사실이 아니었음**. `auth/permission.go` L48-L55에 이미 `action == ActionCreate || action == ActionUpdate` 조건으로 non-admin의 `"role"` payload 기재를 `403 Forbidden` (`ErrPrivilegeEscalation`)으로 차단하는 가드가 Milestone 5부터 작동하고 있었음. 즉, `User.role` 승격은 코어 엔진에서 이미 완벽히 차단되어 있었으며, 백로그 등재 시 소스 코드 확인 없이 추정하여 잘못 서술했던 경위를 기록함.
+    - **3대 시나리오 실측 결과**:
+      1. `User.role` + `permissions.create: public`: **재현 안 됨 (안전)** — `auth/permission.go#L48-L55` 코어 가드에 의해 `403 Forbidden` 차단됨.
+      2. `Post.author_id` + `permissions.create: authenticated`: **재현됨 (위조 가능)** — 로그인 유저 100이 `author_id: 999` 지정 시 `201 Created` 생성됨.
+      3. `SakeRecord.owner_id` + `permissions.create: authenticated`: **재현됨 (위조 가능)** — 로그인 유저 101이 `owner_id: 202` 지정 시 `201 Created` 생성됨.
+    - **기각 채택 근거**: 실제 소유권 위조가 재현된 사례는 총 2건으로 채택 조건("3개 이상 재현")에 미달하며, 얇은 glue 핸들러(`/signup`, `/posts/create`) 우회 방식이 코어 IR 확장보다 마세라티 원칙 및 단일 소스 오브 트루스에 부합함.
+    - **문서 등재**: `docs/resource-guide.md` 7절에 패턴 7(서버 강제 필드 권한 상승 및 glue 핸들러 패턴) 추가 완료 (`fc25bea`, `c1a1d75`).
+    - **전용 테스트**: `runtime/privilege_escalation_test.go` 실측 스위트 작성 완료 (`997983a`).
 
 - [ ] **Task 7.2: 세션 사용자 조회 Escape Hatch 부재 (`IssueSessionForUser`의 반대 방향)**
-  - **배경**: Task 7.1의 glue 핸들러(`/posts/create`)를 작성하려면 `*http.Request`에서
-    현재 세션의 user id를 읽어야 하는데, `runtime.App`/`auth` 패키지에 이를 위한
-    공개 API가 문서상 확인되지 않음 (`IssueSessionForUser`는 발급 방향만 존재,
-    Task 5.3).
+  - **배경 및 Task 7.1 연결 필수성**: Task 7.1에서 glue 핸들러 패턴(`/posts/create`, `/signup`)이 최종 확정 채택됨에 따라, 애플리케이션 핸들러에서 세션의 `user_id`를 읽어 소유권 필드(`author_id`, `owner_id`)를 고정하기 위한 `runtime.App.SessionUser(r *http.Request)` (또는 동등) 공개 API 실구현이 **필수 선행 조건**이 됨. `runtime.App`/`auth` 패키지에 이를 위한 공개 API 추가 필요 (`IssueSessionForUser`는 발급 방향만 존재, Task 5.3).
   - **완료 조건**: `runtime.App`에 `SessionUser(r *http.Request) (userID int64, role string, ok bool)`
     (또는 동등한) 공개 메서드 추가 여부를 판정하고, 채택 시 `examples/quickstart/main_with_signup.go.txt`의
     `sessionUserIDFromRequest` 스텁을 실제 구현으로 교체.
