@@ -235,3 +235,14 @@ AI 에이전트는 Resource YAML을 작성/수정할 때 아래의 **잘못된 �
 | ```yaml<br>relations:<br>  - name: tags<br>    kind: has_and_belongs_to_many # ❌ 미지원 relation kind!<br>    target: Tag<br>``` | ```yaml<br># RecordTag.yaml (명시적 Join Resource)<br>resource:<br>  name: RecordTag<br><br>fields:<br>  - name: sake_record_id<br>    type: int<br>    nullable: false   # ✅ FK nullability 우회 차단<br>  - name: tag_id<br>    type: int<br>    nullable: false<br><br>relations:<br>  - name: record<br>    kind: belongs_to<br>    target: SakeRecord<br>    foreign_key: sake_record_id<br>  - name: tag<br>    kind: belongs_to<br>    target: Tag<br>    foreign_key: tag_id<br><br>constraints:<br>  unique_together:<br>    - [sake_record_id, tag_id] # ✅ 복합 unique로 중복 연결 차단<br>``` |
 
 ---
+
+### 패턴 7: 클라이언트 입력 신뢰로 인한 생성 시 권한 상승/소유권 위조 (`User.role` 또는 `ownership_field` 노출)
+
+> **위험성**: `User.role`이 포함된 Resource의 `permissions.create`를 `public`으로 열거나, `ownership_field`(예: `author_id`, `owner_id`)가 지정된 Resource의 `create`에서 클라이언트가 전송한 JSON 본문의 소유권 필드 값을 서버가 그대로 믿고 저장할 경우, 관리자 계정 무단 생성이나 타인 명의 레코드 생성(Identity Forgery)이 발생함. Mold의 REST API (`POST /api/{table}`)는 제네릭 엔드포인트이므로 필드 단위 검증/고정이 필요할 때는 권한을 좁히고 애플리케이션 레이어(Glue Handler / OAuth Callback)에서 신뢰할 수 있는 세션값으로 고정해야 함.
+
+| ❌ Bad (잘못된 설정/패턴) | ✅ Good (올바른 설정/패턴) |
+| :--- | :--- |
+| ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>fields:<br>  - name: email<br>    type: email<br>  - name: role<br>    type: enum<br>    constraints:<br>      values: ["admin", "user"]<br><br>auth:<br>  permissions:<br>    create: public  # ❌ public이면 누구나 POST /api/users로 가입 시도<br>```<br><br>```yaml<br># Post.yaml<br>resource:<br>  name: Post<br><br>fields:<br>  - name: author_id<br>    type: int<br><br>auth:<br>  ownership_field: author_id<br>  permissions:<br>    create: authenticated  # ❌ POST /api/posts에 author_id: 999 전송 시 타인 명의 글 생성 가능<br>``` | ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>auth:<br>  permissions:<br>    create: role:admin  # ✅ 제네릭 API는 어드민 전용으로 잠금<br>```<br><br>```go<br>// 회원가입/소유권 생성은 별도 Glue Handler로 처리<br>http.HandleFunc("/signup", func(w http.ResponseWriter, r *http.Request) {<br>    // email, password, name만 받아서 role="user"로 서버 고정 후 app.CreateRecord 호출<br>    app.CreateRecord(r.Context(), "User", map[string]any{<br>        "email": req.Email, "password": req.Password, "name": req.Name, "role": "user",<br>    })<br>})<br><br>http.HandleFunc("/posts/create", func(w http.ResponseWriter, r *http.Request) {<br>    // 세션 user_id를 서버에서 읽어 author_id로 고정<br>    userID, _, _ := app.SessionUser(r)<br>    app.CreateRecord(r.Context(), "Post", map[string]any{<br>        "title": req.Title, "body": req.Body, "author_id": userID,<br>    })<br>})<br>``` |
+
+
+---
