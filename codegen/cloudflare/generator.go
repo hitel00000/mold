@@ -604,9 +604,11 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');\n")
 		sb.WriteString("  }\n")
 
-		if ownershipField != "" {
-			sb.WriteString(fmt.Sprintf("  if ((body['%s'] === undefined || body['%s'] === null) && authUser) {\n", ownershipField, ownershipField))
+		if ownershipField != "" && ownershipField != "id" {
+			sb.WriteString("  if (authUser) {\n")
 			sb.WriteString(fmt.Sprintf("    body['%s'] = authUser.id;\n", ownershipField))
+			sb.WriteString("  } else {\n")
+			sb.WriteString(fmt.Sprintf("    delete body['%s'];\n", ownershipField))
 			sb.WriteString("  }\n")
 		}
 
