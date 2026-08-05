@@ -58,7 +58,7 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 				Delete: "public",
 			},
 		},
-		Fields: []resource.Field{{Name: "title", Type: resource.TypeString}},
+		Fields: []resource.Field{{Name: "title", Type: resource.TypeString, ClientWritable: true}},
 	}
 
 	authenticatedRes := &resource.Resource{
@@ -72,7 +72,7 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 				Delete: "authenticated",
 			},
 		},
-		Fields: []resource.Field{{Name: "title", Type: resource.TypeString}},
+		Fields: []resource.Field{{Name: "title", Type: resource.TypeString, ClientWritable: true}},
 	}
 
 	ownerRes := &resource.Resource{
@@ -89,8 +89,8 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 			},
 		},
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString},
-			{Name: "user_id", Type: resource.TypeString},
+			{Name: "title", Type: resource.TypeString, ClientWritable: true},
+			{Name: "user_id", Type: resource.TypeString, ClientWritable: true},
 		},
 	}
 
@@ -105,7 +105,7 @@ func TestPermissionMatrix_Coverage(t *testing.T) {
 				Delete: "role:admin",
 			},
 		},
-		Fields: []resource.Field{{Name: "title", Type: resource.TypeString}},
+		Fields: []resource.Field{{Name: "title", Type: resource.TypeString, ClientWritable: true}},
 	}
 
 	ctx := t.Context()
@@ -387,10 +387,10 @@ func TestUser_Role_PrivilegeEscalation_Protection(t *testing.T) {
 			},
 		},
 		Fields: []resource.Field{
-			{Name: "username", Type: resource.TypeString, Nullable: false},
-			{Name: "email", Type: resource.TypeEmail, Nullable: false},
-			{Name: "password", Type: resource.TypePassword, Nullable: false},
-			{Name: "role", Type: resource.TypeEnum, Nullable: false, Constraints: resource.Constraints{Values: roleValues}},
+			{Name: "username", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "password", Type: resource.TypePassword, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{Values: roleValues}},
 		},
 	}
 
@@ -540,9 +540,9 @@ func TestPassword_ValidationAndHashing(t *testing.T) {
 			},
 		},
 		Fields: []resource.Field{
-			{Name: "username", Type: resource.TypeString, Nullable: false},
-			{Name: "password", Type: resource.TypePassword, Nullable: false, Constraints: resource.Constraints{MinLength: &minLen}},
-			{Name: "role", Type: resource.TypeEnum, Nullable: false, Constraints: resource.Constraints{Values: roleValues}},
+			{Name: "username", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "password", Type: resource.TypePassword, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{MinLength: &minLen}},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{Values: roleValues}},
 		},
 	}
 

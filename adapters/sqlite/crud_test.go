@@ -113,9 +113,10 @@ func TestCRUD_ValidationRejection(t *testing.T) {
 		Table: "articles",
 		Fields: []resource.Field{
 			{
-				Name:     "title",
-				Type:     resource.TypeString,
-				Nullable: false,
+				Name:           "title",
+				Type:           resource.TypeString,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					MinLength: &minLen,
 				},
@@ -165,7 +166,7 @@ func TestList_IDsBatchQuery(t *testing.T) {
 		Name:  "Item",
 		Table: "items",
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 	if err := store.EnsureSchema(ctx, res); err != nil {
