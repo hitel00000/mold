@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -144,7 +145,7 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"data": post})
 	}
 
-	// 1a. Direct POST /api/users with role: admin -> Rejection (403 FORBIDDEN / privilege escalation block)
+	// 1a. Direct POST /api/users with role: admin -> Privilege Escalation Guard Block (403 FORBIDDEN)
 	badAdminBody := `{"email":"hacker1@example.com","password":"password123","name":"Hacker","role":"admin"}`
 	reqBadAdmin, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badAdminBody))
 	reqBadAdmin.Header.Set("Content-Type", "application/json")
@@ -162,7 +163,7 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		t.Errorf("expected error code FORBIDDEN, got %s", wBadAdmin.Body.String())
 	}
 
-	// 1b. Direct POST /api/users with role: user -> Rejection (403 FORBIDDEN / privilege escalation block)
+	// 1b. Direct POST /api/users with role: user -> Privilege Escalation Guard Block (403 FORBIDDEN)
 	badUserBody := `{"email":"hacker2@example.com","password":"password123","name":"Hacker","role":"user"}`
 	reqBadUser, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badUserBody))
 	reqBadUser.Header.Set("Content-Type", "application/json")
@@ -178,6 +179,56 @@ func TestQuickstart_WithAuth(t *testing.T) {
 	}
 	if !strings.Contains(wBadUser.Body.String(), "FORBIDDEN") {
 		t.Errorf("expected error code FORBIDDEN, got %s", wBadUser.Body.String())
+	}
+
+	// 1c. Standalone client_writable: false test for non-role system field (credit) -> Validation Guard Block (400 Bad Request / CLIENT_WRITE_FORBIDDEN)
+	// We create a temporary App instance with an Account resource containing client_writable: false on 'credit' field
+	// to demonstrate that CLIENT_WRITE_FORBIDDEN (400) operates stand-alone when not shadowed by auth.Evaluate role guard.
+	tempResDir := t.TempDir()
+	accountYAML := `
+resource:
+  name: Account
+  timestamps: true
+
+fields:
+  - name: name
+    type: string
+    nullable: false
+  - name: credit
+    type: int
+    nullable: false
+    default: 100
+    client_writable: false
+
+auth:
+  permissions:
+    create: public
+`
+	_ = os.WriteFile(filepath.Join(tempResDir, "Account.yaml"), []byte(accountYAML), 0644)
+	appAccount, err := runtime.New(runtime.Config{
+		ResourceDir: tempResDir,
+		DBPath:      filepath.Join(t.TempDir(), "account.db"),
+	})
+	if err != nil {
+		t.Fatalf("failed initializing Account App: %v", err)
+	}
+	defer appAccount.Close()
+
+	badCreditBody := `{"name":"Hacker","credit":999999}`
+	reqCredit, _ := http.NewRequest(http.MethodPost, "/api/accounts", strings.NewReader(badCreditBody))
+	reqCredit.Header.Set("Content-Type", "application/json")
+	wCredit := httptest.NewRecorder()
+	appAccount.ServeHTTP(wCredit, reqCredit)
+
+	t.Logf("=== STANDALONE NON-ROLE FIELD CLIENT_WRITE_FORBIDDEN REJECTION TEST (credit: 999999) ===")
+	t.Logf("POST /api/accounts\n%s", badCreditBody)
+	t.Logf("HTTP/1.1 %d\n%s", wCredit.Code, wCredit.Body.String())
+
+	if wCredit.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for client_writable: false credit field, got %d: %s", wCredit.Code, wCredit.Body.String())
+	}
+	if !strings.Contains(wCredit.Body.String(), "CLIENT_WRITE_FORBIDDEN") {
+		t.Errorf("expected error code CLIENT_WRITE_FORBIDDEN, got %s", wCredit.Body.String())
 	}
 
 	// 2. Direct POST /api/users omitting role -> 201 Created & default role: "user" applied
