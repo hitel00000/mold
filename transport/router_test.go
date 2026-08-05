@@ -3,6 +3,7 @@ package transport_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -36,9 +37,9 @@ func TestTransport_E2E(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
-			{Name: "body", Type: resource.TypeMarkdown, Nullable: false},
-			{Name: "legacy_slug", Type: resource.TypeString, Nullable: true, Deprecated: true, DeprecatedSince: &depSince},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeMarkdown, Nullable: false, ClientWritable: true},
+			{Name: "legacy_slug", Type: resource.TypeString, Nullable: true, Deprecated: true, DeprecatedSince: &depSince, ClientWritable: true},
 		},
 	}
 
@@ -49,7 +50,7 @@ func TestTransport_E2E(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "body", Type: resource.TypeText, Nullable: false},
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{
@@ -255,7 +256,7 @@ func TestTransport_PaginationTotalCount(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -315,7 +316,7 @@ func TestTransport_MultipartFormGoldenSnapshot(t *testing.T) {
 		Name:  "Comment",
 		Table: "comments",
 		Fields: []resource.Field{
-			{Name: "body", Type: resource.TypeString, Nullable: false},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id"},
@@ -331,7 +332,7 @@ func TestTransport_MultipartFormGoldenSnapshot(t *testing.T) {
 		Name:  "Post",
 		Table: "posts",
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 		Auth: &resource.Auth{
 			Permissions: resource.Permissions{
@@ -399,8 +400,8 @@ func TestRouter_UniqueTogether_E2E(t *testing.T) {
 		SchemaVersion: 1,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
 		},
 		Constraints: &resource.ResourceConstraints{
 			UniqueTogether: [][]string{
@@ -502,5 +503,119 @@ func TestRouter_UniqueTogether_E2E(t *testing.T) {
 	}
 	if errEnvelopeUpd.Error.Code != "INVALID_INPUT" {
 		t.Errorf("expected error code INVALID_INPUT on update conflict, got '%s'", errEnvelopeUpd.Error.Code)
+	}
+}
+
+func TestTransport_ClientWritable_E2E(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_client_writable_rest.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "badge", Type: resource.TypeString, Nullable: false, Default: "bronze", ClientWritable: false},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "public",
+				Read:   "public",
+				Update: "public",
+			},
+		},
+	}
+
+	ctx := t.Context()
+	if err := store.EnsureSchema(ctx, userRes); err != nil {
+		t.Fatalf("failed to ensure schema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(userRes, store)
+	router := transport.NewRouter(reg)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// 1. Rejection on POST with client_writable: false field (badge: "gold") -> 400 CLIENT_WRITE_FORBIDDEN
+	postBodyBad := `{"email": "hacker@example.com", "badge": "gold"}`
+	respBad, err := ts.Client().Post(ts.URL+"/api/users", "application/json", strings.NewReader(postBodyBad))
+	if err != nil {
+		t.Fatalf("failed to send post: %v", err)
+	}
+	defer respBad.Body.Close()
+
+	if respBad.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for non-client-writable field on POST, got %d", respBad.StatusCode)
+	}
+
+	var errEnv transport.ErrorEnvelope
+	_ = json.NewDecoder(respBad.Body).Decode(&errEnv)
+	if errEnv.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
+		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN', got '%s'", errEnv.Error.Code)
+	}
+
+	// 2. Successful POST without badge -> 201 Created
+	postBodyOk := `{"email": "normal@example.com"}`
+	respOk, err := ts.Client().Post(ts.URL+"/api/users", "application/json", strings.NewReader(postBodyOk))
+	if err != nil {
+		t.Fatalf("failed to send post ok: %v", err)
+	}
+	defer respOk.Body.Close()
+
+	if respOk.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created on normal user registration, got %d", respOk.StatusCode)
+	}
+
+	var createEnv transport.SuccessEnvelope
+	_ = json.NewDecoder(respOk.Body).Decode(&createEnv)
+	userRec, ok := createEnv.Data.(map[string]any)
+	if !ok || userRec["id"] == nil {
+		t.Fatalf("expected created user to have id, got %v", createEnv.Data)
+	}
+
+	userID := userRec["id"]
+
+	// 3. GET /api/users/{id} -> Verify badge field is preserved in read response (not sanitized) and defaulted to "bronze"
+	respGet, err := ts.Client().Get(ts.URL + fmt.Sprintf("/api/users/%v", userID))
+	if err != nil {
+		t.Fatalf("failed to send get: %v", err)
+	}
+	defer respGet.Body.Close()
+
+	if respGet.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK on GET user detail, got %d", respGet.StatusCode)
+	}
+
+	var getEnv transport.SuccessEnvelope
+	_ = json.NewDecoder(respGet.Body).Decode(&getEnv)
+	getRec, ok := getEnv.Data.(map[string]any)
+	if !ok || getRec["badge"] != "bronze" {
+		t.Errorf("expected GET detail response to retain badge 'bronze', got %v", getRec["badge"])
+	}
+
+	// 4. Rejection on PUT /api/users/{id} with badge -> 400 CLIENT_WRITE_FORBIDDEN
+	putBodyBad := `{"badge": "gold"}`
+	reqPut, _ := http.NewRequest("PUT", ts.URL+fmt.Sprintf("/api/users/%v", userID), strings.NewReader(putBodyBad))
+	reqPut.Header.Set("Content-Type", "application/json")
+	respPut, err := ts.Client().Do(reqPut)
+	if err != nil {
+		t.Fatalf("failed to send put: %v", err)
+	}
+	defer respPut.Body.Close()
+
+	if respPut.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on PUT with non-client-writable field, got %d", respPut.StatusCode)
+	}
+	var errPutEnv transport.ErrorEnvelope
+	_ = json.NewDecoder(respPut.Body).Decode(&errPutEnv)
+	if errPutEnv.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
+		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN' on PUT, got '%s'", errPutEnv.Error.Code)
 	}
 }

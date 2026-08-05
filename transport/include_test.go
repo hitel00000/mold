@@ -32,7 +32,7 @@ func TestInclude_ValidationAndErrors(t *testing.T) {
 		Name:  "Tag",
 		Table: "tags",
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "record_tags", Kind: resource.KindHasMany, Target: "RecordTag", ForeignKey: "tag_id"},
@@ -43,8 +43,8 @@ func TestInclude_ValidationAndErrors(t *testing.T) {
 		Name:  "RecordTag",
 		Table: "record_tags",
 		Fields: []resource.Field{
-			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false},
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: false},
+			{Name: "sake_record_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
@@ -123,8 +123,8 @@ func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
 			},
 		},
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
-			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
 		},
 	}
 
@@ -133,7 +133,7 @@ func TestInclude_PermissionSecurityMatrixAndN1Prevention(t *testing.T) {
 		Name:  "RecordTag",
 		Table: "record_tags",
 		Fields: []resource.Field{
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
@@ -287,7 +287,7 @@ func TestInclude_N1Prevention_QueryCount(t *testing.T) {
 		Name:  "Tag",
 		Table: "tags",
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -295,7 +295,7 @@ func TestInclude_N1Prevention_QueryCount(t *testing.T) {
 		Name:  "RecordTag",
 		Table: "record_tags",
 		Fields: []resource.Field{
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
@@ -383,7 +383,7 @@ func TestInclude_LargeFKBatch25Plus(t *testing.T) {
 		Name:  "Tag",
 		Table: "tags",
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -391,7 +391,7 @@ func TestInclude_LargeFKBatch25Plus(t *testing.T) {
 		Name:  "RecordTag",
 		Table: "record_tags",
 		Fields: []resource.Field{
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},

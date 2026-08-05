@@ -290,6 +290,10 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 	// 1. Create record in Store first to get actual record_id
 	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
+		if isClientWriteForbiddenError(err) {
+			WriteError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error(), nil)
+			return
+		}
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
@@ -440,6 +444,10 @@ func (rt *Router) handleUpdate(w http.ResponseWriter, req *http.Request, res *re
 			WriteError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("record with id '%v' not found in resource '%s'", id, res.Name), nil)
 			return
 		}
+		if isClientWriteForbiddenError(err) {
+			WriteError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error(), nil)
+			return
+		}
 		if isFKConstraintError(err) {
 			WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("referenced foreign key target does not exist: %v", err), nil)
 			return
@@ -512,6 +520,13 @@ func parseID(s string) any {
 		return val
 	}
 	return s
+}
+
+func isClientWriteForbiddenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "is not client-writable")
 }
 
 func isFKConstraintError(err error) bool {
