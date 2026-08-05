@@ -189,6 +189,7 @@ fields:
     type: enum
     nullable: false
     default: "user"
+    client_writable: false
     constraints:
       values: ["admin", "user"]
 
@@ -233,33 +234,25 @@ curl -X POST http://localhost:8080/_mold/reload \
 개발 중에는 파일 저장할 때마다 매번 curl로 reload를 부르는 대신
 `mold dev` CLI를 쓰면 파일 저장만으로 자동 반영됩니다 (`cmd/mold-dev`).
 
-> [!WARNING]
-> 위 `User.yaml`처럼 `role` 같은 권한 필드가 있는 Resource는
-> `permissions.create: public`으로 열면 안 됩니다. Mold의 IR은 필드 단위
-> 권한을 지원하지 않으므로(`docs/ir-spec.md` 5절), `create`가 public이면
-> 누구나 요청 본문에 `"role": "admin"`을 직접 실어 보내 관리자 계정을
-> 만들 수 있습니다. 회원가입은 아래처럼 별도 glue 핸들러로 처리하세요.
+> [!TIP]
+> **안전한 회원가입 (`client_writable: false`)**:
+> `User.yaml`의 `role` 필드에 `client_writable: false`와 `default: "user"`를
+> 함께 지정하면, `permissions.create: public`으로 가입을 공개해두어도
+> 클라이언트가 `"role": "admin"`을 실어 보내는 공격 시도가 400 Bad Request
+> (`CLIENT_WRITE_FORBIDDEN`)로 자동 차단되며, 기본값 `"user"`로 안전하게 가입 처리됩니다.
 
-### 5.1 회원가입(Signup) 만들기
+### 5.1 회원가입(Signup)과 애플리케이션 핸들러
 
-기본 View는 모든 Resource에 대해 List/Detail/Create/Edit 제네릭 폼만
-만들어줍니다. `User`도 예외가 아니라서, "회원가입 화면"이라는 전용 개념은
-Mold에 없습니다 — 어떤 필드를 받고 어떤 온보딩 흐름을 보여줄지는
-`docs/philosophy.md`가 명시적으로 Frontend/제품의 영역으로 남겨둔
-부분입니다.
+`client_writable: false` 덕분에 단순한 회원가입은 별도 백엔드 코드 작성 없이
+Mold 기본 CRUD 화면 및 REST API (`POST /api/users`)만으로 즉시 안전하게 수용할 수 있습니다.
 
-그래서 안전한 회원가입은 두 부분으로 나눠서 만듭니다.
+그러나 다음과 같이 부가적인 서비스 로직이 필요한 경우에는 커스텀 커스텀 핸들러 (Glue Handler)를 작성하는 편이 권장됩니다:
 
-1. **`User.yaml`의 `permissions.create`를 `role:admin`으로 좁힌다** — 일반
-   REST create 엔드포인트(`POST /api/users`)를 가입 창구로 쓰지 않습니다.
-2. **`/signup` 같은 전용 엔드포인트를 하나 만들고, 그 안에서 `email`/
-   `password`/`name`만 클라이언트에서 받고 `role`은 서버가 항상
-   `"user"`로 고정해서 `app.CreateRecord`를 호출한다.**
+1. **이메일 인증 토큰 발급 및 발송**: 회원가입 직후 이메일 검증 링크/토큰을 발급해야 하는 경우
+2. **소셜 로그인 (OAuth Callback)**: Google, GitHub 등 외부 Provider 인증 완료 후 세션을 잇는 경우 (`examples/drink-log-pilot/functions/api/auth/google/callback.ts` 참조)
+3. **복합 온보딩 트랜잭션**: 회원가입과 동시에 기본 워크스페이스나 초기 설정 레코드를 함께 생성해야 하는 경우
 
-전체 예제는 `examples/quickstart/with-auth/main.go`에 있습니다. `examples/drink-log-pilot/functions/api/auth/google/callback.ts`의
-OAuth 콜백 glue 코드와 정확히 같은 패턴입니다 — 외부/공개 입력을 코어에
-그대로 통과시키지 않고, 신뢰할 수 없는 필드를 걸러내는 얇은 애플리케이션
-레이어를 하나 둡니다.
+단순 가입은 Mold 기본 기능으로 해결하고, 비즈니스 특화 부가 로직이 있을 때만 얇은 커스텀 핸들러를 얹어 확장하면 됩니다.
 
 ### 5.2 트러블슈팅: 필드를 추가했는데 `no column named ...` 에러가 발생하는 경우
 

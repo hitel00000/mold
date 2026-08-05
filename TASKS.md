@@ -319,17 +319,23 @@
     6. `docs/ir-spec.md` 5절에 CREATE-time 자동 주입 규칙 명세 추가.
   - **Task 8.2와의 결합 재평가**: Task 8.1 구현 완료로 `Post.author_id` 등의 소유권 필드 위조가 기본 REST API(`POST /api/posts`) 및 HTML View 폼에서 완벽히 원천 차단됨. 이에 따라 별도 `/posts/create` glue 핸들러 없이도 기본 API만으로 안전한 소유권 주입이 가능해졌으며, `User.role` 등의 client-non-writable 필드를 다루는 Task 8.2(설계)와 결합 시 glue 핸들러 의존성을 획기적으로 줄일 수 있음을 확인.
 
-- [ ] **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**
-  - **배경**: `User.role`처럼 클라이언트가 절대 임의 지정할 수 없어야 하는 필드가 존재할 때, 현재는 (a) `permissions.create`를 좁게 잠가 기본 View 폼 자체를 닫거나, (b) `create: public`으로 열어 위험한 필드가 노출된 폼을 공개하는 두 가지 나쁜 선택지만 존재한다.
-  - **제안 방향**: 필드 단위 신규 속성(가칭 `client_writable: false`, 명칭은 설계 단계에서 재검토 가능)을 도입하여:
-    1. REST API 요청 payload에서 이 필드 입력을 무시 또는 거부.
-    2. 기본 View의 Create/Edit 폼 렌더링 시 해당 input 요소 배제.
-    3. `default` 값이 지정되어 있으면 해당 기본값 적용.
-  - **AGENTS.md 원칙 9 적용 (선 설계 후 구현)**: 이 작업은 `resource/ir.go` 및 `docs/ir-spec.md` 확장이 수반되므로 **코드를 작성하기 전에** 대안 옵션과 트레이드오프를 담은 브리핑 문서(`docs/tasks/client-writable-field-brief.md`)를 작성하여 승인을 받는다:
-    - `password` 타입의 응답 자동 은폐 특수 메커니즘과의 관계 정리
-    - Payload 입력 수신 시 "조용히 무시" vs "400 Bad Request 거부" 트레이드오프 비교
-    - 9개 Target (Go REST/View, Cloudflare TS Codegen 등) 영향성 전수 점검
-  - **완료 조건 (설계 단계)**:
-    - 옵션 A/B/C 설계 대안 및 트레이드오프 명시.
-    - `docs/philosophy.md` ⑦(마세라티 원칙) 및 `docs/ir-spec.md` 5절과의 정합성 판정.
-  - **의존 관계**: Task 8.1 완료 후 연속적으로 진행할 수 있으며, 두 Task가 결합되면 glue 핸들러 없이 기본 API만으로 완전한 보안과 UX를 제공할 수 있는지 최종 평가한다.
+- [x] **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) 완결**
+  - **커밋**:
+    - `9d75861`: `feat(resource): add ClientWritable field to IR and handle YAML default true in loader`
+    - `67a9f5e`: `feat(plan): include ClientWritable in FieldPlan`
+    - `ea705cf`: `feat(resource): enforce 400 rejection for non-client-writable fields in ValidateRecord`
+    - `4a58ea5`: `feat(view): exclude non-client-writable fields from form fields and handle in form parsing`
+    - `5d10967`: `feat(transport): handle CLIENT_WRITE_FORBIDDEN error response and 1-step multipart validation`
+    - `c107642`: `feat(codegen): add client_writable validation check to Cloudflare Workers TS target`
+    - `57df27e`: `test(resource): add unit and E2E tests for client_writable field attribute`
+    - `40577f7`: `refactor(resource): export ErrClientWriteForbidden sentinel error and enhance raw proof logs`
+  - **작업 내용**:
+    1. `resource.Field`에 `ClientWritable bool` (기본값 `true`) 추가 및 `UnmarshalYAML` / `NormalizeFields()`에서 정규화.
+    2. `plan.FieldPlan`으로 `ClientWritable` 전파.
+    3. `resource.ValidateRecord`에서 `!f.ClientWritable` 필드 키 존재 시(값 또는 explicit `null` 포함) `resource.ErrClientWriteForbidden` Sentinel 에러 및 `resource.ClientWriteForbiddenError` 반환.
+    4. View Widget (`view/widget.go`) Create/Edit 폼에서 `!f.ClientWritable` 필드 제외, 폼 변조 제출 시 `ValidateRecord` 400 Bad Request 유도.
+    5. REST API (`transport/handler.go`) 및 1-Step Multipart Blob 업로드에서 `errors.Is(err, resource.ErrClientWriteForbidden)` 감지 시 HTTP 400 Bad Request 및 에러 코드 `CLIENT_WRITE_FORBIDDEN` 반환.
+    6. Cloudflare Workers TS Target (`codegen/cloudflare/generator.go`) POST/PUT 핸들러에 `CLIENT_WRITE_FORBIDDEN` TS 검사 코드 구문 생성.
+    7. `resource/loader_test.go`에 `examples/` 내 20개 YAML/94개 필드 기본값(`true`) 전수 회귀 테스트 수립.
+    8. REST API POST(string/explicit null), CREATE default 적용, GET 상세 유지, 1-Step Multipart, PUT, View Form, Miniflare TS 8대 시나리오 실측 RAW HTTP 요청/응답 로그 검증 완결.
+    9. `docs/ir-spec.md`, `docs/resource-guide.md`, `docs/getting-started.md`, `NOW.md`, `TASKS.md` 문서 업데이트 수립.

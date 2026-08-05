@@ -115,12 +115,13 @@ fields:
 * `nullable`: 기본값 `false`
 * `default`: 생략 가능
 * `constraints`: type별로 허용되는 키가 다름 (min/max, min_length/max_length, pattern, unique, values)
+* `client_writable`: 기본값 `true`. `false`로 설정할 경우 클라이언트가 CREATE/UPDATE 페이로드에 해당 필드 키를 포함하여 제출하는 행위를 HTTP 400 Bad Request (`CLIENT_WRITE_FORBIDDEN` / `ErrClientWriteForbidden`)로 즉시 거부한다. YAML 로더(`UnmarshalYAML`) 및 `NormalizeFields()`를 통한 파생 FK 필드 생성 시 명시되지 않은 경우 항상 `true`로 자동 정규화된다.
 * `deprecated`, `deprecated_since`: append-only 필드 폐기용. `deprecated: true`인 필드는 CRUD API 응답/Form에서 제외되지만 컬럼은 유지됨.
 
 ### 파생 FK 필드 정규화 (`resource.NormalizeFields()`) 및 Golden DDL Parity
 
 * **암묵적 FK 필드 확장**: `relations` 노드에 `belongs_to` 관계(`rel.Kind == KindBelongsTo`)가 선언되고 외래키 이름(`rel.ForeignKey`)이 지정된 경우, `fields` 목록에 해당 FK 필드를 중복 기재하지 않더라도 `res.NormalizeFields()`를 통해 단일 `[]Field` 슬라이스로 자동 확장된다.
-* **Golden DDL Parity (파생 FK의 `Nullable: true`)**: `NormalizeFields()`에 의해 자동 파생되는 FK 필드는 `Type: TypeInt`, `Nullable: true`로 기본 생성된다 (`Field{Name: rel.ForeignKey, Type: TypeInt, Nullable: true}`). 이는 DDL 생성 및 Record Validation 시 명시적 필드 미작성 FK 컬럼이 `"post_id" INTEGER` (NULL 허용)로 일관되게 처리되도록 보장하기 위한 골든 패리티 보정 규칙이다.
+* **Golden DDL Parity (파생 FK의 `Nullable: true` & `ClientWritable: true`)**: `NormalizeFields()`에 의해 자동 파생되는 FK 필드는 `Type: TypeInt`, `Nullable: true`, `ClientWritable: true`로 기본 생성된다 (`Field{Name: rel.ForeignKey, Type: TypeInt, Nullable: true, ClientWritable: true}`). 이는 DDL 생성 및 Record Validation 시 명시적 필드 미작성 FK 컬럼이 `"post_id" INTEGER` (NULL 허용)로 일관되게 처리되도록 보장하기 위한 골든 패리티 보정 규칙이다.
 * **중복 방지 (Deduplication)**: YAML 작성자가 `fields`에 FK 컬럼(예: `post_id`)을 명시적으로 선언한 경우, `NormalizeFields()`는 `fieldMap`을 통해 이를 감지하고 중복 필드를 생성하지 않으며 명시적 필드 정의를 그대로 유지한다.
 
 ---
@@ -187,6 +188,12 @@ auth:
 - **인증 사용자 요청 (`sess != nil`)**: 클라이언트가 payload에 타인의 ID를 포함하여 전송하더라도(예: `author_id: 999`), 서버가 항상 로그인한 세션 사용자 ID로 덮어써서 소유권 위조를 API/View/Codegen 전체 타깃에서 원천 차단한다.
 - **미인증 요청 (`sess == nil`)**: 클라이언트가 payload에 보낸 소유권 필드 값은 제거(`NULL` / 삭제)된다. 필드가 `nullable: true`이면 DB에 `NULL` 레코드로 저장되며(공용/시스템 레코드 규칙과 일관), `nullable: false`이면 유효성 검사 실패(`400 VALIDATION_FAILED: field ... is required`)로 처리되어 미인증 사용자의 타인 소유권 명의 도용을 차단한다.
 - **특수 예외 (`ownership_field: id`)**: `User.yaml`처럼 자기 자신의 레코드 소유권을 나타내어 `ownership_field`가 `id` (INTEGER Primary Key)로 지정된 특수 케이스는 PK 자동 발급 무결성을 유지하기 위해 세션 ID 덮어쓰기 대상에서 제외된다.
+
+### `client_writable: false`와 `ownership_field` 자동 주입 규칙의 차이점
+
+`client_writable: false`와 `ownership_field` 자동 주입 규칙은 모두 **"서버가 필드 값을 통제하여 위변조를 방지한다"**는 목적을 공유하지만, 클라이언트 페이로드 수용 방식 및 반환 동작에서 명확한 차이가 있다:
+- **`client_writable: false` (엄격한 거부 / 400 Bad Request)**: `role`, `badge`, `is_verified`와 같은 시스템/어드민 전용 통제 필드에 적용된다. 클라이언트가 생성/수정 요청 페이로드에 해당 필드 키를 명시적으로 포함하기만 해도(값이 `null`이더라도) **요청을 400 Bad Request (`CLIENT_WRITE_FORBIDDEN` / `ErrClientWriteForbidden`)로 즉시 거부**한다. 값은 DB 스키마의 `default` 설정이나 백엔드 서버 로직에 의해서만 초기화된다.
+- **`ownership_field` 자동 주입 (편의적 덮어쓰기 / 200~201 Success)**: `author_id`와 같은 소유권 연관 필드에 적용된다. 인증된 사용자가 생성 요청 시 해당 필드 키를 포함하더라도 에러로 거부하지 않고 **현재 로그인된 세션 ID로 안전하게 자동 덮어쓴 뒤 201 Created로 정상 처리**한다. 이를 통해 사용자 입장에서 별도의 외래키 전송 없이도 본인 작성글 생성이 매끄럽게 동작한다.
 
 ### List 액션의 Ownership 레코드 필터링 규칙
 

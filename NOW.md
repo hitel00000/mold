@@ -48,7 +48,6 @@
 2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
 3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
 4. [x] ~~**Task 8.1: Ownership Field CREATE-time 자동 주입**~~ (완료: 커밋 `8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`)
-5. 👉 **Task 8.2: Client-Writable 필드 차단 (`client_writable: false`) — IR 확장 설계 우선**:
-   - **사유**: `User.role` 등 클라이언트 작성 불가 필드를 기본 View 폼 및 REST payload에서 제외. IR 확장이 수반되므로 코드를 짜기 전 설계 브리핑 우선 제출 (`AGENTS.md` 원칙 9).
-6. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: 다중 Storage 백엔드 확장. Phase 8 완료 후 진행.
+5. [x] ~~**Task 8.2: Client-Writable 필드 차단 (`client_writable: false`)**~~ (완료: Option A Field-level IR 확장 + 400 Bad Request 거부 + `CLIENT_WRITE_FORBIDDEN` + `ErrClientWriteForbidden` sentinel error + 5개 타깃 일관 전파)
+6. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+   - **사유**: 다중 Storage 백엔드 확장 (마세라티 원칙에 따라 필요성 확인 후 세션 시작 시 확정).

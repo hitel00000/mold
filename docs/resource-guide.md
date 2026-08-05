@@ -246,3 +246,13 @@ AI 에이전트는 Resource YAML을 작성/수정할 때 아래의 **잘못된 �
 
 
 ---
+
+### 패턴 8: `client_writable: false` 필드 속성을 활용한 안전한 공공 회원가입 및 권한 상승 방지
+
+> **위험성**: `role`, `badge`, `is_verified`와 같은 민감/시스템 통제 필드를 `client_writable: false` 속성 없이 `permissions.create: public`으로 열어둘 경우, 일반 사용자가 가입/생성 요청 시 `role: "admin"`을 실어 보내 관리자 권한으로 승격되는 위험이 발생함.
+> **올바른 패턴**: 민감 필드에 `client_writable: false`와 `default: "user"`를 지정하면, `permissions.create: public` 상태에서도 클라이언트가 해당 필드 키를 전송하는 모든 요청(값 또는 explicit null 포함)이 HTTP 400 Bad Request (`CLIENT_WRITE_FORBIDDEN`)로 자동 차단되며, 서버 DB 스키마 default 설정에 따라 기본값 `"user"`로 안전하게 가입 처리됨.
+
+| ❌ Bad (잘못된 설정) | ✅ Good (올바른 설정) |
+| :--- | :--- |
+| ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>fields:<br>  - name: email<br>    type: email<br>  - name: role<br>    type: enum<br>    nullable: false<br>    default: "user"<br>    constraints:<br>      values: ["admin", "user"]<br>    # ❌ client_writable 속성 누락!<br>    # public 회원가입 시 role: "admin" 전송하면 승격 위험<br><br>auth:<br>  permissions:<br>    create: public<br>``` | ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>fields:<br>  - name: email<br>    type: email<br>  - name: role<br>    type: enum<br>    nullable: false<br>    default: "user"<br>    client_writable: false  # ✅ 클라이언트 페이로드 쓰기 완전 차단!<br>    constraints:<br>      values: ["admin", "user"]<br><br>auth:<br>  permissions:<br>    create: public  # ✅ permissions.create: public이어도 안심하고 개방 가능<br>``` |
+
