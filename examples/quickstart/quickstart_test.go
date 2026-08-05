@@ -89,6 +89,12 @@ func TestQuickstart_WithAuth(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// Sanitize record to remove sensitive/deprecated fields (e.g. password)
+		user, err = app.SanitizeRecord("User", user)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		var userID int64
 		switch v := user["id"].(type) {
 		case int64:
@@ -138,22 +144,40 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"data": post})
 	}
 
-	// 1. Direct POST /api/users with non-client-writable field (badge: gold) -> Rejection (400 Bad Request / CLIENT_WRITE_FORBIDDEN)
-	badBody := `{"email":"hacker@example.com","password":"password123","name":"Hacker","badge":"gold"}`
-	reqBad, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badBody))
-	reqBad.Header.Set("Content-Type", "application/json")
-	wBad := httptest.NewRecorder()
-	app.ServeHTTP(wBad, reqBad)
+	// 1a. Direct POST /api/users with role: admin -> Rejection (403 FORBIDDEN / privilege escalation block)
+	badAdminBody := `{"email":"hacker1@example.com","password":"password123","name":"Hacker","role":"admin"}`
+	reqBadAdmin, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badAdminBody))
+	reqBadAdmin.Header.Set("Content-Type", "application/json")
+	wBadAdmin := httptest.NewRecorder()
+	app.ServeHTTP(wBadAdmin, reqBadAdmin)
 
-	t.Logf("=== DIRECT POST /api/users REJECTION TEST (role: admin) ===")
-	t.Logf("POST /api/users\n%s", badBody)
-	t.Logf("HTTP/1.1 %d\n%s", wBad.Code, wBad.Body.String())
+	t.Logf("=== DIRECT POST /api/users PRIVILEGE ESCALATION REJECTION TEST (role: admin) ===")
+	t.Logf("POST /api/users\n%s", badAdminBody)
+	t.Logf("HTTP/1.1 %d\n%s", wBadAdmin.Code, wBadAdmin.Body.String())
 
-	if wBad.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request for role: admin payload, got %d: %s", wBad.Code, wBad.Body.String())
+	if wBadAdmin.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for role: admin payload, got %d: %s", wBadAdmin.Code, wBadAdmin.Body.String())
 	}
-	if !strings.Contains(wBad.Body.String(), "CLIENT_WRITE_FORBIDDEN") {
-		t.Errorf("expected error code CLIENT_WRITE_FORBIDDEN, got %s", wBad.Body.String())
+	if !strings.Contains(wBadAdmin.Body.String(), "FORBIDDEN") {
+		t.Errorf("expected error code FORBIDDEN, got %s", wBadAdmin.Body.String())
+	}
+
+	// 1b. Direct POST /api/users with role: user -> Rejection (403 FORBIDDEN / privilege escalation block)
+	badUserBody := `{"email":"hacker2@example.com","password":"password123","name":"Hacker","role":"user"}`
+	reqBadUser, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badUserBody))
+	reqBadUser.Header.Set("Content-Type", "application/json")
+	wBadUser := httptest.NewRecorder()
+	app.ServeHTTP(wBadUser, reqBadUser)
+
+	t.Logf("=== DIRECT POST /api/users PRIVILEGE ESCALATION REJECTION TEST (role: user) ===")
+	t.Logf("POST /api/users\n%s", badUserBody)
+	t.Logf("HTTP/1.1 %d\n%s", wBadUser.Code, wBadUser.Body.String())
+
+	if wBadUser.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for role field attempt, got %d: %s", wBadUser.Code, wBadUser.Body.String())
+	}
+	if !strings.Contains(wBadUser.Body.String(), "FORBIDDEN") {
+		t.Errorf("expected error code FORBIDDEN, got %s", wBadUser.Body.String())
 	}
 
 	// 2. Direct POST /api/users omitting role -> 201 Created & default role: "user" applied
@@ -203,7 +227,7 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		t.Errorf("SECURITY RISK: password exposed in GET response!")
 	}
 
-	// 4. Test /signup Glue Handler (instant session cookie issuance)
+	// 4. Test /signup Glue Handler (instant session cookie issuance + password sanitization audit)
 	signupBody := `{"email":"newuser@example.com","password":"password123","name":"New User"}`
 	reqSignup, _ := http.NewRequest(http.MethodPost, "/signup", strings.NewReader(signupBody))
 	reqSignup.Header.Set("Content-Type", "application/json")
@@ -222,6 +246,16 @@ func TestQuickstart_WithAuth(t *testing.T) {
 	cookieVal := wSignup.Header().Get("Set-Cookie")
 	if !strings.Contains(cookieVal, "_mold_session=") {
 		t.Fatalf("expected _mold_session cookie, got: %s", cookieVal)
+	}
+
+	var signupRes struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(wSignup.Body.Bytes(), &signupRes); err != nil {
+		t.Fatalf("failed parsing signup response: %v", err)
+	}
+	if _, passExposed := signupRes.Data["password"]; passExposed {
+		t.Errorf("SECURITY RISK: password exposed in /signup response!")
 	}
 
 	// 5. Test /posts/create with session cookie

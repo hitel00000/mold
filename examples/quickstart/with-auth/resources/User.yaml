@@ -17,11 +17,6 @@ fields:
   - name: name
     type: string
     nullable: false
-  - name: badge
-    type: string
-    nullable: false
-    default: "bronze"
-    client_writable: false
   - name: role
     type: enum
     nullable: false
