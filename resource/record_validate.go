@@ -55,7 +55,11 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		if deprecatedFields[k] {
 			return fmt.Errorf("resource '%s': field '%s' is deprecated and cannot be written", r.Name, k)
 		}
-		if _, isValid := validFields[k]; !isValid {
+		if f, isValid := validFields[k]; isValid {
+			if !f.ClientWritable {
+				return fmt.Errorf("resource '%s': field '%s' is not client-writable", r.Name, k)
+			}
+		} else {
 			return fmt.Errorf("resource '%s': unknown field '%s'", r.Name, k)
 		}
 	}

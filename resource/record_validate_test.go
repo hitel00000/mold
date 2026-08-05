@@ -11,8 +11,8 @@ func TestValidateRecord_UnknownDeprecatedAndPKFields(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
-			{Name: "legacy_slug", Type: resource.TypeString, Deprecated: true, DeprecatedSince: &depSince},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "legacy_slug", Type: resource.TypeString, Deprecated: true, DeprecatedSince: &depSince, ClientWritable: true},
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestValidateRecord_GoldenExecutionOrderSnapshot(t *testing.T) {
 		Timestamps: true,
 		SoftDelete: true,
 		Fields: []resource.Field{
-			{Name: "username", Type: resource.TypeString, Nullable: false, Constraints: resource.Constraints{MinLength: &minLen}},
+			{Name: "username", Type: resource.TypeString, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{MinLength: &minLen}},
 		},
 		Relations: []resource.Relation{
 			{Name: "org", Kind: resource.KindBelongsTo, Target: "Org", ForeignKey: "org_id"},
@@ -97,7 +97,7 @@ func TestValidateRecord_SystemColumnRejection(t *testing.T) {
 		Timestamps: true,
 		SoftDelete: true,
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -119,7 +119,7 @@ func TestValidateRecord_SystemColumnRejection(t *testing.T) {
 		Timestamps: false,
 		SoftDelete: false,
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -134,11 +134,11 @@ func TestValidateRecord_FieldTypeMismatch(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: true},
-			{Name: "view_count", Type: resource.TypeInt, Nullable: true},
-			{Name: "rating", Type: resource.TypeFloat, Nullable: true},
-			{Name: "is_published", Type: resource.TypeBool, Nullable: true},
-			{Name: "published_at", Type: resource.TypeDateTime, Nullable: true},
+			{Name: "title", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "view_count", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
+			{Name: "rating", Type: resource.TypeFloat, Nullable: true, ClientWritable: true},
+			{Name: "is_published", Type: resource.TypeBool, Nullable: true, ClientWritable: true},
+			{Name: "published_at", Type: resource.TypeDateTime, Nullable: true, ClientWritable: true},
 		},
 	}
 
@@ -189,7 +189,7 @@ func TestValidateRecord_RequiredFieldMissing(t *testing.T) {
 	res := &resource.Resource{
 		Name: "Post",
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -213,9 +213,10 @@ func TestValidateRecord_MinMaxLength(t *testing.T) {
 		Name: "Post",
 		Fields: []resource.Field{
 			{
-				Name:     "title",
-				Type:     resource.TypeString,
-				Nullable: false,
+				Name:           "title",
+				Type:           resource.TypeString,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					MinLength: &minLen,
 					MaxLength: &maxLen,
@@ -248,9 +249,10 @@ func TestValidateRecord_Pattern(t *testing.T) {
 		Name: "User",
 		Fields: []resource.Field{
 			{
-				Name:     "email",
-				Type:     resource.TypeEmail,
-				Nullable: false,
+				Name:           "email",
+				Type:           resource.TypeEmail,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					Pattern: `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`,
 				},
@@ -278,9 +280,10 @@ func TestValidateRecord_MinMax(t *testing.T) {
 		Name: "Product",
 		Fields: []resource.Field{
 			{
-				Name:     "price",
-				Type:     resource.TypeFloat,
-				Nullable: false,
+				Name:           "price",
+				Type:           resource.TypeFloat,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					Min: &minVal,
 					Max: &maxVal,
@@ -305,5 +308,39 @@ func TestValidateRecord_MinMax(t *testing.T) {
 	err = resource.ValidateRecord(res, map[string]any{"price": 49.99}, false)
 	if err != nil {
 		t.Errorf("unexpected error for valid price: %v", err)
+	}
+}
+
+func TestValidateRecord_ClientWritable(t *testing.T) {
+	res := &resource.Resource{
+		Name: "User",
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, Default: "user", ClientWritable: false, Constraints: resource.Constraints{Values: []string{"admin", "user"}}},
+		},
+	}
+
+	// 1. Reject payload containing client_writable: false field (with string value)
+	err := resource.ValidateRecord(res, map[string]any{"email": "user@example.com", "role": "admin"}, false)
+	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
+		t.Errorf("expected non-client-writable error for role: admin, got: %v", err)
+	}
+
+	// 2. Reject payload containing client_writable: false field (even with null value)
+	err = resource.ValidateRecord(res, map[string]any{"email": "user@example.com", "role": nil}, false)
+	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
+		t.Errorf("expected non-client-writable error for role: nil, got: %v", err)
+	}
+
+	// 3. Reject on Update as well if field is present
+	err = resource.ValidateRecord(res, map[string]any{"role": "user"}, true)
+	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
+		t.Errorf("expected non-client-writable error on Update, got: %v", err)
+	}
+
+	// 4. Accept payload omitting client_writable: false field
+	err = resource.ValidateRecord(res, map[string]any{"email": "user@example.com"}, false)
+	if err != nil {
+		t.Errorf("unexpected error when non-client-writable field is omitted: %v", err)
 	}
 }
