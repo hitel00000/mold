@@ -188,6 +188,25 @@ func (a *App) CreateRecord(ctx context.Context, resourceName string, record map[
 	return created, nil
 }
 
+// SanitizeRecord removes fields marked with deprecated: true or password type from a record map
+// using the registered Resource IR. It is intended for custom handlers calling CreateRecord/GetRecord.
+func (a *App) SanitizeRecord(resourceName string, record map[string]any) (map[string]any, error) {
+	a.mu.RLock()
+	resReg := a.resReg
+	a.mu.RUnlock()
+
+	if resReg == nil {
+		return nil, ErrNotInitialized
+	}
+
+	res, ok := resReg.Get(resourceName)
+	if !ok || res == nil {
+		return nil, fmt.Errorf("%w: %q", ErrResourceNotFound, resourceName)
+	}
+
+	return transport.SanitizeRecord(res, record), nil
+}
+
 // ServeHTTP implements http.Handler for App, dispatching requests to API router or HTML view handler.
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()

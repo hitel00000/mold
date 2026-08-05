@@ -71,6 +71,9 @@ func signupHandler(app *runtime.App) http.HandlerFunc {
 			return
 		}
 
+		// Sanitize record to remove sensitive/deprecated fields (e.g. password) before JSON encoding
+		user, _ = app.SanitizeRecord("User", user)
+
 		userID, ok := user["id"].(int64)
 		if !ok {
 			http.Error(w, `{"error":{"code":"INTERNAL_ERROR","message":"unexpected id type"}}`, http.StatusInternalServerError)
