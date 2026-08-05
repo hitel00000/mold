@@ -618,6 +618,13 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				continue
 			}
 
+			if !f.ClientWritable {
+				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined) {\n", f.Name))
+				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'%s\\' is not client-writable');\n", f.Name))
+				sb.WriteString("  }\n")
+				continue
+			}
+
 			if !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob {
 				sb.WriteString(fmt.Sprintf("  if (body['%s'] === undefined || body['%s'] === null) {\n", f.Name, f.Name))
 				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s is required');\n", f.Name))
@@ -817,6 +824,17 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  if (body['role'] !== undefined && body['role'] !== (existing as any)['role'] && body['role'] === 'admin' && (!authUser || authUser.role !== 'admin')) {\n")
 		sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'cannot grant admin role');\n")
 		sb.WriteString("  }\n")
+
+		for _, f := range p.Fields {
+			if f.Deprecated {
+				continue
+			}
+			if !f.ClientWritable {
+				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined) {\n", f.Name))
+				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'%s\\' is not client-writable');\n", f.Name))
+				sb.WriteString("  }\n")
+			}
+		}
 
 		// Password hashing on update
 		for _, f := range p.Fields {

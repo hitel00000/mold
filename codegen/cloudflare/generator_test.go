@@ -1136,3 +1136,31 @@ func TestCloudflareGenerator_OwnershipAutoInjectionTS(t *testing.T) {
 	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS CODE SNIPPET (POST /api/posts) ===")
 	t.Logf("%s", expectedSnippet)
 }
+
+func TestCloudflareGenerator_ClientWritableTS(t *testing.T) {
+	res := &resource.Resource{
+		Name:  "User",
+		Table: "users",
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, Default: "user", ClientWritable: false},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	reg.Register(res)
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	expectedSnippet := "if (body['role'] !== undefined) {\n    return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'role\\' is not client-writable');\n  }"
+	if !strings.Contains(output.IndexTS, expectedSnippet) {
+		t.Fatalf("expected generated IndexTS to contain client_writable check snippet:\n%s\ngot IndexTS:\n%s", expectedSnippet, output.IndexTS)
+	}
+
+	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS CODE SNIPPET (CLIENT_WRITE_FORBIDDEN) ===")
+	t.Logf("%s", expectedSnippet)
+}
