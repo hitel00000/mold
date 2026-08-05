@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -549,32 +550,62 @@ func TestTransport_ClientWritable_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to send post: %v", err)
 	}
-	defer respBad.Body.Close()
+	bodyBadBytes, _ := io.ReadAll(respBad.Body)
+	respBad.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 1 - POST Rejection on client_writable: false field]:")
+	t.Logf("  POST /api/users Payload: %s", postBodyBad)
+	t.Logf("  Response Status: %d %s", respBad.StatusCode, http.StatusText(respBad.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyBadBytes))
 
 	if respBad.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for non-client-writable field on POST, got %d", respBad.StatusCode)
 	}
 
 	var errEnv transport.ErrorEnvelope
-	_ = json.NewDecoder(respBad.Body).Decode(&errEnv)
+	_ = json.Unmarshal(bodyBadBytes, &errEnv)
 	if errEnv.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
 		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN', got '%s'", errEnv.Error.Code)
 	}
 
-	// 2. Successful POST without badge -> 201 Created
+	// 2. Rejection on POST with explicit null key ({"email": "test@example.com", "badge": null}) -> 400 CLIENT_WRITE_FORBIDDEN
+	postBodyNull := `{"email": "nulltest@example.com", "badge": null}`
+	respNull, err := ts.Client().Post(ts.URL+"/api/users", "application/json", strings.NewReader(postBodyNull))
+	if err != nil {
+		t.Fatalf("failed to send post null: %v", err)
+	}
+	bodyNullBytes, _ := io.ReadAll(respNull.Body)
+	respNull.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 2 - POST Rejection on explicit null key (badge: null)]:")
+	t.Logf("  POST /api/users Payload: %s", postBodyNull)
+	t.Logf("  Response Status: %d %s", respNull.StatusCode, http.StatusText(respNull.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyNullBytes))
+
+	if respNull.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for explicit null key on POST, got %d", respNull.StatusCode)
+	}
+
+	// 3. Successful POST without badge -> 201 Created & Default value "bronze" applied
 	postBodyOk := `{"email": "normal@example.com"}`
 	respOk, err := ts.Client().Post(ts.URL+"/api/users", "application/json", strings.NewReader(postBodyOk))
 	if err != nil {
 		t.Fatalf("failed to send post ok: %v", err)
 	}
-	defer respOk.Body.Close()
+	bodyOkBytes, _ := io.ReadAll(respOk.Body)
+	respOk.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 3 - Normal Registration without badge]:")
+	t.Logf("  POST /api/users Payload: %s", postBodyOk)
+	t.Logf("  Response Status: %d %s", respOk.StatusCode, http.StatusText(respOk.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyOkBytes))
 
 	if respOk.StatusCode != http.StatusCreated {
 		t.Fatalf("expected 201 Created on normal user registration, got %d", respOk.StatusCode)
 	}
 
 	var createEnv transport.SuccessEnvelope
-	_ = json.NewDecoder(respOk.Body).Decode(&createEnv)
+	_ = json.Unmarshal(bodyOkBytes, &createEnv)
 	userRec, ok := createEnv.Data.(map[string]any)
 	if !ok || userRec["id"] == nil {
 		t.Fatalf("expected created user to have id, got %v", createEnv.Data)
@@ -582,25 +613,61 @@ func TestTransport_ClientWritable_E2E(t *testing.T) {
 
 	userID := userRec["id"]
 
-	// 3. GET /api/users/{id} -> Verify badge field is preserved in read response (not sanitized) and defaulted to "bronze"
+	// 4. GET /api/users/{id} -> Verify badge field is preserved in read response (not sanitized) and defaulted to "bronze"
 	respGet, err := ts.Client().Get(ts.URL + fmt.Sprintf("/api/users/%v", userID))
 	if err != nil {
 		t.Fatalf("failed to send get: %v", err)
 	}
-	defer respGet.Body.Close()
+	bodyGetBytes, _ := io.ReadAll(respGet.Body)
+	respGet.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 4 - GET User Detail Response Retaining Default 'bronze']:")
+	t.Logf("  GET /api/users/%v", userID)
+	t.Logf("  Response Status: %d %s", respGet.StatusCode, http.StatusText(respGet.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyGetBytes))
 
 	if respGet.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK on GET user detail, got %d", respGet.StatusCode)
 	}
 
 	var getEnv transport.SuccessEnvelope
-	_ = json.NewDecoder(respGet.Body).Decode(&getEnv)
+	_ = json.Unmarshal(bodyGetBytes, &getEnv)
 	getRec, ok := getEnv.Data.(map[string]any)
 	if !ok || getRec["badge"] != "bronze" {
-		t.Errorf("expected GET detail response to retain badge 'bronze', got %v", getRec["badge"])
+		t.Errorf("expected GET detail response to retain default badge 'bronze', got %v", getRec["badge"])
 	}
 
-	// 4. Rejection on PUT /api/users/{id} with badge -> 400 CLIENT_WRITE_FORBIDDEN
+	// 5. Rejection on 1-Step Multipart POST with non-client-writable form field (badge=gold) -> 400 CLIENT_WRITE_FORBIDDEN
+	var mpBuf bytes.Buffer
+	mpWriter := multipart.NewWriter(&mpBuf)
+	_ = mpWriter.WriteField("email", "multipart_hacker@example.com")
+	_ = mpWriter.WriteField("badge", "gold")
+	_ = mpWriter.Close()
+
+	reqMp, _ := http.NewRequest("POST", ts.URL+"/api/users", &mpBuf)
+	reqMp.Header.Set("Content-Type", mpWriter.FormDataContentType())
+	respMp, err := ts.Client().Do(reqMp)
+	if err != nil {
+		t.Fatalf("failed to send multipart post: %v", err)
+	}
+	bodyMpBytes, _ := io.ReadAll(respMp.Body)
+	respMp.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 5 - 1-Step Multipart Form POST Rejection]:")
+	t.Logf("  POST /api/users (Content-Type: %s)", mpWriter.FormDataContentType())
+	t.Logf("  Response Status: %d %s", respMp.StatusCode, http.StatusText(respMp.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyMpBytes))
+
+	if respMp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on 1-Step Multipart POST with non-client-writable field, got %d", respMp.StatusCode)
+	}
+	var errMpEnv transport.ErrorEnvelope
+	_ = json.Unmarshal(bodyMpBytes, &errMpEnv)
+	if errMpEnv.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
+		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN' on Multipart POST, got '%s'", errMpEnv.Error.Code)
+	}
+
+	// 6. Rejection on PUT /api/users/{id} with badge -> 400 CLIENT_WRITE_FORBIDDEN
 	putBodyBad := `{"badge": "gold"}`
 	reqPut, _ := http.NewRequest("PUT", ts.URL+fmt.Sprintf("/api/users/%v", userID), strings.NewReader(putBodyBad))
 	reqPut.Header.Set("Content-Type", "application/json")
@@ -608,13 +675,19 @@ func TestTransport_ClientWritable_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to send put: %v", err)
 	}
-	defer respPut.Body.Close()
+	bodyPutBytes, _ := io.ReadAll(respPut.Body)
+	respPut.Body.Close()
+
+	t.Logf("[RAW HTTP PROOF 6 - PUT Rejection on client_writable: false field]:")
+	t.Logf("  PUT /api/users/%v Payload: %s", userID, putBodyBad)
+	t.Logf("  Response Status: %d %s", respPut.StatusCode, http.StatusText(respPut.StatusCode))
+	t.Logf("  Response Body: %s", string(bodyPutBytes))
 
 	if respPut.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request on PUT with non-client-writable field, got %d", respPut.StatusCode)
 	}
 	var errPutEnv transport.ErrorEnvelope
-	_ = json.NewDecoder(respPut.Body).Decode(&errPutEnv)
+	_ = json.Unmarshal(bodyPutBytes, &errPutEnv)
 	if errPutEnv.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
 		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN' on PUT, got '%s'", errPutEnv.Error.Code)
 	}

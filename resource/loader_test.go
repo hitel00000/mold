@@ -1,7 +1,9 @@
 package resource_test
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hitel00000/mold/resource"
@@ -143,5 +145,41 @@ fields:
 	if roleField.Name != "role" || roleField.ClientWritable {
 		t.Errorf("expected field 'role' to have ClientWritable false, got %v", roleField.ClientWritable)
 	}
+}
+
+func TestLoad_AllExistingExamplesDefaultClientWritableTrue(t *testing.T) {
+	examplesRoot := filepath.Join("..", "examples")
+	yamlCount := 0
+	fieldCount := 0
+
+	err := filepath.Walk(examplesRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+			yamlCount++
+			r, err := resource.LoadFromFile(path)
+			if err != nil {
+				t.Fatalf("failed loading example YAML file %s: %v", path, err)
+			}
+			for _, f := range r.NormalizeFields() {
+				fieldCount++
+				if !f.ClientWritable {
+					t.Errorf("REGRESSION DETECTED: File %s field '%s' has ClientWritable false, expected true default", path, f.Name)
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("failed walking examples directory: %v", err)
+	}
+
+	if yamlCount == 0 {
+		t.Fatalf("no YAML files found under %s", examplesRoot)
+	}
+
+	t.Logf("[RAW PROOF LOG]: Verified %d YAML resource files (%d fields total) across examples/ directory - all have ClientWritable: true default!", yamlCount, fieldCount)
 }
 

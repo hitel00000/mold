@@ -596,14 +596,19 @@ func TestView_ClientWritable_FormSubmission_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to post form: %v", err)
 	}
-	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	htmlOutput := string(bodyBytes)
+
+	t.Logf("[RAW VIEW FORM PROOF 1 - Tampered HTML Form Submission Rejection]:")
+	t.Logf("  POST /view/users/create Form Data: %v", formValues)
+	t.Logf("  Response Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("  Response HTML Snippet: %s", htmlOutput)
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request when badge is sent in form, got %d", resp.StatusCode)
 	}
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	htmlOutput := string(bodyBytes)
 	if !strings.Contains(htmlOutput, "is not client-writable") {
 		t.Errorf("expected HTML error to contain 'is not client-writable', got:\n%s", htmlOutput)
 	}
@@ -622,7 +627,14 @@ func TestView_ClientWritable_FormSubmission_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed normal post form: %v", err)
 	}
-	defer resp2.Body.Close()
+	body2Bytes, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+
+	t.Logf("[RAW VIEW FORM PROOF 2 - Normal HTML Form Submission Success]:")
+	t.Logf("  POST /view/users/create Form Data: %v", normalValues)
+	t.Logf("  Response Status: %d %s", resp2.StatusCode, http.StatusText(resp2.StatusCode))
+	t.Logf("  Response Headers (Location): %s", resp2.Header.Get("Location"))
+	_ = body2Bytes
 
 	if resp2.StatusCode != http.StatusSeeOther {
 		t.Errorf("expected 303 SeeOther redirect for normal submission, got %d", resp2.StatusCode)

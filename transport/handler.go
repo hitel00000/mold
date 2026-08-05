@@ -526,7 +526,7 @@ func isClientWriteForbiddenError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "is not client-writable")
+	return errors.Is(err, resource.ErrClientWriteForbidden) || strings.Contains(err.Error(), "is not client-writable")
 }
 
 func isFKConstraintError(err error) bool {

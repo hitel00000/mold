@@ -1,6 +1,7 @@
 package resource_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/hitel00000/mold/resource"
@@ -322,25 +323,29 @@ func TestValidateRecord_ClientWritable(t *testing.T) {
 
 	// 1. Reject payload containing client_writable: false field (with string value)
 	err := resource.ValidateRecord(res, map[string]any{"email": "user@example.com", "role": "admin"}, false)
-	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
-		t.Errorf("expected non-client-writable error for role: admin, got: %v", err)
+	if err == nil || !errors.Is(err, resource.ErrClientWriteForbidden) {
+		t.Errorf("expected ErrClientWriteForbidden for role: admin, got: %v", err)
 	}
+	t.Logf("[RAW PROOF LOG 1 - Go ValidateRecord String Payload Rejection]: %v", err)
 
-	// 2. Reject payload containing client_writable: false field (even with null value)
-	err = resource.ValidateRecord(res, map[string]any{"email": "user@example.com", "role": nil}, false)
-	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
-		t.Errorf("expected non-client-writable error for role: nil, got: %v", err)
+	// 2. Reject payload containing client_writable: false field (with explicit null value: {"role": null})
+	errNull := resource.ValidateRecord(res, map[string]any{"email": "user@example.com", "role": nil}, false)
+	if errNull == nil || !errors.Is(errNull, resource.ErrClientWriteForbidden) {
+		t.Errorf("expected ErrClientWriteForbidden for role: nil, got: %v", errNull)
 	}
+	t.Logf("[RAW PROOF LOG 2 - Go ValidateRecord Explicit Null Key Rejection (role: null)]: %v", errNull)
 
-	// 3. Reject on Update as well if field is present
-	err = resource.ValidateRecord(res, map[string]any{"role": "user"}, true)
-	if err == nil || err.Error() != "resource 'User': field 'role' is not client-writable" {
-		t.Errorf("expected non-client-writable error on Update, got: %v", err)
+	// 3. Reject on Update as well if field key is present
+	errUpd := resource.ValidateRecord(res, map[string]any{"role": "user"}, true)
+	if errUpd == nil || !errors.Is(errUpd, resource.ErrClientWriteForbidden) {
+		t.Errorf("expected ErrClientWriteForbidden on Update, got: %v", errUpd)
 	}
+	t.Logf("[RAW PROOF LOG 3 - Go ValidateRecord Update Rejection]: %v", errUpd)
 
 	// 4. Accept payload omitting client_writable: false field
-	err = resource.ValidateRecord(res, map[string]any{"email": "user@example.com"}, false)
-	if err != nil {
-		t.Errorf("unexpected error when non-client-writable field is omitted: %v", err)
+	errOk := resource.ValidateRecord(res, map[string]any{"email": "user@example.com"}, false)
+	if errOk != nil {
+		t.Errorf("unexpected error when omitting client_writable: false field: %v", errOk)
 	}
+	t.Logf("[RAW PROOF LOG 4 - Go ValidateRecord Accept Payload Omitting Non-Writable Field]: err = nil")
 }

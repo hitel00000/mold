@@ -1,11 +1,29 @@
 package resource
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
 	"unicode/utf8"
 )
+
+// ErrClientWriteForbidden is the sentinel error used with errors.Is to identify non-client-writable field write attempts.
+var ErrClientWriteForbidden = errors.New("field is not client-writable")
+
+// ClientWriteForbiddenError represents a specific non-client-writable field validation error.
+type ClientWriteForbiddenError struct {
+	Resource string
+	Field    string
+}
+
+func (e *ClientWriteForbiddenError) Error() string {
+	return fmt.Sprintf("resource '%s': field '%s' is not client-writable", e.Resource, e.Field)
+}
+
+func (e *ClientWriteForbiddenError) Is(target error) bool {
+	return target == ErrClientWriteForbidden || errors.Is(target, ErrClientWriteForbidden)
+}
 
 // ValidateRecord verifies that input record data satisfies type safety and all constraints defined in the Resource IR.
 // Note: Due to Go package import cycle constraints (resource <-> plan), this function does not import plan package directly.
@@ -57,7 +75,7 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 		}
 		if f, isValid := validFields[k]; isValid {
 			if !f.ClientWritable {
-				return fmt.Errorf("resource '%s': field '%s' is not client-writable", r.Name, k)
+				return &ClientWriteForbiddenError{Resource: r.Name, Field: k}
 			}
 		} else {
 			return fmt.Errorf("resource '%s': unknown field '%s'", r.Name, k)
