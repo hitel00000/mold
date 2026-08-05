@@ -74,7 +74,7 @@ func TestView_FKField_FormSubmission_E2E(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "title", Type: resource.TypeString, Nullable: false},
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -85,7 +85,7 @@ func TestView_FKField_FormSubmission_E2E(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "body", Type: resource.TypeText, Nullable: false},
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{
@@ -186,9 +186,10 @@ func TestView_FormValidationErrorHandling_E2E(t *testing.T) {
 		SoftDelete:    true,
 		Fields: []resource.Field{
 			{
-				Name:     "title",
-				Type:     resource.TypeString,
-				Nullable: false,
+				Name:           "title",
+				Type:           resource.TypeString,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					MinLength: &minLen,
 				},
@@ -203,7 +204,7 @@ func TestView_FormValidationErrorHandling_E2E(t *testing.T) {
 		Timestamps:    true,
 		SoftDelete:    true,
 		Fields: []resource.Field{
-			{Name: "body", Type: resource.TypeText, Nullable: false},
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{
@@ -313,9 +314,10 @@ func TestFormValue_ReflectedXSS_AutoEscaping(t *testing.T) {
 		SchemaVersion: 1,
 		Fields: []resource.Field{
 			{
-				Name:     "title",
-				Type:     resource.TypeString,
-				Nullable: false,
+				Name:           "title",
+				Type:           resource.TypeString,
+				Nullable:       false,
+				ClientWritable: true,
 				Constraints: resource.Constraints{
 					MinLength: &minLen,
 				},
@@ -389,7 +391,7 @@ func TestView_RelationInclude_E2E(t *testing.T) {
 		Name:  "Tag",
 		Table: "tags",
 		Fields: []resource.Field{
-			{Name: "name", Type: resource.TypeString, Nullable: false},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -397,7 +399,7 @@ func TestView_RelationInclude_E2E(t *testing.T) {
 		Name:  "RecordTag",
 		Table: "record_tags",
 		Fields: []resource.Field{
-			{Name: "tag_id", Type: resource.TypeInt, Nullable: true},
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: true, ClientWritable: true},
 		},
 		Relations: []resource.Relation{
 			{Name: "tag", Kind: resource.KindBelongsTo, Target: "Tag", ForeignKey: "tag_id"},
@@ -491,8 +493,8 @@ func TestViewHandler_RenderLogin_EmailLabel(t *testing.T) {
 		Table:         "users",
 		SchemaVersion: 1,
 		Fields: []resource.Field{
-			{Name: "email", Type: resource.TypeEmail, Nullable: false},
-			{Name: "password", Type: resource.TypePassword, Nullable: false},
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "password", Type: resource.TypePassword, Nullable: false, ClientWritable: true},
 		},
 	}
 
@@ -530,5 +532,108 @@ func TestViewHandler_RenderLogin_EmailLabel(t *testing.T) {
 	}
 	if !strings.Contains(htmlBody, `placeholder="Enter your email address"`) {
 		t.Errorf("expected HTML to contain email placeholder, got:\n%s", htmlBody)
+	}
+}
+
+func TestBuildFormFields_ClientWritable(t *testing.T) {
+	res := &resource.Resource{
+		Name: "User",
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "badge", Type: resource.TypeString, Nullable: false, Default: "bronze", ClientWritable: false},
+		},
+	}
+
+	widgets := view.BuildFormFields(res, nil, false)
+	if len(widgets) != 1 {
+		t.Fatalf("expected 1 widget (badge excluded), got %d", len(widgets))
+	}
+	if widgets[0].Name != "email" {
+		t.Errorf("expected widget for email, got %s", widgets[0].Name)
+	}
+}
+
+func TestView_ClientWritable_FormSubmission_E2E(t *testing.T) {
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "badge", Type: resource.TypeString, Nullable: false, Default: "bronze", ClientWritable: false},
+		},
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "client_writable_form.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed sqlite.Open: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.EnsureSchema(t.Context(), userRes); err != nil {
+		t.Fatalf("failed EnsureSchema: %v", err)
+	}
+
+	reg := transport.NewRegistry()
+	reg.Register(userRes, store)
+
+	router := transport.NewRouter(reg)
+	vh, err := view.NewViewHandler(router, nil)
+	if err != nil {
+		t.Fatalf("failed NewViewHandler: %v", err)
+	}
+
+	ts := httptest.NewServer(vh)
+	defer ts.Close()
+
+	// 1. Submit form WITH badge=gold (simulating malicious form tampering)
+	formValues := url.Values{}
+	formValues.Set("email", "hacker@example.com")
+	formValues.Set("badge", "gold")
+
+	resp, err := ts.Client().PostForm(ts.URL+"/view/users/create", formValues)
+	if err != nil {
+		t.Fatalf("failed to post form: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request when badge is sent in form, got %d", resp.StatusCode)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	htmlOutput := string(bodyBytes)
+	if !strings.Contains(htmlOutput, "is not client-writable") {
+		t.Errorf("expected HTML error to contain 'is not client-writable', got:\n%s", htmlOutput)
+	}
+
+	// 2. Submit form WITHOUT badge (normal user submission)
+	normalValues := url.Values{}
+	normalValues.Set("email", "normal@example.com")
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp2, err := client.PostForm(ts.URL+"/view/users/create", normalValues)
+	if err != nil {
+		t.Fatalf("failed normal post form: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusSeeOther {
+		t.Errorf("expected 303 SeeOther redirect for normal submission, got %d", resp2.StatusCode)
+	}
+
+	// Verify in DB that badge defaulted to "bronze"
+	records, err := store.List(t.Context(), userRes, storage.Query{})
+	if err != nil || len(records) != 1 {
+		t.Fatalf("expected 1 record created in DB, got %d (err: %v)", len(records), err)
+	}
+	if records[0]["badge"] != "bronze" {
+		t.Errorf("expected badge to default to 'bronze', got %v", records[0]["badge"])
 	}
 }

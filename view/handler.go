@@ -564,7 +564,10 @@ func parseFormPayload(req *http.Request, res *resource.Resource) map[string]any 
 
 	// Single unified loop over plan.Fields (explicit + derived FK fields)
 	for _, f := range p.Fields {
-		if f.Deprecated {
+		if !f.ClientWritable {
+			if req.Form != nil && len(req.Form[f.Name]) > 0 {
+				payload[f.Name] = req.FormValue(f.Name)
+			}
 			continue
 		}
 

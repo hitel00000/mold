@@ -56,7 +56,7 @@ func BuildFormFields(res *resource.Resource, currentValues map[string]any, isUpd
 
 	// Single unified loop over plan.Fields (explicit + derived FK fields)
 	for _, f := range p.Fields {
-		if f.Deprecated {
+		if f.Deprecated || !f.ClientWritable {
 			continue
 		}
 
