@@ -17,16 +17,22 @@ fields:
   - name: name
     type: string
     nullable: false
+  - name: badge
+    type: string
+    nullable: false
+    default: "bronze"
+    client_writable: false
   - name: role
     type: enum
     nullable: false
     default: "user"
+    client_writable: false
     constraints:
       values: ["admin", "user"]
 
 auth:
   permissions:
-    create: role:admin
+    create: public
     read: authenticated
     update: owner
     delete: role:admin

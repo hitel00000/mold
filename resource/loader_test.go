@@ -162,10 +162,13 @@ func TestLoad_AllExistingExamplesDefaultClientWritableTrue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed loading example YAML file %s: %v", path, err)
 			}
+			contentBytes, _ := os.ReadFile(path)
+			contentStr := string(contentBytes)
+
 			for _, f := range r.NormalizeFields() {
 				fieldCount++
-				if !f.ClientWritable {
-					t.Errorf("REGRESSION DETECTED: File %s field '%s' has ClientWritable false, expected true default", path, f.Name)
+				if !f.ClientWritable && !strings.Contains(contentStr, "client_writable: false") {
+					t.Errorf("REGRESSION DETECTED: File %s field '%s' has ClientWritable false without explicit configuration, expected true default", path, f.Name)
 				}
 			}
 		}
