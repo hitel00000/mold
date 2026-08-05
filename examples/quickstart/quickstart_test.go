@@ -84,7 +84,6 @@ func TestQuickstart_WithAuth(t *testing.T) {
 			"email":    req.Email,
 			"password": req.Password,
 			"name":     req.Name,
-			"role":     "user", // hardcoded
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -139,8 +138,73 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"data": post})
 	}
 
-	// 1. Test /signup
-	signupBody := `{"email":"newuser@example.com","password":"password123","name":"New User","role":"admin"}`
+	// 1. Direct POST /api/users with non-client-writable field (badge: gold) -> Rejection (400 Bad Request / CLIENT_WRITE_FORBIDDEN)
+	badBody := `{"email":"hacker@example.com","password":"password123","name":"Hacker","badge":"gold"}`
+	reqBad, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(badBody))
+	reqBad.Header.Set("Content-Type", "application/json")
+	wBad := httptest.NewRecorder()
+	app.ServeHTTP(wBad, reqBad)
+
+	t.Logf("=== DIRECT POST /api/users REJECTION TEST (role: admin) ===")
+	t.Logf("POST /api/users\n%s", badBody)
+	t.Logf("HTTP/1.1 %d\n%s", wBad.Code, wBad.Body.String())
+
+	if wBad.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for role: admin payload, got %d: %s", wBad.Code, wBad.Body.String())
+	}
+	if !strings.Contains(wBad.Body.String(), "CLIENT_WRITE_FORBIDDEN") {
+		t.Errorf("expected error code CLIENT_WRITE_FORBIDDEN, got %s", wBad.Body.String())
+	}
+
+	// 2. Direct POST /api/users omitting role -> 201 Created & default role: "user" applied
+	pubBody := `{"email":"public_user@example.com","password":"password123","name":"Public User"}`
+	reqPub, _ := http.NewRequest(http.MethodPost, "/api/users", strings.NewReader(pubBody))
+	reqPub.Header.Set("Content-Type", "application/json")
+	wPub := httptest.NewRecorder()
+	app.ServeHTTP(wPub, reqPub)
+
+	t.Logf("=== DIRECT POST /api/users PUBLIC SIGNUP TEST (role omitted) ===")
+	t.Logf("POST /api/users\n%s", pubBody)
+	t.Logf("HTTP/1.1 %d\n%s", wPub.Code, wPub.Body.String())
+
+	if wPub.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for public signup, got %d: %s", wPub.Code, wPub.Body.String())
+	}
+
+	// Issue session for created user ID 1 for subsequent authenticated GET/POST requests
+	cookiePubVal, _, err := app.IssueSessionForUser(context.Background(), 1, "user")
+	if err != nil {
+		t.Fatalf("failed issuing session for public user: %v", err)
+	}
+
+	// 3. GET /api/users/1 -> Verify default role: "user" in response & password field sanitized/absent
+	reqGet, _ := http.NewRequest(http.MethodGet, "/api/users/1", nil)
+	reqGet.Header.Set("Cookie", cookiePubVal)
+	wGet := httptest.NewRecorder()
+	app.ServeHTTP(wGet, reqGet)
+
+	t.Logf("=== GET /api/users/1 AUDIT TEST (default role & password sanitization) ===")
+	t.Logf("GET /api/users/1\nCookie: %s", cookiePubVal)
+	t.Logf("HTTP/1.1 %d\n%s", wGet.Code, wGet.Body.String())
+
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for user detail GET, got %d: %s", wGet.Code, wGet.Body.String())
+	}
+	var getRes struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(wGet.Body.Bytes(), &getRes); err != nil {
+		t.Fatalf("failed parsing GET response: %v", err)
+	}
+	if getRes.Data["role"] != "user" {
+		t.Errorf("expected default role to be 'user', got %v", getRes.Data["role"])
+	}
+	if _, passExposed := getRes.Data["password"]; passExposed {
+		t.Errorf("SECURITY RISK: password exposed in GET response!")
+	}
+
+	// 4. Test /signup Glue Handler (instant session cookie issuance)
+	signupBody := `{"email":"newuser@example.com","password":"password123","name":"New User"}`
 	reqSignup, _ := http.NewRequest(http.MethodPost, "/signup", strings.NewReader(signupBody))
 	reqSignup.Header.Set("Content-Type", "application/json")
 	wSignup := httptest.NewRecorder()
@@ -160,18 +224,7 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		t.Fatalf("expected _mold_session cookie, got: %s", cookieVal)
 	}
 
-	// Verify role was forced to "user" despite client passing "role": "admin"
-	var userRes struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := json.Unmarshal(wSignup.Body.Bytes(), &userRes); err != nil {
-		t.Fatalf("failed parsing signup response: %v", err)
-	}
-	if userRes.Data["role"] != "user" {
-		t.Errorf("expected user role to be forced to 'user', got %v", userRes.Data["role"])
-	}
-
-	// 2. Test /posts/create with session cookie
+	// 5. Test /posts/create with session cookie
 	postBody := `{"title":"Auth Post Title","body":"Auth Post Body"}`
 	reqPost, _ := http.NewRequest(http.MethodPost, "/posts/create", strings.NewReader(postBody))
 	reqPost.Header.Set("Content-Type", "application/json")
@@ -195,9 +248,9 @@ func TestQuickstart_WithAuth(t *testing.T) {
 		t.Fatalf("failed parsing post response: %v", err)
 	}
 
-	// Verify author_id was automatically forced from session (userID = 1)
+	// Verify author_id was automatically forced from session (userID = 2)
 	authorIDVal := fmt.Sprintf("%v", postRes.Data["author_id"])
-	if authorIDVal != "1" {
-		t.Errorf("expected author_id to be forced to 1 from session, got %v", authorIDVal)
+	if authorIDVal != "2" {
+		t.Errorf("expected author_id to be forced to 2 from session, got %v", authorIDVal)
 	}
 }

@@ -38,9 +38,11 @@ type signupRequest struct {
 	Name     string `json:"name"`
 }
 
-// signupHandler only forwards email/password/name to CreateRecord. `role` is
-// never read from the client request — it is always fixed to "user" here,
-// so this endpoint cannot be used to mint an admin account.
+// signupHandler handles user registration. Since User.yaml sets `client_writable: false`
+// and `default: "user"` on the `role` field, privilege escalation is automatically prevented
+// by Mold runtime even with `permissions.create: public`.
+// This custom handler exists specifically to issue a session cookie (`app.IssueSessionForUser`)
+// immediately upon successful registration for instant auto-login.
 func signupHandler(app *runtime.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -63,7 +65,6 @@ func signupHandler(app *runtime.App) http.HandlerFunc {
 			"email":    req.Email,
 			"password": req.Password,
 			"name":     req.Name,
-			"role":     "user", // hardcoded — never taken from the request
 		})
 		if err != nil {
 			http.Error(w, `{"error":{"code":"SIGNUP_FAILED","message":"`+err.Error()+`"}}`, http.StatusBadRequest)
