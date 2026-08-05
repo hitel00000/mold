@@ -13,6 +13,7 @@ type FieldPlan struct {
 	Constraints     resource.Constraints
 	Deprecated      bool
 	DeprecatedSince *int
+	ClientWritable  bool
 	IsSystemColumn  bool
 	IsDerivedFK     bool
 }
@@ -95,6 +96,7 @@ func Build(res *resource.Resource) *Plan {
 			Constraints:     f.Constraints,
 			Deprecated:      f.Deprecated,
 			DeprecatedSince: f.DeprecatedSince,
+			ClientWritable:  f.ClientWritable,
 			IsSystemColumn:  false,
 			IsDerivedFK:     !explicitNames[f.Name],
 		}

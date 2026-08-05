@@ -85,3 +85,25 @@ func TestPlan_BuildOmitDuplicateExplicitFK(t *testing.T) {
 		t.Errorf("expected explicit author_id field retained, got %+v", p.Fields[1])
 	}
 }
+
+func TestPlan_BuildClientWritable(t *testing.T) {
+	res := &resource.Resource{
+		Name:  "User",
+		Table: "users",
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, ClientWritable: false},
+		},
+	}
+
+	p := plan.Build(res)
+	if len(p.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(p.Fields))
+	}
+	if !p.Fields[0].ClientWritable {
+		t.Errorf("expected email field ClientWritable true, got false")
+	}
+	if p.Fields[1].ClientWritable {
+		t.Errorf("expected role field ClientWritable false, got true")
+	}
+}
