@@ -241,18 +241,21 @@ curl -X POST http://localhost:8080/_mold/reload \
 > 클라이언트가 `"role": "admin"`을 실어 보내는 공격 시도가 400 Bad Request
 > (`CLIENT_WRITE_FORBIDDEN`)로 자동 차단되며, 기본값 `"user"`로 안전하게 가입 처리됩니다.
 
-### 5.1 회원가입(Signup)과 애플리케이션 핸들러
+### 5.1 회원가입(Signup)과 커스텀 핸들러 (Glue Handler)
 
 `client_writable: false` 덕분에 단순한 회원가입은 별도 백엔드 코드 작성 없이
-Mold 기본 CRUD 화면 및 REST API (`POST /api/users`)만으로 즉시 안전하게 수용할 수 있습니다.
+Mold 기본 CRUD 화면 및 REST API (`POST /api/users`)만으로 안전하게 수용할 수 있습니다.
 
-그러나 다음과 같이 부가적인 서비스 로직이 필요한 경우에는 커스텀 커스텀 핸들러 (Glue Handler)를 작성하는 편이 권장됩니다:
+그러나 튜토리얼 예제인 `examples/quickstart/with-auth/main.go`에서는 회원가입 성공 시 **즉시 세션 쿠키를 발급(`app.IssueSessionForUser`)하여 자동 로그인시키는 흐름**을 구현하기 위해 커스텀 `/signup` 핸들러 방식을 유지하고 있습니다.
 
-1. **이메일 인증 토큰 발급 및 발송**: 회원가입 직후 이메일 검증 링크/토큰을 발급해야 하는 경우
-2. **소셜 로그인 (OAuth Callback)**: Google, GitHub 등 외부 Provider 인증 완료 후 세션을 잇는 경우 (`examples/drink-log-pilot/functions/api/auth/google/callback.ts` 참조)
-3. **복합 온보딩 트랜잭션**: 회원가입과 동시에 기본 워크스페이스나 초기 설정 레코드를 함께 생성해야 하는 경우
+이처럼 다음과 같은 부가적인 유저 경험 및 서비스 로직이 필요한 경우 얇은 커스텀 핸들러(Glue Handler)를 작성하는 편이 권장됩니다:
 
-단순 가입은 Mold 기본 기능으로 해결하고, 비즈니스 특화 부가 로직이 있을 때만 얇은 커스텀 핸들러를 얹어 확장하면 됩니다.
+1. **가입 즉시 세션 쿠키 자동 발급**: `app.CreateRecord` 생성 후 `app.IssueSessionForUser`로 세션 쿠키를 바로 구워주는 경우 (`examples/quickstart/with-auth/main.go` 참조)
+2. **이메일 인증 토큰 발급 및 발송**: 회원가입 직후 이메일 검증 링크/토큰을 발급해야 하는 경우
+3. **소셜 로그인 (OAuth Callback)**: Google, GitHub 등 외부 Provider 인증 완료 후 세션을 잇는 경우 (`examples/drink-log-pilot/functions/api/auth/google/callback.ts` 참조)
+4. **복합 온보딩 트랜잭션**: 회원가입과 동시에 기본 워크스페이스나 초기 설정 레코드를 함께 생성해야 하는 경우
+
+단순 레코드 가입은 Mold 코어 기능(`client_writable: false`)으로 해결하고, 세션 자동 발급 및 비즈니스 부가 로직이 필요할 때만 얇은 커스텀 핸들러를 얹어 확장하면 됩니다.
 
 ### 5.2 트러블슈팅: 필드를 추가했는데 `no column named ...` 에러가 발생하는 경우
 
