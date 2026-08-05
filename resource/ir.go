@@ -1,5 +1,9 @@
 package resource
 
+import (
+	"gopkg.in/yaml.v3"
+)
+
 // FieldType represents the supported primitive types in Mold.
 type FieldType string
 
@@ -35,9 +39,23 @@ type Field struct {
 	Type            FieldType   `yaml:"type" json:"type"`
 	Nullable        bool        `yaml:"nullable" json:"nullable"`
 	Default         any         `yaml:"default,omitempty" json:"default,omitempty"`
+	ClientWritable  bool        `yaml:"client_writable" json:"client_writable"` // Default true. If false, rejected in CREATE/UPDATE payload and omitted from default View form input.
 	Constraints     Constraints `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 	Deprecated      bool        `yaml:"deprecated" json:"deprecated"`
 	DeprecatedSince *int        `yaml:"deprecated_since,omitempty" json:"deprecated_since,omitempty"`
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for Field to ensure ClientWritable defaults to true when omitted.
+func (f *Field) UnmarshalYAML(value *yaml.Node) error {
+	type rawField Field
+	raw := rawField{
+		ClientWritable: true,
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*f = Field(raw)
+	return nil
 }
 
 // RelationKind defines the cardinality/direction of a resource relation.
@@ -117,9 +135,10 @@ func (r *Resource) NormalizeFields() []Field {
 		if rel.Kind == KindBelongsTo && rel.ForeignKey != "" {
 			if !fieldMap[rel.ForeignKey] {
 				res = append(res, Field{
-					Name:     rel.ForeignKey,
-					Type:     TypeInt,
-					Nullable: true,
+					Name:           rel.ForeignKey,
+					Type:           TypeInt,
+					Nullable:       true,
+					ClientWritable: true,
 				})
 				fieldMap[rel.ForeignKey] = true
 			}

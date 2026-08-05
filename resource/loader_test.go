@@ -109,3 +109,39 @@ constraints:
 	}
 }
 
+func TestLoad_ClientWritableDefaultAndExplicit(t *testing.T) {
+	yamlData := []byte(`
+resource:
+  name: User
+
+fields:
+  - name: email
+    type: email
+  - name: role
+    type: enum
+    nullable: false
+    default: "user"
+    client_writable: false
+    constraints:
+      values: ["admin", "user"]
+`)
+	r, err := resource.Load(yamlData)
+	if err != nil {
+		t.Fatalf("unexpected load error: %v", err)
+	}
+
+	if len(r.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(r.Fields))
+	}
+
+	emailField := r.Fields[0]
+	if emailField.Name != "email" || !emailField.ClientWritable {
+		t.Errorf("expected field 'email' to have ClientWritable true by default, got %v", emailField.ClientWritable)
+	}
+
+	roleField := r.Fields[1]
+	if roleField.Name != "role" || roleField.ClientWritable {
+		t.Errorf("expected field 'role' to have ClientWritable false, got %v", roleField.ClientWritable)
+	}
+}
+
