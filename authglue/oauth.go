@@ -104,13 +104,26 @@ func OAuthCallbackHandler(app *runtime.App, providerName string, verifier OAuthV
 	}
 }
 
-func findOrCreateUser(ctx context.Context, app *runtime.App, ou *OAuthUser) (record map[string]any, createdNew bool, err error) {
-	userResIR := &resource.Resource{
+func getUserResourceIR() *resource.Resource {
+	return &resource.Resource{
 		Name:       "User",
 		Table:      "users",
 		Timestamps: true,
 		SoftDelete: true,
+		Fields: []resource.Field{
+			{Name: "id", Type: resource.TypeInt, ClientWritable: false},
+			{Name: "email", Type: resource.TypeEmail, Nullable: true, ClientWritable: true},
+			{Name: "password", Type: resource.TypePassword, Nullable: true, ClientWritable: true},
+			{Name: "name", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "provider", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "provider_user_id", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, Default: "user", ClientWritable: false},
+		},
 	}
+}
+
+func findOrCreateUser(ctx context.Context, app *runtime.App, ou *OAuthUser) (record map[string]any, createdNew bool, err error) {
+	userResIR := getUserResourceIR()
 
 	// 1. Query existing user by provider and provider_user_id
 	existingRecs, queryErr := app.Store().List(ctx, userResIR, storage.Query{
@@ -124,7 +137,40 @@ func findOrCreateUser(ctx context.Context, app *runtime.App, ou *OAuthUser) (rec
 		return existingRecs[0], false, nil
 	}
 
-	// 2. Not found -> create new user record
+	// 2. Query existing user by email to support safe account linking for local email/password users
+	if ou.Email != "" {
+		emailRecs, emailErr := app.Store().List(ctx, userResIR, storage.Query{
+			Filter: map[string]any{
+				"email": ou.Email,
+			},
+			Limit: 1,
+		})
+		if emailErr == nil && len(emailRecs) > 0 {
+			existingUser := emailRecs[0]
+			existingProvider, _ := existingUser["provider"].(string)
+
+			// If account was created via local email/password signup (provider is nil or empty),
+			// safely link the verified OAuth provider to this existing account.
+			if existingProvider == "" {
+				userID := existingUser["id"]
+				updateFields := map[string]any{
+					"provider":         ou.Provider,
+					"provider_user_id": ou.ProviderUserID,
+				}
+				if ou.Name != "" && existingUser["name"] == nil {
+					updateFields["name"] = ou.Name
+				}
+				updatedUser, updateErr := app.Store().Update(ctx, userResIR, userID, updateFields)
+				if updateErr == nil {
+					return updatedUser, false, nil
+				}
+			} else if existingProvider != ou.Provider {
+				return nil, false, fmt.Errorf("email %s is already registered with another provider (%s)", ou.Email, existingProvider)
+			}
+		}
+	}
+
+	// 3. Not found -> create new user record
 	payload := map[string]any{
 		"provider":         ou.Provider,
 		"provider_user_id": ou.ProviderUserID,
