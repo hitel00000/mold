@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
@@ -64,6 +65,10 @@ func SignupHandler(app *runtime.App) http.HandlerFunc {
 		if err != nil {
 			if errors.Is(err, resource.ErrClientWriteForbidden) {
 				writeError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error())
+				return
+			}
+			if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+				writeError(w, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email is already registered")
 				return
 			}
 			writeError(w, http.StatusBadRequest, "SIGNUP_FAILED", err.Error())
