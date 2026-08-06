@@ -8,6 +8,8 @@ fields:
   - name: email
     type: email
     nullable: true
+    constraints:
+      unique: true
   - name: password
     type: password
     nullable: true
