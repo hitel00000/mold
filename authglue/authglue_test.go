@@ -205,30 +205,144 @@ func TestAuthGlue_SignupSuccessAndSanitize(t *testing.T) {
 }
 
 // TestAuthGlue_SignupPreAccountTakeoverBlocked verifies that passing provider & provider_user_id in /signup
-// is ignored by payload whitelisting and does NOT pre-link the account.
+// is ignored by payload whitelisting and does NOT pre-link the account or compromise OAuth login.
 func TestAuthGlue_SignupPreAccountTakeoverBlocked(t *testing.T) {
 	app, _ := setupTestApp(t)
-	mux := setupTestServer(app, nil)
 
-	// Attacker attempts pre-account takeover by providing target victim's Google sub in signup payload
-	attackerReqBody := `{"email":"victim@example.com","password":"attackerpassword123","provider":"google","provider_user_id":"g_victim_12345"}`
-	req := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(attackerReqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	// Custom mock verifier that returns real victim Google OAuth info
+	mockVerifier := func(ctx context.Context, r *http.Request) (*authglue.OAuthUser, error) {
+		return &authglue.OAuthUser{
+			Provider:       "google",
+			ProviderUserID: "g_victim_12345",
+			Email:          "victim_real@example.com",
+			Name:           "Victim Real",
+		}, nil
+	}
+	mux := setupTestServer(app, mockVerifier)
 
-	mux.ServeHTTP(w, req)
+	// Step 1: Attacker attempts pre-account takeover by injecting victim's Google sub into /signup payload
+	attackerReqBody := `{"email":"attacker_claimed_victim@example.com","password":"attackerpassword123","provider":"google","provider_user_id":"g_victim_12345"}`
+	reqSignup := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(attackerReqBody))
+	reqSignup.Header.Set("Content-Type", "application/json")
+	wSignup := httptest.NewRecorder()
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected signup to succeed for whitelisted fields, got %d: %s", w.Code, w.Body.String())
+	t.Logf("=== RAW HTTP REQUEST: Step 1 Attacker /signup with injected provider_user_id ===")
+	t.Logf("POST /signup HTTP/1.1\nContent-Type: application/json\n\n%s", attackerReqBody)
+
+	mux.ServeHTTP(wSignup, reqSignup)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 1 Attacker /signup Response (whitelisted fields only) ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", wSignup.Code, wSignup.Header().Get("Content-Type"), wSignup.Body.String())
+
+	if wSignup.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed for whitelisted fields, got %d: %s", wSignup.Code, wSignup.Body.String())
 	}
 
-	var res struct {
+	var resSignup struct {
 		Data map[string]any `json:"data"`
 	}
-	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	_ = json.Unmarshal(wSignup.Body.Bytes(), &resSignup)
 
-	if res.Data["provider"] != nil || res.Data["provider_user_id"] != nil {
-		t.Errorf("SECURITY VULNERABILITY: Pre-account takeover failed! provider/provider_user_id were copied: %v", res.Data)
+	if resSignup.Data["provider"] != nil || resSignup.Data["provider_user_id"] != nil {
+		t.Fatalf("SECURITY VULNERABILITY: Pre-account takeover failed! provider/provider_user_id were copied into account: %v", resSignup.Data)
+	}
+
+	// Step 2: Real victim logs in via Google OAuth with provider_user_id "g_victim_12345"
+	reqOAuth := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{}`))
+	reqOAuth.Header.Set("Content-Type", "application/json")
+	wOAuth := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Step 2 Real Victim OAuth Callback ===")
+	t.Logf("POST /auth/google/callback HTTP/1.1\nContent-Type: application/json\n\n{}")
+
+	mux.ServeHTTP(wOAuth, reqOAuth)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 2 Real Victim OAuth Callback Response (New Clean Account Created) ===")
+	t.Logf("HTTP/1.1 %d\nSet-Cookie: %s\nContent-Type: %s\n\n%s",
+		wOAuth.Code, wOAuth.Header().Get("Set-Cookie"), wOAuth.Header().Get("Content-Type"), wOAuth.Body.String())
+
+	if wOAuth.Code != http.StatusCreated {
+		t.Fatalf("expected victim OAuth login to create a new clean user (201 Created), got %d: %s", wOAuth.Code, wOAuth.Body.String())
+	}
+
+	var resOAuth struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(wOAuth.Body.Bytes(), &resOAuth)
+
+	if fmt.Sprintf("%v", resSignup.Data["id"]) == fmt.Sprintf("%v", resOAuth.Data["id"]) {
+		t.Errorf("CRITICAL SECURITY FAILURE: Victim OAuth login was hijacked by attacker account ID %v", resSignup.Data["id"])
+	}
+}
+
+// TestAuthGlue_OAuthAccountLinking verifies that a user who registered with email/password first
+// can safely link their verified OAuth provider when logging in with matching email.
+func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	mockVerifier := func(ctx context.Context, r *http.Request) (*authglue.OAuthUser, error) {
+		return &authglue.OAuthUser{
+			Provider:       "google",
+			ProviderUserID: "g_alice_sub_999",
+			Email:          "alice@example.com",
+			Name:           "Alice Google",
+		}, nil
+	}
+	mux := setupTestServer(app, mockVerifier)
+
+	// Step 1: Alice registers via /signup with email & password
+	signupReqBody := `{"email":"alice@example.com","password":"alicepassword123","name":"Alice Local"}`
+	reqSignup := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(signupReqBody))
+	reqSignup.Header.Set("Content-Type", "application/json")
+	wSignup := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Step 1 Alice Signup with Email/Password ===")
+	t.Logf("POST /signup HTTP/1.1\nContent-Type: application/json\n\n%s", signupReqBody)
+
+	mux.ServeHTTP(wSignup, reqSignup)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 1 Alice Signup Response ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", wSignup.Code, wSignup.Header().Get("Content-Type"), wSignup.Body.String())
+
+	if wSignup.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for Alice signup, got %d: %s", wSignup.Code, wSignup.Body.String())
+	}
+
+	var signupRes struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(wSignup.Body.Bytes(), &signupRes)
+	aliceID := signupRes.Data["id"]
+
+	// Step 2: Alice logs in via Google OAuth with matching email "alice@example.com"
+	reqOAuth := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{}`))
+	reqOAuth.Header.Set("Content-Type", "application/json")
+	wOAuth := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Step 2 Alice OAuth Login with Matching Email ===")
+	t.Logf("POST /auth/google/callback HTTP/1.1\nContent-Type: application/json\n\n{}")
+
+	mux.ServeHTTP(wOAuth, reqOAuth)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 2 Alice OAuth Login Response (Account Linked) ===")
+	t.Logf("HTTP/1.1 %d\nSet-Cookie: %s\nContent-Type: %s\n\n%s",
+		wOAuth.Code, wOAuth.Header().Get("Set-Cookie"), wOAuth.Header().Get("Content-Type"), wOAuth.Body.String())
+
+	if wOAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for account linking on matching email, got %d: %s", wOAuth.Code, wOAuth.Body.String())
+	}
+
+	var oauthRes struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(wOAuth.Body.Bytes(), &oauthRes)
+
+	if fmt.Sprintf("%v", oauthRes.Data["id"]) != fmt.Sprintf("%v", aliceID) {
+		t.Errorf("expected OAuth login to link to existing user ID %v, got %v", aliceID, oauthRes.Data["id"])
+	}
+	if oauthRes.Data["provider"] != "google" || oauthRes.Data["provider_user_id"] != "g_alice_sub_999" {
+		t.Errorf("expected provider fields to be linked, got provider=%v, provider_user_id=%v",
+			oauthRes.Data["provider"], oauthRes.Data["provider_user_id"])
 	}
 }
 
@@ -237,20 +351,36 @@ func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
 	app, _ := setupTestApp(t)
 	mux := setupTestServer(app, nil)
 
-	reqBody := `{"email":"dup@example.com","password":"password123","name":"First Registrant"}`
-	req1 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody))
+	reqBody1 := `{"email":"dup@example.com","password":"password123","name":"First Registrant"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody1))
 	req1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: 1st Signup with Email dup@example.com ===")
+	t.Logf("POST /signup HTTP/1.1\nContent-Type: application/json\n\n%s", reqBody1)
+
 	mux.ServeHTTP(w1, req1)
+
+	t.Logf("=== RAW HTTP RESPONSE: 1st Signup Response ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w1.Code, w1.Header().Get("Content-Type"), w1.Body.String())
+
 	if w1.Code != http.StatusCreated {
 		t.Fatalf("first signup failed: %d: %s", w1.Code, w1.Body.String())
 	}
 
 	// Second signup with same email address
-	req2 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody))
+	reqBody2 := `{"email":"dup@example.com","password":"password456","name":"Second Registrant"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody2))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: 2nd Signup with Duplicate Email dup@example.com ===")
+	t.Logf("POST /signup HTTP/1.1\nContent-Type: application/json\n\n%s", reqBody2)
+
 	mux.ServeHTTP(w2, req2)
+
+	t.Logf("=== RAW HTTP RESPONSE: 2nd Signup Response (Duplicate Email Rejected) ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w2.Code, w2.Header().Get("Content-Type"), w2.Body.String())
 
 	if w2.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for duplicate email signup, got %d: %s", w2.Code, w2.Body.String())
@@ -300,10 +430,18 @@ func TestAuthGlue_NilVerifierRejected(t *testing.T) {
 	app, _ := setupTestApp(t)
 	handler := authglue.OAuthCallbackHandler(app, "google", nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{"code":"123"}`))
+	reqBody := `{"code":"123"}`
+	req := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	t.Logf("=== RAW HTTP REQUEST: OAuth Callback with nil verifier ===")
+	t.Logf("POST /auth/google/callback HTTP/1.1\nContent-Type: application/json\n\n%s", reqBody)
+
 	handler.ServeHTTP(w, req)
+
+	t.Logf("=== RAW HTTP RESPONSE: Nil Verifier Rejected Response ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w.Code, w.Header().Get("Content-Type"), w.Body.String())
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 Internal Server Error for nil verifier, got %d: %s", w.Code, w.Body.String())
