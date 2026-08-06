@@ -22,7 +22,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/signup", authglue.SignupHandler(app))
-	mux.HandleFunc("/auth/google/callback", authglue.OAuthCallbackHandler(app, "google", nil))
+	mux.HandleFunc("/auth/google/callback", authglue.OAuthCallbackHandler(app, "google", authglue.UnsafeTestStubOAuthVerifier("google")))
 	mux.HandleFunc("/posts/create", createPostHandler(app))
 	// Everything else (/api/*, /view/*, /_mold/*) falls through to Mold's
 	// own handler. runtime.App implements http.Handler via ServeHTTP.

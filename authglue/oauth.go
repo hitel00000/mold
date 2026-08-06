@@ -23,22 +23,31 @@ type OAuthUser struct {
 // OAuthVerifier is a function that exchanges credentials/codes or verifies ID tokens to return an OAuthUser.
 type OAuthVerifier func(ctx context.Context, r *http.Request) (*OAuthUser, error)
 
+// UnsafeTestStubOAuthVerifier creates a test-only OAuthVerifier that parses JSON body or query parameters.
+// ⚠️ WARNING: This verifier performs NO external OAuth token exchange or ID token validation.
+// It MUST ONLY be used in test environments or local sandbox mocks!
+func UnsafeTestStubOAuthVerifier(defaultProvider string) OAuthVerifier {
+	return func(ctx context.Context, r *http.Request) (*OAuthUser, error) {
+		return parseOAuthUserFromRequest(r, defaultProvider)
+	}
+}
+
 // OAuthCallbackHandler handles OAuth callback requests (e.g. `/auth/google/callback`).
 // It uses the provided OAuthVerifier to obtain verified provider identity, performs find-or-create
 // against the Mold `User` resource (`unique_together: [[provider, provider_user_id]]`), and issues
 // a session cookie via app.IssueSessionForUser.
+//
+// Security Contract:
+//   - verifier MUST NOT be nil. Passing a nil verifier is rejected with HTTP 500 (OAUTH_VERIFIER_REQUIRED).
 func OAuthCallbackHandler(app *runtime.App, providerName string, verifier OAuthVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-
-		var oauthUser *OAuthUser
-		var err error
-
-		if verifier != nil {
-			oauthUser, err = verifier(ctx, r)
-		} else {
-			oauthUser, err = parseOAuthUserFromRequest(r, providerName)
+		if verifier == nil {
+			writeError(w, http.StatusInternalServerError, "OAUTH_VERIFIER_REQUIRED", "OAuthCallbackHandler requires a non-nil OAuthVerifier")
+			return
 		}
+
+		ctx := r.Context()
+		oauthUser, err := verifier(ctx, r)
 
 		if err != nil || oauthUser == nil || oauthUser.ProviderUserID == "" {
 			msg := "failed to verify oauth identity"
