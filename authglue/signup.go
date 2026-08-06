@@ -45,8 +45,22 @@ func SignupHandler(app *runtime.App) http.HandlerFunc {
 			return
 		}
 
+		// Whitelist payload fields to prevent Pre-Account Takeover attacks
+		// (e.g. malicious clients attempting to pre-link provider / provider_user_id during signup).
+		payload := map[string]any{
+			"email":    emailVal,
+			"password": passVal,
+		}
+		if nameVal, ok := rawPayload["name"].(string); ok && nameVal != "" {
+			payload["name"] = nameVal
+		}
+		// Include role if explicitly present so app.CreateRecord can enforce client_writable: false
+		if roleVal, exists := rawPayload["role"]; exists {
+			payload["role"] = roleVal
+		}
+
 		ctx := r.Context()
-		created, err := app.CreateRecord(ctx, "User", rawPayload)
+		created, err := app.CreateRecord(ctx, "User", payload)
 		if err != nil {
 			if errors.Is(err, resource.ErrClientWriteForbidden) {
 				writeError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error())
@@ -72,6 +86,7 @@ func SignupHandler(app *runtime.App) http.HandlerFunc {
 		userRole, _ := sanitized["role"].(string)
 		if userRole == "" {
 			userRole = "user"
+			sanitized["role"] = userRole
 		}
 
 		cookieVal, _, err := app.IssueSessionForUser(ctx, userID, userRole)
