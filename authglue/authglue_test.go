@@ -275,8 +275,8 @@ func TestAuthGlue_SignupPreAccountTakeoverBlocked(t *testing.T) {
 	}
 }
 
-// TestAuthGlue_OAuthAccountLinking verifies that a user who registered with email/password first
-// can safely link their verified OAuth provider when logging in with matching email.
+// TestAuthGlue_OAuthAccountLinking verifies that when a user exists with matching email,
+// unverified automatic account linking is rejected to prevent Pre-Account Hijacking (Option a).
 func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
 	app, _ := setupTestApp(t)
 
@@ -290,7 +290,7 @@ func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
 	}
 	mux := setupTestServer(app, mockVerifier)
 
-	// Step 1: Alice registers via /signup with email & password
+	// Step 1: Alice registers via /signup with email & password (unverified local account)
 	signupReqBody := `{"email":"alice@example.com","password":"alicepassword123","name":"Alice Local"}`
 	reqSignup := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(signupReqBody))
 	reqSignup.Header.Set("Content-Type", "application/json")
@@ -308,13 +308,7 @@ func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
 		t.Fatalf("expected 201 Created for Alice signup, got %d: %s", wSignup.Code, wSignup.Body.String())
 	}
 
-	var signupRes struct {
-		Data map[string]any `json:"data"`
-	}
-	_ = json.Unmarshal(wSignup.Body.Bytes(), &signupRes)
-	aliceID := signupRes.Data["id"]
-
-	// Step 2: Alice logs in via Google OAuth with matching email "alice@example.com"
+	// Step 2: Google OAuth login attempt with matching email "alice@example.com"
 	reqOAuth := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{}`))
 	reqOAuth.Header.Set("Content-Type", "application/json")
 	wOAuth := httptest.NewRecorder()
@@ -324,29 +318,26 @@ func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
 
 	mux.ServeHTTP(wOAuth, reqOAuth)
 
-	t.Logf("=== RAW HTTP RESPONSE: Step 2 Alice OAuth Login Response (Account Linked) ===")
-	t.Logf("HTTP/1.1 %d\nSet-Cookie: %s\nContent-Type: %s\n\n%s",
-		wOAuth.Code, wOAuth.Header().Get("Set-Cookie"), wOAuth.Header().Get("Content-Type"), wOAuth.Body.String())
+	t.Logf("=== RAW HTTP RESPONSE: Step 2 OAuth Login Response (Unverified Auto-linking Rejected) ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", wOAuth.Code, wOAuth.Header().Get("Content-Type"), wOAuth.Body.String())
 
-	if wOAuth.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for account linking on matching email, got %d: %s", wOAuth.Code, wOAuth.Body.String())
+	if wOAuth.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict for unverified account linking, got %d: %s", wOAuth.Code, wOAuth.Body.String())
 	}
 
-	var oauthRes struct {
-		Data map[string]any `json:"data"`
+	var errRes struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	_ = json.Unmarshal(wOAuth.Body.Bytes(), &oauthRes)
-
-	if fmt.Sprintf("%v", oauthRes.Data["id"]) != fmt.Sprintf("%v", aliceID) {
-		t.Errorf("expected OAuth login to link to existing user ID %v, got %v", aliceID, oauthRes.Data["id"])
-	}
-	if oauthRes.Data["provider"] != "google" || oauthRes.Data["provider_user_id"] != "g_alice_sub_999" {
-		t.Errorf("expected provider fields to be linked, got provider=%v, provider_user_id=%v",
-			oauthRes.Data["provider"], oauthRes.Data["provider_user_id"])
+	_ = json.Unmarshal(wOAuth.Body.Bytes(), &errRes)
+	if errRes.Error.Code != "ACCOUNT_LINKING_REQUIRED" {
+		t.Errorf("expected error code 'ACCOUNT_LINKING_REQUIRED', got: %s", errRes.Error.Code)
 	}
 }
 
-// TestAuthGlue_DuplicateEmailSignupBlocked verifies duplicate email registrations are blocked by unique constraint.
+// TestAuthGlue_DuplicateEmailSignupBlocked verifies duplicate email registrations are blocked by unique constraint with structured error.
 func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
 	app, _ := setupTestApp(t)
 	mux := setupTestServer(app, nil)
@@ -382,8 +373,19 @@ func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
 	t.Logf("=== RAW HTTP RESPONSE: 2nd Signup Response (Duplicate Email Rejected) ===")
 	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w2.Code, w2.Header().Get("Content-Type"), w2.Body.String())
 
-	if w2.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request for duplicate email signup, got %d: %s", w2.Code, w2.Body.String())
+	if w2.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict for duplicate email signup, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	var errRes struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(w2.Body.Bytes(), &errRes)
+	if errRes.Error.Code != "EMAIL_ALREADY_EXISTS" {
+		t.Errorf("expected structured error code 'EMAIL_ALREADY_EXISTS', got: %s", errRes.Error.Code)
 	}
 }
 
