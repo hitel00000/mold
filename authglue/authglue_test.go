@@ -124,6 +124,7 @@ func setupTestServer(app *runtime.App, mockVerifier authglue.OAuthVerifier) *htt
 		mockVerifier = authglue.UnsafeTestStubOAuthVerifier("google")
 	}
 	mux.HandleFunc("/auth/google/callback", authglue.OAuthCallbackHandler(app, "google", mockVerifier))
+	mux.HandleFunc("/auth/github/callback", authglue.OAuthCallbackHandler(app, "github", mockVerifier))
 	mux.Handle("/", app)
 	return mux
 }
@@ -209,7 +210,6 @@ func TestAuthGlue_SignupSuccessAndSanitize(t *testing.T) {
 func TestAuthGlue_SignupPreAccountTakeoverBlocked(t *testing.T) {
 	app, _ := setupTestApp(t)
 
-	// Custom mock verifier that returns real victim Google OAuth info
 	mockVerifier := func(ctx context.Context, r *http.Request) (*authglue.OAuthUser, error) {
 		return &authglue.OAuthUser{
 			Provider:       "google",
@@ -337,7 +337,78 @@ func TestAuthGlue_OAuthAccountLinking(t *testing.T) {
 	}
 }
 
-// TestAuthGlue_DuplicateEmailSignupBlocked verifies duplicate email registrations are blocked by unique constraint with structured error.
+// TestAuthGlue_OAuthProviderConflict verifies that logging in with Google when email is registered with GitHub returns OAUTH_PROVIDER_CONFLICT.
+func TestAuthGlue_OAuthProviderConflict(t *testing.T) {
+	app, _ := setupTestApp(t)
+
+	// Step 1: User registers via GitHub OAuth
+	githubVerifier := func(ctx context.Context, r *http.Request) (*authglue.OAuthUser, error) {
+		return &authglue.OAuthUser{
+			Provider:       "github",
+			ProviderUserID: "gh_bob_777",
+			Email:          "bob@example.com",
+			Name:           "Bob GitHub",
+		}, nil
+	}
+	mux := setupTestServer(app, githubVerifier)
+
+	reqGH := httptest.NewRequest(http.MethodPost, "/auth/github/callback", strings.NewReader(`{}`))
+	reqGH.Header.Set("Content-Type", "application/json")
+	wGH := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Step 1 Bob GitHub OAuth Registration ===")
+	t.Logf("POST /auth/github/callback HTTP/1.1\nContent-Type: application/json\n\n{}")
+
+	mux.ServeHTTP(wGH, reqGH)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 1 Bob GitHub Signup Response ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", wGH.Code, wGH.Header().Get("Content-Type"), wGH.Body.String())
+
+	if wGH.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for GitHub signup, got %d: %s", wGH.Code, wGH.Body.String())
+	}
+
+	// Step 2: Bob tries to log in via Google OAuth with same email bob@example.com
+	googleVerifier := func(ctx context.Context, r *http.Request) (*authglue.OAuthUser, error) {
+		return &authglue.OAuthUser{
+			Provider:       "google",
+			ProviderUserID: "g_bob_888",
+			Email:          "bob@example.com",
+			Name:           "Bob Google",
+		}, nil
+	}
+	muxG := setupTestServer(app, googleVerifier)
+
+	reqG := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{}`))
+	reqG.Header.Set("Content-Type", "application/json")
+	wG := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Step 2 Bob Google OAuth Login Attempt (Different Provider Conflict) ===")
+	t.Logf("POST /auth/google/callback HTTP/1.1\nContent-Type: application/json\n\n{}")
+
+	muxG.ServeHTTP(wG, reqG)
+
+	t.Logf("=== RAW HTTP RESPONSE: Step 2 Google OAuth Login Response (OAUTH_PROVIDER_CONFLICT) ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", wG.Code, wG.Header().Get("Content-Type"), wG.Body.String())
+
+	if wG.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict for different provider conflict, got %d: %s", wG.Code, wG.Body.String())
+	}
+
+	var errRes struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(wG.Body.Bytes(), &errRes)
+
+	if errRes.Error.Code != "OAUTH_PROVIDER_CONFLICT" {
+		t.Errorf("expected error code 'OAUTH_PROVIDER_CONFLICT', got: %s", errRes.Error.Code)
+	}
+}
+
+// TestAuthGlue_DuplicateEmailSignupBlocked verifies duplicate email registrations are blocked by explicit store List pre-check with structured error.
 func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
 	app, _ := setupTestApp(t)
 	mux := setupTestServer(app, nil)
