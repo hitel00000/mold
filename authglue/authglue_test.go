@@ -33,6 +33,8 @@ fields:
   - name: email
     type: email
     nullable: true
+    constraints:
+      unique: true
   - name: password
     type: password
     nullable: true
@@ -118,6 +120,9 @@ auth:
 func setupTestServer(app *runtime.App, mockVerifier authglue.OAuthVerifier) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/signup", authglue.SignupHandler(app))
+	if mockVerifier == nil {
+		mockVerifier = authglue.UnsafeTestStubOAuthVerifier("google")
+	}
 	mux.HandleFunc("/auth/google/callback", authglue.OAuthCallbackHandler(app, "google", mockVerifier))
 	mux.Handle("/", app)
 	return mux
@@ -199,6 +204,59 @@ func TestAuthGlue_SignupSuccessAndSanitize(t *testing.T) {
 	}
 }
 
+// TestAuthGlue_SignupPreAccountTakeoverBlocked verifies that passing provider & provider_user_id in /signup
+// is ignored by payload whitelisting and does NOT pre-link the account.
+func TestAuthGlue_SignupPreAccountTakeoverBlocked(t *testing.T) {
+	app, _ := setupTestApp(t)
+	mux := setupTestServer(app, nil)
+
+	// Attacker attempts pre-account takeover by providing target victim's Google sub in signup payload
+	attackerReqBody := `{"email":"victim@example.com","password":"attackerpassword123","provider":"google","provider_user_id":"g_victim_12345"}`
+	req := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(attackerReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed for whitelisted fields, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var res struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+
+	if res.Data["provider"] != nil || res.Data["provider_user_id"] != nil {
+		t.Errorf("SECURITY VULNERABILITY: Pre-account takeover failed! provider/provider_user_id were copied: %v", res.Data)
+	}
+}
+
+// TestAuthGlue_DuplicateEmailSignupBlocked verifies duplicate email registrations are blocked by unique constraint.
+func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
+	app, _ := setupTestApp(t)
+	mux := setupTestServer(app, nil)
+
+	reqBody := `{"email":"dup@example.com","password":"password123","name":"First Registrant"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first signup failed: %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Second signup with same email address
+	req2 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for duplicate email signup, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
 // TestAuthGlue_PrivilegeEscalationBlocked verifies passing role: "admin" in signup payload
 // is rejected with 400 Bad Request (CLIENT_WRITE_FORBIDDEN) due to client_writable: false.
 func TestAuthGlue_PrivilegeEscalationBlocked(t *testing.T) {
@@ -234,6 +292,31 @@ func TestAuthGlue_PrivilegeEscalationBlocked(t *testing.T) {
 
 	if errRes.Error.Code != "CLIENT_WRITE_FORBIDDEN" {
 		t.Errorf("expected error code 'CLIENT_WRITE_FORBIDDEN', got: %s", errRes.Error.Code)
+	}
+}
+
+// TestAuthGlue_NilVerifierRejected verifies passing a nil verifier returns HTTP 500 (OAUTH_VERIFIER_REQUIRED).
+func TestAuthGlue_NilVerifierRejected(t *testing.T) {
+	app, _ := setupTestApp(t)
+	handler := authglue.OAuthCallbackHandler(app, "google", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/google/callback", strings.NewReader(`{"code":"123"}`))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 Internal Server Error for nil verifier, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var res struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if res.Error.Code != "OAUTH_VERIFIER_REQUIRED" {
+		t.Errorf("expected error code 'OAUTH_VERIFIER_REQUIRED', got: %s", res.Error.Code)
 	}
 }
 
