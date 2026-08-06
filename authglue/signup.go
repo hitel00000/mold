@@ -8,6 +8,7 @@ import (
 
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
+	"github.com/hitel00000/mold/storage"
 )
 
 // SignupHandler returns an http.HandlerFunc that handles user registration (`POST /signup`).
@@ -61,13 +62,27 @@ func SignupHandler(app *runtime.App) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
+
+		// Explicit pre-check for existing email to return clean structured error (EMAIL_ALREADY_EXISTS)
+		// without relying on fragile DB internal error string matching.
+		existingRecs, queryErr := app.Store().List(ctx, getUserResourceIR(), storage.Query{
+			Filter: map[string]any{
+				"email": emailVal,
+			},
+			Limit: 1,
+		})
+		if queryErr == nil && len(existingRecs) > 0 {
+			writeError(w, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email is already registered")
+			return
+		}
+
 		created, err := app.CreateRecord(ctx, "User", payload)
 		if err != nil {
 			if errors.Is(err, resource.ErrClientWriteForbidden) {
 				writeError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error())
 				return
 			}
-			if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+			if errors.Is(err, storage.ErrAlreadyExists) || strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				writeError(w, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email is already registered")
 				return
 			}
