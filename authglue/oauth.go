@@ -65,6 +65,10 @@ func OAuthCallbackHandler(app *runtime.App, providerName string, verifier OAuthV
 		// Find or Create User with unique_together: [[provider, provider_user_id]]
 		userRec, createdNew, err := findOrCreateUser(ctx, app, oauthUser)
 		if err != nil {
+			if strings.Contains(err.Error(), "ACCOUNT_LINKING_REQUIRED") || strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+				writeError(w, http.StatusConflict, "ACCOUNT_LINKING_REQUIRED", "an account with this email already exists; please log in with email and password")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "OAUTH_USER_FAILED", err.Error())
 			return
 		}
@@ -137,7 +141,7 @@ func findOrCreateUser(ctx context.Context, app *runtime.App, ou *OAuthUser) (rec
 		return existingRecs[0], false, nil
 	}
 
-	// 2. Query existing user by email to support safe account linking for local email/password users
+	// 2. Query existing user by email to reject unverified auto-linking (Pre-Account Hijacking prevention)
 	if ou.Email != "" {
 		emailRecs, emailErr := app.Store().List(ctx, userResIR, storage.Query{
 			Filter: map[string]any{
@@ -146,27 +150,7 @@ func findOrCreateUser(ctx context.Context, app *runtime.App, ou *OAuthUser) (rec
 			Limit: 1,
 		})
 		if emailErr == nil && len(emailRecs) > 0 {
-			existingUser := emailRecs[0]
-			existingProvider, _ := existingUser["provider"].(string)
-
-			// If account was created via local email/password signup (provider is nil or empty),
-			// safely link the verified OAuth provider to this existing account.
-			if existingProvider == "" {
-				userID := existingUser["id"]
-				updateFields := map[string]any{
-					"provider":         ou.Provider,
-					"provider_user_id": ou.ProviderUserID,
-				}
-				if ou.Name != "" && existingUser["name"] == nil {
-					updateFields["name"] = ou.Name
-				}
-				updatedUser, updateErr := app.Store().Update(ctx, userResIR, userID, updateFields)
-				if updateErr == nil {
-					return updatedUser, false, nil
-				}
-			} else if existingProvider != ou.Provider {
-				return nil, false, fmt.Errorf("email %s is already registered with another provider (%s)", ou.Email, existingProvider)
-			}
+			return nil, false, fmt.Errorf("ACCOUNT_LINKING_REQUIRED: an account with email %s already exists", ou.Email)
 		}
 	}
 
