@@ -346,3 +346,13 @@
     1. `runtime.App` 컨테이너에 `SanitizeRecord(resourceName string, record map[string]any) (map[string]any, error)` 공개 Escape Hatch 신설.
     2. `app.CreateRecord`로 인프라 레벨 레코드를 생성한 후 custom HTTP 핸들러가 클라이언트에 JSON 응답을 전송하기 전 `password` 해시 및 deprecated 필드를 100% 소멸하도록 보장.
     3. `examples/quickstart/with-auth/main.go`의 `signupHandler`에 적용하여 `/signup` 응답 내 bcrypt 비밀번호 해시 노출 결함 원천 차단 및 E2E 실측 검증.
+
+- [x] **Task 8.4: 얇은 Auth 레이어 (`authglue`) 및 세션 발급 핸들러 완결**
+  - **작업 내용**:
+    1. **Mold 코어 0줄 변경 (`git diff origin/main -- resource/ runtime/ auth/ transport/ view/ codegen/`)**: `runtime.App` 공개 API만 재조합하여 `authglue` 패키지 구축.
+    2. **`SignupHandler` (`POST /signup`)**: `email`, `password`, `name`, `role` 필드만 화이트리스트 추출하여 Pre-Account Takeover 원천 차단. `client_writable: false`인 `role: "admin"` 제출 시 `400 CLIENT_WRITE_FORBIDDEN` 명시적 거부. `app.SanitizeRecord` 응답 비밀번호 해시 소멸 및 `_mold_session` 세션 쿠키 발급.
+    3. **`OAuthCallbackHandler` (`POST /auth/{provider}/callback`)**: 필수 non-nil `OAuthVerifier` 검증 (`500 OAUTH_VERIFIER_REQUIRED`). `provider` + `provider_user_id` 기준 find-or-create 및 `_mold_session` 세션 쿠키 발급.
+    4. **Pre-Account Hijacking (Trojan Horse Account) 원천 방어 (옵션 a)**: 이메일/비밀번호 로컬 계정이 이미 있는 이메일로 OAuth 로그인 시 검증되지 않은 계정 자동 연동을 원천 거부하고 HTTP 409 Conflict (`ACCOUNT_LINKING_REQUIRED`: `"an account with this email already exists; please log in with email and password"`) 반환.
+    5. **Provider 충돌 에러 분기**: 기존 계정이 다른 OAuth Provider(예: GitHub)로 가입된 경우 `OAUTH_PROVIDER_CONFLICT` (`"email is already registered with provider 'github'"`)로 정확히 분기.
+    6. **Known Constraint 문서화**: `/signup` 이메일 인증 발송 미실시에 따른 계정 스쿼팅(Account Squatting) 및 `409 ACCOUNT_LINKING_REQUIRED` 거부 트레이드오프를 `authglue/README.md`에 명시적 기록.
+    7. **E2E 테스트 & 회귀 실측**: soft-delete된 계정 이메일 동일 재가입 허용 (`201 Created`), 중복 이메일 가입 사전 조회 거부 (`409 EMAIL_ALREADY_EXISTS`), OAuth provider 충돌, 권한 승격 차단, 세션 쿠키 보호 리소스 접근 실측 raw HTTP 로그 검증 통과. `docs/retrospectives/thin-auth-glue-layer.md` 회고 수립.

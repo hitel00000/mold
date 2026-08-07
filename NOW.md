@@ -21,9 +21,9 @@
 
 ---
 
-## 현재 상태 (2026-07-31 기준)
+## 현재 상태 (2026-08-07 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 (복합 Unique Constraint, N:M Join Resource, OAuth 세션발급 Escape Hatch, Nullable Ownership 패리티, List Owner 필터링, 관계 조인 조회 `?include=`) 완결, 및 **Phase 6 Task 6.1 `drink-log` 실제 프로덕션 이관 완결 (Option C INTEGER AUTOINCREMENT PK, R2 키 보존, `tags` `slug` + `unique_together` Idempotency, 5개 테이블 `soft_delete: true`, Delete Orchestration 세션 HTTP API Abort 계약, Miniflare E2E 6대 시나리오 100% PASS)**, **Task 6.2 [독립 bugfix] Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 픽스 완결**.  
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 (복합 Unique Constraint, N:M Join Resource, OAuth 세션발급 Escape Hatch, Nullable Ownership 패리티, List Owner 필터링, 관계 조인 조회 `?include=`) 완결, 및 **Phase 6 Task 6.1 `drink-log` 실제 프로덕션 이관 완결 (Option C INTEGER AUTOINCREMENT PK, R2 키 보존, `tags` `slug` + `unique_together` Idempotency, 5개 테이블 `soft_delete: true`, Delete Orchestration 세션 HTTP API Abort 계약, Miniflare E2E 6대 시나리오 100% PASS)**, **Task 6.2 [독립 bugfix] Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 픽스 완결**, **Task 8.1/8.2 소유권 CREATE-time 자동 주입 및 `client_writable: false` 전파 완결**, **Task 8.4 얇은 Auth 레이어 (`authglue` 패키지: `/signup`, OAuth 콜백, Pre-Account Hijacking 방지, 계정 스쿼팅 known constraint 문서화, 코어 0줄 변경) 완결**.  
 👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
 
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
@@ -49,5 +49,6 @@
 3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
 4. [x] ~~**Task 8.1: Ownership Field CREATE-time 자동 주입**~~ (완료: 커밋 `8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`)
 5. [x] ~~**Task 8.2: Client-Writable 필드 차단 (`client_writable: false`)**~~ (완료: Option A Field-level IR 확장 + 400 Bad Request 거부 + `CLIENT_WRITE_FORBIDDEN` + `ErrClientWriteForbidden` sentinel error + 5개 타깃 일관 전파)
-6. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+6. [x] ~~**Task 8.4: 얇은 Auth 레이어 (`authglue`) 및 세션 발급 핸들러**~~ (완료: 코어 0줄 변경, Pre-Account Takeover/Hijacking 차단, `authglue/README.md` 알려진 제약 문서화, `docs/retrospectives/thin-auth-glue-layer.md` 회고 수립)
+7. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
    - **사유**: 다중 Storage 백엔드 확장 (마세라티 원칙에 따라 필요성 확인 후 세션 시작 시 확정).
