@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/hitel00000/mold/authglue"
+	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
 )
 
@@ -457,6 +458,60 @@ func TestAuthGlue_DuplicateEmailSignupBlocked(t *testing.T) {
 	_ = json.Unmarshal(w2.Body.Bytes(), &errRes)
 	if errRes.Error.Code != "EMAIL_ALREADY_EXISTS" {
 		t.Errorf("expected structured error code 'EMAIL_ALREADY_EXISTS', got: %s", errRes.Error.Code)
+	}
+}
+
+// TestAuthGlue_SoftDeletedUserEmailReSignupAllowed verifies that when a user is soft-deleted,
+// a new user can sign up with the exact same email address without getting blocked.
+func TestAuthGlue_SoftDeletedUserEmailReSignupAllowed(t *testing.T) {
+	app, _ := setupTestApp(t)
+	mux := setupTestServer(app, nil)
+	ctx := context.Background()
+
+	// 1. Initial signup for user with email "deleted_user@example.com"
+	reqBody1 := `{"email":"deleted_user@example.com","password":"password123","name":"User One"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first signup failed: %d: %s", w1.Code, w1.Body.String())
+	}
+
+	var signupRes struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(w1.Body.Bytes(), &signupRes)
+	userID1 := signupRes.Data["id"]
+
+	// 2. Perform soft-delete on user 1 (setting deleted_at timestamp)
+	userResIR := &resource.Resource{
+		Name:       "User",
+		Table:      "users",
+		Timestamps: true,
+		SoftDelete: true,
+	}
+	if err := app.Store().SoftDelete(ctx, userResIR, userID1); err != nil {
+		t.Fatalf("failed soft-deleting user 1: %v", err)
+	}
+
+	// 3. Re-signup attempt with exact same email address "deleted_user@example.com"
+	reqBody2 := `{"email":"deleted_user@example.com","password":"password456","name":"User Two"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/signup", strings.NewReader(reqBody2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+
+	t.Logf("=== RAW HTTP REQUEST: Signup with Email of Soft-Deleted Account ===")
+	t.Logf("POST /signup HTTP/1.1\nContent-Type: application/json\n\n%s", reqBody2)
+
+	mux.ServeHTTP(w2, req2)
+
+	t.Logf("=== RAW HTTP RESPONSE: Signup Response (Re-signup Allowed) ===")
+	t.Logf("HTTP/1.1 %d\nContent-Type: %s\n\n%s", w2.Code, w2.Header().Get("Content-Type"), w2.Body.String())
+
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for re-signup after soft-delete, got %d: %s", w2.Code, w2.Body.String())
 	}
 }
 
