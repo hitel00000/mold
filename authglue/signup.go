@@ -82,6 +82,9 @@ func SignupHandler(app *runtime.App) http.HandlerFunc {
 				writeError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", err.Error())
 				return
 			}
+			// NOTE: adapters/sqlite currently wraps raw driver errors without converting to storage.ErrAlreadyExists.
+			// Primary duplicate-email defense is the explicit app.Store().List() pre-check above.
+			// This check contains errors.Is for forward-compatibility alongside SQLite string pattern matching.
 			if errors.Is(err, storage.ErrAlreadyExists) || strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				writeError(w, http.StatusConflict, "EMAIL_ALREADY_EXISTS", "email is already registered")
 				return
