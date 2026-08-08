@@ -6,9 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/hitel00000/mold/codegen/cloudflare"
-	"github.com/hitel00000/mold/resource"
 )
 
 func TestDrinkLog_E2ERealProductionMigration(t *testing.T) {
@@ -17,134 +14,51 @@ func TestDrinkLog_E2ERealProductionMigration(t *testing.T) {
 		t.Skip("node not found in PATH")
 	}
 
-	reg, err := resource.LoadAll(".")
-	if err != nil {
-		t.Fatalf("failed loading resources: %v", err)
-	}
-
-	gen := cloudflare.NewGenerator()
-	output, err := gen.Generate(reg)
-	if err != nil {
-		t.Fatalf("generate Cloudflare Workers target failed: %v", err)
-	}
-
 	tmpDir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(output.PackageJSON), 0644)
-	_ = os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644)
-	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 
-	glueCode := `const app = new Hono<{ Bindings: Bindings }>();
+	// Copy functions directory into tmpDir
+	functionsSrc := filepath.Join(".", "functions")
+	functionsDest := filepath.Join(tmpDir, "functions")
+	copyDir(t, functionsSrc, functionsDest)
 
-// Custom Hono Glue Endpoints for Drink-Log Real Production Migration (Preposed for route priority)
-app.get('/api/sake-records', async (c) => {
-  const cookieHeader = c.req.header('Cookie') || '';
-  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
-  if (!match) return c.json({ error: 'unauthorized' }, 401);
-
-  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
-    .bind(match[1], new Date().toISOString()).first();
-  if (!session) return c.json({ error: 'unauthorized' }, 401);
-
-  const records = await c.env.DB.prepare('SELECT * FROM sake_records WHERE owner_id = ? ORDER BY consumed_date DESC, created_at DESC')
-    .bind(session.user_id).all();
-
-  const entries = [];
-  for (const record of records.results || []) {
-    const images = await c.env.DB.prepare('SELECT * FROM sake_images WHERE owner_id = ? AND record_id = ? ORDER BY display_order').bind(session.user_id, record.id).all();
-    const recordTags = await c.env.DB.prepare('SELECT * FROM record_tags WHERE sake_record_id = ?').bind(record.id).all();
-    const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?)').bind(session.user_id).all();
-    const tagsMap = new Map((tags.results || []).map(t => [t.id, t]));
-
-    entries.push({
-      id: String(record.id),
-      record,
-      images: (images.results || []).map(img => ({
-        ...img,
-        data_url: ` + "`" + `/api/images?key=${encodeURIComponent(img.image_key)}` + "`" + `,
-        thumbnail_data_url: img.thumbnail_key ? ` + "`" + `/api/images?key=${encodeURIComponent(img.thumbnail_key)}` + "`" + ` : null,
-      })),
-      record_tags: recordTags.results || [],
-      tags: (recordTags.results || []).map(rt => tagsMap.get(rt.tag_id)).filter(Boolean).map(t => ({ ...t, is_default: Boolean(t.is_default) }))
-    });
-  }
-
-  return c.json(entries);
-});
-
-app.get('/api/tags', async (c) => {
-  const cookieHeader = c.req.header('Cookie') || '';
-  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
-  if (!match) return c.json({ error: 'unauthorized' }, 401);
-
-  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
-    .bind(match[1], new Date().toISOString()).first();
-  if (!session) return c.json({ error: 'unauthorized' }, 401);
-
-  const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?) ORDER BY tag_group, is_default DESC, label').bind(session.user_id).all();
-  return c.json((tags.results || []).map(t => ({ ...t, is_default: Boolean(t.is_default) })));
-});
-
-app.post('/api/tags', async (c) => {
-  const cookieHeader = c.req.header('Cookie') || '';
-  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
-  if (!match) return c.json({ error: 'unauthorized' }, 401);
-
-  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
-    .bind(match[1], new Date().toISOString()).first();
-  if (!session) return c.json({ error: 'unauthorized' }, 401);
-
-  const body = await c.req.json();
-  const tagGroup = body.tag_group;
-  const label = (body.label || '').trim().slice(0, 20);
-  if (!tagGroup || !label) return c.json({ error: 'invalid_tag' }, 400);
-
-  const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?)').bind(session.user_id).all();
-  const existing = (tags.results || []).find(t => t.tag_group === tagGroup && t.label.trim().toLowerCase() === label.toLowerCase());
-  if (existing) {
-    return c.json({ ...existing, is_default: Boolean(existing.is_default), already_exists: true }, 200, { 'X-Sake-Tag-Existing': 'true' });
-  }
-
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  await c.env.DB.prepare('INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES (?, ?, "sake", ?, ?, 0, ?)')
-    .bind(id, session.user_id, tagGroup, label, now).run();
-
-  return c.json({ id, owner_id: session.user_id, drink_type: 'sake', tag_group: tagGroup, label, is_default: false, created_at: now, already_exists: false }, 201);
-});
-
-app.delete('/api/sake-records/:id', async (c) => {
-  const id = c.req.param('id');
-  const cookieHeader = c.req.header('Cookie') || '';
-  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
-  if (!match) return c.json({ error: 'unauthorized' }, 401);
-
-  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
-    .bind(match[1], new Date().toISOString()).first();
-  if (!session) return c.json({ error: 'unauthorized' }, 401);
-
-  const rec = await c.env.DB.prepare('SELECT * FROM sake_records WHERE id = ?').bind(id).first();
-  if (!rec) return c.json({ error: 'not_found' }, 404);
-  if (rec.owner_id !== session.user_id) return c.json({ error: 'forbidden' }, 403);
-
-  const images = await c.env.DB.prepare('SELECT image_key, thumbnail_key FROM sake_images WHERE owner_id = ? AND record_id = ?').bind(session.user_id, id).all();
-  await c.env.DB.prepare('DELETE FROM sake_records WHERE owner_id = ? AND id = ?').bind(session.user_id, id).run();
-
-  const bucket = c.env.IMAGES || c.env.alcohol_log_images;
-  if (bucket) {
-    await Promise.all((images.results || []).flatMap(img => [img.image_key, img.thumbnail_key].filter(Boolean).map(key => bucket.delete(key))));
-  }
-
-  return new Response(null, { status: 204 });
-});`
-
-	indexTS := strings.Replace(output.IndexTS, "const app = new Hono<{ Bindings: Bindings }>();", glueCode, 1)
-	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(indexTS), 0644)
-
+	// Copy migration SQL into tmpDir
 	migSQL, err := os.ReadFile(filepath.Join("migrations", "0001_drink_log_migration.sql"))
 	if err != nil {
 		t.Fatalf("failed reading migration sql: %v", err)
 	}
 	_ = os.WriteFile(filepath.Join(tmpDir, "migration.sql"), migSQL, 0644)
+
+	// Create index.ts that directly imports and dispatches to deployable functions/ TypeScript modules
+	indexTS := `import { Hono } from 'hono';
+import { onRequestGet as getSakeRecords, onRequestPost as createSakeRecord } from './functions/api/sake-records/index';
+import { onRequestGet as getSakeRecord, onRequestPut as updateSakeRecord, onRequestDelete as deleteSakeRecord } from './functions/api/sake-records/[id]';
+import { onRequestGet as getTags, onRequestPost as createTag } from './functions/api/tags/index';
+
+const app = new Hono<{ Bindings: any }>();
+
+app.get('/api/sake-records', (c) => getSakeRecords({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.post('/api/sake-records', (c) => createSakeRecord({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.get('/api/sake-records/:id', (c) => getSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.put('/api/sake-records/:id', (c) => updateSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.delete('/api/sake-records/:id', (c) => deleteSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.get('/api/tags', (c) => getTags({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+app.post('/api/tags', (c) => createTag({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+
+export default app;
+`
+	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(indexTS), 0644)
+
+	// Write package.json for Miniflare & Hono & Esbuild
+	pkgJSON := `{
+  "name": "drink-log-pilot-e2e",
+  "type": "module",
+  "dependencies": {
+    "miniflare": "^3.20241205.0",
+    "hono": "^4.0.0",
+    "esbuild": "^0.20.0"
+  }
+}`
+	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(pkgJSON), 0644)
 
 	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
 	if os.Getenv("OS") != "Windows_NT" {
@@ -253,12 +167,12 @@ async function run() {
     process.exit(1);
   }
 
-  console.log("\n=== STEP 3: Testing Endpoint Response & Tag Deduplication ===");
+  console.log("\n=== STEP 3: Testing Real Pages Functions API Contracts & Tag Deduplication ===");
   const sessionToken = "session_token_123";
   const sessionExp = "2030-01-01T00:00:00Z";
   await db.exec("INSERT INTO oauth_sessions (id, user_id, created_at, expires_at) VALUES ('" + sessionToken + "', '" + u1_id + "', '2026-08-08T00:00:00Z', '" + sessionExp + "');");
 
-  // GET /api/sake-records response contract
+  // GET /api/sake-records response contract (via Pages Functions routing)
   const listRes = await mf.dispatchFetch("http://localhost/api/sake-records", {
     headers: { "Cookie": "alcohol_log_session=" + sessionToken }
   });
@@ -267,14 +181,14 @@ async function run() {
   console.log("List Response Entry Count:", listJson.length);
   console.log("Entry Shape:", Object.keys(listJson[0] || {}));
 
-  // POST /api/tags deduplication (toLowerCase test)
+  // POST /api/tags deduplication (toLowerCase test: "산뜻 ")
   const tagCreate1 = await mf.dispatchFetch("http://localhost/api/tags", {
     method: "POST",
     headers: { "Cookie": "alcohol_log_session=" + sessionToken, "Content-Type": "application/json" },
-    body: JSON.stringify({ tag_group: "taste", label: "산뜻" })
+    body: JSON.stringify({ tag_group: "taste", label: "산뜻 " })
   });
   const tagJson1 = await tagCreate1.json();
-  console.log("Duplicate Tag POST Status:", tagCreate1.status, "Already Exists:", tagJson1.already_exists);
+  console.log("Duplicate Tag POST Status:", tagCreate1.status, "Already Exists:", tagJson1.already_exists, "Matched ID:", tagJson1.id, "Header:", tagCreate1.headers.get("X-Sake-Tag-Existing"));
 
   // DELETE /api/sake-records/:id Cascade test
   const delRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id, {
@@ -290,8 +204,8 @@ async function run() {
 
   console.log("Post Delete State - Records:", postRecCount, "Images:", postImgCount, "R2 Deleted:", r2OrigAfter === null && r2ThumbAfter === null);
 
-  if (listRes.status === 200 && tagJson1.already_exists === true && delRes.status === 204 && postRecCount === 0 && postImgCount === 0 && r2OrigAfter === null && r2ThumbAfter === null) {
-    console.log("[EMPIRICAL CONTRACT VERIFIED]: All API Contracts & Cascade Deletes Succeeded!");
+  if (listRes.status === 200 && tagJson1.already_exists === true && tagJson1.id === "tag_taste_fresh" && delRes.status === 204 && postRecCount === 0 && postImgCount === 0 && r2OrigAfter === null && r2ThumbAfter === null) {
+    console.log("[EMPIRICAL CONTRACT VERIFIED]: All Deployable Pages Functions Contracts & Cascade Deletes Succeeded!");
   } else {
     console.error("Contract Verification Failed");
     process.exit(1);
@@ -320,5 +234,30 @@ run().catch(err => {
 
 	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL CONTRACT VERIFIED]") {
 		t.Fatalf("empirical verification markers not found in output:\n%s", rawOutput)
+	}
+}
+
+func copyDir(t *testing.T, srcDir, destDir string) {
+	t.Helper()
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		targetPath := filepath.Join(destDir, rel)
+		if info.IsDir() {
+			return os.MkdirAll(targetPath, 0755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(targetPath, data, info.Mode())
+	})
+	if err != nil {
+		t.Fatalf("failed copying directory from %s to %s: %v", srcDir, destDir, err)
 	}
 }
