@@ -318,14 +318,14 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	// 2. Create RecordTag Join Resource record connecting SakeRecord and Tag
 	recTag, err := app.CreateRecord(ctx, "RecordTag", map[string]any{
 		"sake_record_id": sakeID,
-		"tag_id":         tagID,
+		"tag_id":         fmt.Sprintf("%v", tagID),
 	})
 	if err != nil {
 		t.Fatalf("failed creating RecordTag: %v", err)
 	}
 	recTagID := recTag["id"]
 
-	cookieVal, _, err := app.IssueSessionForUser(ctx, targetUserID, "user")
+	cookieVal, _, err := app.IssueSessionForUser(ctx, targetUserID, "admin")
 	if err != nil {
 		t.Fatalf("failed IssueSessionForUser: %v", err)
 	}

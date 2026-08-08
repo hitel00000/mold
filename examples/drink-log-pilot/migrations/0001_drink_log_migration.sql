@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS "sake_images_new" (
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
     FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE,
-    FOREIGN KEY ("record_id") REFERENCES "sake_records_new"("id") ON DELETE CASCADE
+    FOREIGN KEY ("record_id") REFERENCES "sake_records_new"("id") ON DELETE RESTRICT
 );
 
 INSERT INTO "sake_images_new" (
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS "record_tags_new" (
     "tag_id" TEXT NOT NULL,
     "created_at" TEXT NOT NULL,
     "updated_at" TEXT NOT NULL,
-    FOREIGN KEY ("sake_record_id") REFERENCES "sake_records_new"("id") ON DELETE CASCADE,
+    FOREIGN KEY ("sake_record_id") REFERENCES "sake_records_new"("id") ON DELETE RESTRICT,
     FOREIGN KEY ("tag_id") REFERENCES "tags"("id") ON DELETE CASCADE
 );
 

@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hitel00000/mold/auth"
@@ -159,6 +160,11 @@ func normalizeIDKey(v any) any {
 		return val
 	case float64:
 		return int64(val)
+	case string:
+		if n, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return n
+		}
+		return val
 	default:
 		return v
 	}

@@ -9,7 +9,7 @@ fields:
     type: int
     nullable: false
   - name: tag_id
-    type: int
+    type: string
     nullable: false
 
 relations:
@@ -28,7 +28,7 @@ constraints:
 
 auth:
   permissions:
-    create: authenticated
-    read: authenticated
-    update: authenticated
-    delete: authenticated
+    create: role:admin
+    read: role:admin
+    update: role:admin
+    delete: role:admin

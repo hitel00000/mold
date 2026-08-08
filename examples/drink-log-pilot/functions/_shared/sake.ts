@@ -656,6 +656,8 @@ export async function deleteSakeRecord(request: Request, env: AppEnv, id: string
     .prepare("SELECT image_key, thumbnail_key FROM sake_images WHERE owner_id = ? AND record_id = ?")
     .bind(session.userId, id)
     .all<{ image_key: string; thumbnail_key: string | null }>();
+  await db.prepare("DELETE FROM record_tags WHERE sake_record_id = ?").bind(id).run();
+  await db.prepare("DELETE FROM sake_images WHERE owner_id = ? AND record_id = ?").bind(session.userId, id).run();
   await db.prepare("DELETE FROM sake_records WHERE owner_id = ? AND id = ?").bind(session.userId, id).run();
   await Promise.all(
     images.results.flatMap((image) =>

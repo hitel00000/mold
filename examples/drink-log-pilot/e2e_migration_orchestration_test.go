@@ -28,21 +28,39 @@ func TestDrinkLog_E2ERealProductionMigration(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(tmpDir, "migration.sql"), migSQL, 0644)
 
-	// Create index.ts that directly imports and dispatches to deployable functions/ TypeScript modules
+	// Create index.ts that directly imports and dispatches to all deployable functions/ TypeScript modules
 	indexTS := `import { Hono } from 'hono';
 import { onRequestGet as getSakeRecords, onRequestPost as createSakeRecord } from './functions/api/sake-records/index';
 import { onRequestGet as getSakeRecord, onRequestPut as updateSakeRecord, onRequestDelete as deleteSakeRecord } from './functions/api/sake-records/[id]';
+import { onRequestPost as addSakeImage } from './functions/api/sake-records/[id]/images';
+import { onRequestDelete as deleteSakeImage } from './functions/api/sake-records/[id]/images/[imageId]';
+import { onRequestGet as searchSakeRecords } from './functions/api/sake-records/search';
 import { onRequestGet as getTags, onRequestPost as createTag } from './functions/api/tags/index';
+import { onRequestGet as getImage } from './functions/api/images';
+import { onRequestGet as getMe } from './functions/api/me';
+import { onRequestGet as googleLogin } from './functions/api/auth/google/login';
+import { onRequestGet as googleCallback } from './functions/api/auth/google-callback';
+import { onRequestPost as logout } from './functions/api/auth/logout';
 
 const app = new Hono<{ Bindings: any }>();
 
-app.get('/api/sake-records', (c) => getSakeRecords({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.post('/api/sake-records', (c) => createSakeRecord({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.get('/api/sake-records/:id', (c) => getSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.put('/api/sake-records/:id', (c) => updateSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.delete('/api/sake-records/:id', (c) => deleteSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.get('/api/tags', (c) => getTags({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
-app.post('/api/tags', (c) => createTag({ env: c.env, request: c.req.raw, params: {}, waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() }));
+const ctx = { waitUntil: () => {}, passThroughOnException: () => {}, next: async () => new Response() };
+
+app.get('/api/sake-records', (c) => getSakeRecords({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.post('/api/sake-records', (c) => createSakeRecord({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/sake-records/search', (c) => searchSakeRecords({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/sake-records/:id', (c) => getSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, ...ctx }));
+app.put('/api/sake-records/:id', (c) => updateSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, ...ctx }));
+app.delete('/api/sake-records/:id', (c) => deleteSakeRecord({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, ...ctx }));
+app.post('/api/sake-records/:id/images', (c) => addSakeImage({ env: c.env, request: c.req.raw, params: { id: c.req.param('id') }, ...ctx }));
+app.delete('/api/sake-records/:id/images/:imageId', (c) => deleteSakeImage({ env: c.env, request: c.req.raw, params: { id: c.req.param('id'), imageId: c.req.param('imageId') }, ...ctx }));
+app.get('/api/tags', (c) => getTags({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.post('/api/tags', (c) => createTag({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/images', (c) => getImage({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/me', (c) => getMe({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/auth/google/login', (c) => googleLogin({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.get('/api/auth/google-callback', (c) => googleCallback({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
+app.post('/api/auth/logout', (c) => logout({ env: c.env, request: c.req.raw, params: {}, ...ctx }));
 
 export default app;
 `
@@ -92,6 +110,11 @@ async function run() {
     scriptPath: "./dist/index.js",
     d1Databases: { DB: "mold-d1", alcohol_log: "mold-d1" },
     r2Buckets: { IMAGES: "mold-r2", alcohol_log_images: "mold-r2" },
+    bindings: {
+      GOOGLE_CLIENT_ID: "test_client_id",
+      GOOGLE_CLIENT_SECRET: "test_client_secret",
+      SESSION_SECRET: "test_session_secret"
+    }
   });
 
   const db = await mf.getD1Database("DB");
@@ -114,7 +137,7 @@ async function run() {
 
   // Seed Default 22 Tags
   await db.exec("INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES ('tag_taste_fresh', NULL, 'sake', 'taste', '산뜻', 1, '2026-08-08T00:00:00Z');");
-  await db.exec("INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES ('tag_taste_umami', NULL, 'sake', 'taste', '감칠', 1, '2026-08-08T00:00:00Z');");
+  await db.exec("INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES ('tag_aroma_fruit', NULL, 'sake', 'aroma', 'Fruity', 1, '2026-08-08T00:00:00Z');");
 
   // Seed Synthetic Production User and Record
   const u1_id = "google:1234567890";
@@ -167,35 +190,93 @@ async function run() {
     process.exit(1);
   }
 
-  console.log("\n=== STEP 3: Testing Real Pages Functions API Contracts & Tag Deduplication ===");
+  console.log("\n=== STEP 3: Full Endpoints Raw Request/Response Verification ===");
   const sessionToken = "session_token_123";
   const sessionExp = "2030-01-01T00:00:00Z";
   await db.exec("INSERT INTO oauth_sessions (id, user_id, created_at, expires_at) VALUES ('" + sessionToken + "', '" + u1_id + "', '2026-08-08T00:00:00Z', '" + sessionExp + "');");
+  const authHeader = { "Cookie": "alcohol_log_session=" + sessionToken };
 
-  // GET /api/sake-records response contract (via Pages Functions routing)
-  const listRes = await mf.dispatchFetch("http://localhost/api/sake-records", {
-    headers: { "Cookie": "alcohol_log_session=" + sessionToken }
-  });
+  // 1. GET /api/me
+  const meRes = await mf.dispatchFetch("http://localhost/api/me", { headers: authHeader });
+  const meJson = await meRes.json();
+  console.log("[ENDPOINT 1] GET /api/me -> Status:", meRes.status, "Authenticated:", meJson.authenticated, "User:", meJson.user?.id);
+
+  // 2. GET /api/sake-records
+  const listRes = await mf.dispatchFetch("http://localhost/api/sake-records", { headers: authHeader });
   const listJson = await listRes.json();
-  console.log("GET /api/sake-records Status:", listRes.status);
-  console.log("List Response Entry Count:", listJson.length);
-  console.log("Entry Shape:", Object.keys(listJson[0] || {}));
+  console.log("[ENDPOINT 2] GET /api/sake-records -> Status:", listRes.status, "Count:", listJson.length, "Entry ID:", listJson[0]?.id);
 
-  // POST /api/tags deduplication (toLowerCase test: "산뜻 ")
+  // 3. GET /api/sake-records/:id
+  const getRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id, { headers: authHeader });
+  const getJson = await getRes.json();
+  console.log("[ENDPOINT 3] GET /api/sake-records/:id -> Status:", getRes.status, "Name:", getJson.record?.name);
+
+  // 4. GET /api/images?key=... (Proxy & Ownership check before PUT)
+  const imageProxyRes = await mf.dispatchFetch("http://localhost/api/images?key=" + encodeURIComponent(img1_key), { headers: authHeader });
+  console.log("[ENDPOINT 4] GET /api/images?key=... -> Status:", imageProxyRes.status, "Content-Type:", imageProxyRes.headers.get("Content-Type"));
+
+  // 5. GET /api/sake-records/search?q=Kokuryu
+  const searchRes = await mf.dispatchFetch("http://localhost/api/sake-records/search?q=Kokuryu", { headers: authHeader });
+  const searchJson = await searchRes.json();
+  console.log("[ENDPOINT 5] GET /api/sake-records/search?q=Kokuryu -> Status:", searchRes.status, "Matched Count:", searchJson.length);
+
+  // 6. PUT /api/sake-records/:id (Include existing images array to preserve images)
+  const putRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id, {
+    method: "PUT",
+    headers: { ...authHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Kokuryu Daiginjo Updated", region: "Fukui", consumed_date: "2026-08-08", images: getJson.images })
+  });
+  const putJson = await putRes.json();
+  console.log("[ENDPOINT 6] PUT /api/sake-records/:id -> Status:", putRes.status, "Updated Name:", putJson.record?.name);
+
+  // 7. POST /api/sake-records/:id/images
+  const addImgRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id + "/images", {
+    method: "POST",
+    headers: { ...authHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ file_name: "new_bottle.jpg", mime_type: "image/jpeg" })
+  });
+  const addImgJson = await addImgRes.json();
+  console.log("[ENDPOINT 7] POST /api/sake-records/:id/images -> Status:", addImgRes.status, "Image ID:", addImgJson.id);
+
+  // 8. DELETE /api/sake-records/:id/images/:imageId
+  const delImgRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id + "/images/" + addImgJson.id, {
+    method: "DELETE",
+    headers: authHeader
+  });
+  console.log("[ENDPOINT 8] DELETE /api/sake-records/:id/images/:imageId -> Status:", delImgRes.status);
+
+  // 9. GET /api/tags?drink_type=sake
+  const tagsRes = await mf.dispatchFetch("http://localhost/api/tags?drink_type=sake", { headers: authHeader });
+  const tagsJson = await tagsRes.json();
+  console.log("[ENDPOINT 9] GET /api/tags?drink_type=sake -> Status:", tagsRes.status, "Tag Count:", tagsJson.length);
+
+  // 10. POST /api/tags (Latin Case-Insensitive & Space Deduplication: "fruity " vs "Fruity")
   const tagCreate1 = await mf.dispatchFetch("http://localhost/api/tags", {
     method: "POST",
-    headers: { "Cookie": "alcohol_log_session=" + sessionToken, "Content-Type": "application/json" },
-    body: JSON.stringify({ tag_group: "taste", label: "산뜻 " })
+    headers: { ...authHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ tag_group: "aroma", label: "fruity " })
   });
   const tagJson1 = await tagCreate1.json();
-  console.log("Duplicate Tag POST Status:", tagCreate1.status, "Already Exists:", tagJson1.already_exists, "Matched ID:", tagJson1.id, "Header:", tagCreate1.headers.get("X-Sake-Tag-Existing"));
+  console.log("[ENDPOINT 10] POST /api/tags (Latin Case-Insensitive) -> Status:", tagCreate1.status, "Already Exists:", tagJson1.already_exists, "Matched ID:", tagJson1.id, "Header:", tagCreate1.headers.get("X-Sake-Tag-Existing"));
 
-  // DELETE /api/sake-records/:id Cascade test
+  // 11. GET /api/auth/google/login
+  const loginRes = await mf.dispatchFetch("http://localhost/api/auth/google/login", { redirect: "manual" });
+  console.log("[ENDPOINT 11] GET /api/auth/google/login -> Status:", loginRes.status, "Redirect Location:", loginRes.headers.get("Location")?.slice(0, 45) + "...");
+
+  // 12. GET /api/auth/google-callback (Invalid state rejection test)
+  const callbackRes = await mf.dispatchFetch("http://localhost/api/auth/google-callback?code=fake&state=invalid");
+  console.log("[ENDPOINT 12] GET /api/auth/google-callback -> Status:", callbackRes.status);
+
+  // 13. DELETE /api/sake-records/:id (Cascade test)
   const delRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id, {
     method: "DELETE",
-    headers: { "Cookie": "alcohol_log_session=" + sessionToken }
+    headers: authHeader
   });
-  console.log("DELETE /api/sake-records/:id Status:", delRes.status);
+  console.log("[ENDPOINT 13] DELETE /api/sake-records/:id -> Status:", delRes.status);
+
+  // 14. POST /api/auth/logout (Revoke session)
+  const logoutRes = await mf.dispatchFetch("http://localhost/api/auth/logout", { method: "POST", headers: authHeader });
+  console.log("[ENDPOINT 14] POST /api/auth/logout -> Status:", logoutRes.status);
 
   const postRecCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
   const postImgCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
@@ -204,8 +285,8 @@ async function run() {
 
   console.log("Post Delete State - Records:", postRecCount, "Images:", postImgCount, "R2 Deleted:", r2OrigAfter === null && r2ThumbAfter === null);
 
-  if (listRes.status === 200 && tagJson1.already_exists === true && tagJson1.id === "tag_taste_fresh" && delRes.status === 204 && postRecCount === 0 && postImgCount === 0 && r2OrigAfter === null && r2ThumbAfter === null) {
-    console.log("[EMPIRICAL CONTRACT VERIFIED]: All Deployable Pages Functions Contracts & Cascade Deletes Succeeded!");
+  if (meRes.status === 200 && listRes.status === 200 && getRes.status === 200 && searchRes.status === 200 && putRes.status === 200 && addImgRes.status === 201 && delImgRes.status === 204 && tagsRes.status === 200 && tagJson1.already_exists === true && tagJson1.id === "tag_aroma_fruit" && imageProxyRes.status === 200 && loginRes.status === 302 && callbackRes.status === 400 && logoutRes.status === 200 && delRes.status === 204 && postRecCount === 0 && postImgCount === 0 && r2OrigAfter === null && r2ThumbAfter === null) {
+    console.log("[EMPIRICAL CONTRACT VERIFIED]: All 14 Deployable Pages Functions Endpoints & Cascade Deletes Succeeded!");
   } else {
     console.error("Contract Verification Failed");
     process.exit(1);
