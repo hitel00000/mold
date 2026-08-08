@@ -79,9 +79,8 @@ func TestDrinkLogPilot_OAuthSessionE2E(t *testing.T) {
 	sakeRec, err := app.CreateRecord(ctx, "SakeRecord", map[string]any{
 		"name":          "Kokuryu Daiginjo",
 		"consumed_date": "2026-07-27T19:00:00Z",
-		"rating":        5.0,
-		"notes":         "Sublime velvet texture",
-		"owner_id":      userID,
+		"one_line_note": "Sublime velvet texture",
+		"owner_id":      fmt.Sprintf("%v", userID),
 	})
 	if err != nil {
 		t.Fatalf("failed creating SakeRecord: %v", err)
@@ -133,7 +132,7 @@ fields:
     type: string
     nullable: true
   - name: owner_id
-    type: int
+    type: string
     nullable: true
   - name: drink_type
     type: string
@@ -191,7 +190,7 @@ auth:
 	userTag, err := app.CreateRecord(ctx, "Tag", map[string]any{
 		"tag_group": "taste",
 		"label":     "User 501 Custom Tag",
-		"owner_id":  501,
+		"owner_id":  "501",
 	})
 	if err != nil {
 		t.Fatalf("failed creating user tag: %v", err)
@@ -308,9 +307,8 @@ func TestDrinkLogPilot_RelationIncludeE2E(t *testing.T) {
 	sake, err := app.CreateRecord(ctx, "SakeRecord", map[string]any{
 		"name":          "Dassai 23",
 		"consumed_date": "2026-07-28T12:00:00Z",
-		"rating":        4.8,
-		"notes":         "Smooth & aromatic",
-		"owner_id":      targetUserID,
+		"one_line_note": "Smooth & aromatic",
+		"owner_id":      fmt.Sprintf("%v", targetUserID),
 	})
 	if err != nil {
 		t.Fatalf("failed creating SakeRecord: %v", err)

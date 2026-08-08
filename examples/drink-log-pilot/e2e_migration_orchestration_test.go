@@ -33,10 +33,9 @@ func TestDrinkLog_E2ERealProductionMigration(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 
-	indexTS := output.IndexTS + `
-// Custom Hono Glue Endpoints for Drink-Log Real Production Migration
+	glueCode := `const app = new Hono<{ Bindings: Bindings }>();
 
-// GET /api/sake-records
+// Custom Hono Glue Endpoints for Drink-Log Real Production Migration (Preposed for route priority)
 app.get('/api/sake-records', async (c) => {
   const cookieHeader = c.req.header('Cookie') || '';
   const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
@@ -72,7 +71,6 @@ app.get('/api/sake-records', async (c) => {
   return c.json(entries);
 });
 
-// GET /api/tags
 app.get('/api/tags', async (c) => {
   const cookieHeader = c.req.header('Cookie') || '';
   const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
@@ -86,7 +84,6 @@ app.get('/api/tags', async (c) => {
   return c.json((tags.results || []).map(t => ({ ...t, is_default: Boolean(t.is_default) })));
 });
 
-// POST /api/tags (Case-insensitive deduplication)
 app.post('/api/tags', async (c) => {
   const cookieHeader = c.req.header('Cookie') || '';
   const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
@@ -115,7 +112,6 @@ app.post('/api/tags', async (c) => {
   return c.json({ id, owner_id: session.user_id, drink_type: 'sake', tag_group: tagGroup, label, is_default: false, created_at: now, already_exists: false }, 201);
 });
 
-// DELETE /api/sake-records/:id
 app.delete('/api/sake-records/:id', async (c) => {
   const id = c.req.param('id');
   const cookieHeader = c.req.header('Cookie') || '';
@@ -139,8 +135,9 @@ app.delete('/api/sake-records/:id', async (c) => {
   }
 
   return new Response(null, { status: 204 });
-});
-`
+});`
+
+	indexTS := strings.Replace(output.IndexTS, "const app = new Hono<{ Bindings: Bindings }>();", glueCode, 1)
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(indexTS), 0644)
 
 	migSQL, err := os.ReadFile(filepath.Join("migrations", "0001_drink_log_migration.sql"))

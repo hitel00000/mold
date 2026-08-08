@@ -22,7 +22,7 @@ fields:
     nullable: true
   - name: last_login_at
     type: datetime
-    nullable: false
+    nullable: true
   - name: role
     type: enum
     nullable: false
