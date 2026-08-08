@@ -1,6 +1,10 @@
 # drink-log 실제 프로덕션 이식 — 사전 분석 및 마이그레이션 계획 보고서
 
-> **문서 상태**: 검토 대기 (Draft for Human Approval)  
+> [!WARNING]
+> 이 문서(Rev 1~10)는 실제 소스 코드 확인 전 작성되었으며 다수 항목(UUID 키 가정, slug 필드 신설 가정, ON DELETE RESTRICT 가정, notes/rating 필드 존재 가정 등)이 실제 프로덕션 코드/스키마와 다릅니다.  
+> 실측 정정 사항 및 확정 이관 명세는 `docs/retrospectives/drink-log-real-migration.md`를 참고하십시오.
+
+> **문서 상태**: 참고용 보존 (Superceded by Real Migration Brief)  
 > **생성 일자**: 2026-07-30  
 > **관련 문서**: [TASKS.md](../../TASKS.md) (Task 5.2 마찰 D), [ir-spec.md](../ir-spec.md) (5.6절, 5.7절), `drink-log/docs/schema.sql`, `drink-log/docs/operations-checklist.md`
 
