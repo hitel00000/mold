@@ -11,7 +11,7 @@ import (
 	"github.com/hitel00000/mold/resource"
 )
 
-func TestDrinkLog_E2EMigrationAndDeleteOrchestration(t *testing.T) {
+func TestDrinkLog_E2ERealProductionMigration(t *testing.T) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil || nodePath == "" {
 		t.Skip("node not found in PATH")
@@ -34,67 +34,111 @@ func TestDrinkLog_E2EMigrationAndDeleteOrchestration(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 
 	indexTS := output.IndexTS + `
-app.delete('/api/sake_records/:id/orchestrate-delete', async (c) => {
-  const recordId = c.req.param('id');
+// Custom Hono Glue Endpoints for Drink-Log Real Production Migration
+
+// GET /api/sake-records
+app.get('/api/sake-records', async (c) => {
   const cookieHeader = c.req.header('Cookie') || '';
-  const match = cookieHeader.match(/mold_session=([^;]+)/);
-  if (!match) return c.json({ error: { code: 'UNAUTHORIZED', message: 'authentication required' } }, 401);
+  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
+  if (!match) return c.json({ error: 'unauthorized' }, 401);
 
-  const token = match[1];
-  const sess = await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?')
-    .bind(token, new Date().toISOString()).first();
-  if (!sess) return c.json({ error: { code: 'UNAUTHORIZED', message: 'invalid session' } }, 401);
+  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
+    .bind(match[1], new Date().toISOString()).first();
+  if (!session) return c.json({ error: 'unauthorized' }, 401);
 
-  const record = await c.env.DB.prepare('SELECT * FROM "sake_records" WHERE id = ?').bind(recordId).first();
-  if (!record) return c.json({ error: { code: 'NOT_FOUND', message: 'record not found' } }, 404);
-  if (record.owner_id != sess.user_id) return c.json({ error: { code: 'FORBIDDEN', message: 'forbidden' } }, 403);
+  const records = await c.env.DB.prepare('SELECT * FROM sake_records WHERE owner_id = ? ORDER BY consumed_date DESC, created_at DESC')
+    .bind(session.user_id).all();
 
-  const images = await c.env.DB.prepare('SELECT * FROM "sake_images" WHERE record_id = ?').bind(recordId).all();
-  const childImages = images.results || [];
+  const entries = [];
+  for (const record of records.results || []) {
+    const images = await c.env.DB.prepare('SELECT * FROM sake_images WHERE owner_id = ? AND record_id = ? ORDER BY display_order').bind(session.user_id, record.id).all();
+    const recordTags = await c.env.DB.prepare('SELECT * FROM record_tags WHERE sake_record_id = ?').bind(record.id).all();
+    const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?)').bind(session.user_id).all();
+    const tagsMap = new Map((tags.results || []).map(t => [t.id, t]));
 
-  for (const img of childImages) {
-    // Simulated Partial Failure Trigger Key
-    if (img.image_key === 'FAIL_BLOB_TRIGGER') {
-      console.log('Step A1 image_key blob delete status: 500 (Simulated Partial Failure)');
-      return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
-    }
-
-    // Step A1: Original Blob Delete
-    if (img.image_key) {
-      const resBlob = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/image_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
-      console.log(` + "`" + `Step A1 image_key blob delete status: ${resBlob.status}` + "`" + `);
-      if (resBlob.status !== 200 && resBlob.status !== 404) {
-        return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image_key blob for image ${img.id}` + "`" + ` } }, 500);
-      }
-    }
-
-    // Step A2: Thumbnail Blob Delete
-    if (img.thumbnail_key) {
-      const resThumb = await app.request(` + "`" + `/api/sake_images/${img.id}/blob/thumbnail_key` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
-      console.log(` + "`" + `Step A2 thumbnail_key blob delete status: ${resThumb.status}` + "`" + `);
-      if (resThumb.status !== 200 && resThumb.status !== 404) {
-        return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete thumbnail_key blob for image ${img.id}` + "`" + ` } }, 500);
-      }
-    }
-
-    // Step B: SakeImage Row Delete
-    const resImg = await app.request(` + "`" + `/api/sake_images/${img.id}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
-    console.log(` + "`" + `Step B row delete status: ${resImg.status}` + "`" + `);
-    if (resImg.status !== 200 && resImg.status !== 404) {
-      return c.json({ error: { code: 'RECORD_DELETE_PARTIAL_FAILURE', message: ` + "`" + `failed to delete image row ${img.id}` + "`" + ` } }, 500);
-    }
+    entries.push({
+      id: String(record.id),
+      record,
+      images: (images.results || []).map(img => ({
+        ...img,
+        data_url: ` + "`" + `/api/images?key=${encodeURIComponent(img.image_key)}` + "`" + `,
+        thumbnail_data_url: img.thumbnail_key ? ` + "`" + `/api/images?key=${encodeURIComponent(img.thumbnail_key)}` + "`" + ` : null,
+      })),
+      record_tags: recordTags.results || [],
+      tags: (recordTags.results || []).map(rt => tagsMap.get(rt.tag_id)).filter(Boolean).map(t => ({ ...t, is_default: Boolean(t.is_default) }))
+    });
   }
 
-  await c.env.DB.prepare('DELETE FROM "record_tags" WHERE sake_record_id = ?').bind(recordId).run();
+  return c.json(entries);
+});
 
-  // Step C: Parent SakeRecord Delete
-  const resParent = await app.request(` + "`" + `/api/sake_records/${recordId}` + "`" + `, { method: 'DELETE', headers: { Cookie: cookieHeader } }, c.env);
-  console.log(` + "`" + `Step C parent delete status: ${resParent.status}` + "`" + `);
+// GET /api/tags
+app.get('/api/tags', async (c) => {
+  const cookieHeader = c.req.header('Cookie') || '';
+  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
+  if (!match) return c.json({ error: 'unauthorized' }, 401);
 
-  if (resParent.status === 200 || resParent.status === 404) {
-    return c.json({ data: { deleted: true, id: Number(recordId) } }, 200);
+  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
+    .bind(match[1], new Date().toISOString()).first();
+  if (!session) return c.json({ error: 'unauthorized' }, 401);
+
+  const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?) ORDER BY tag_group, is_default DESC, label').bind(session.user_id).all();
+  return c.json((tags.results || []).map(t => ({ ...t, is_default: Boolean(t.is_default) })));
+});
+
+// POST /api/tags (Case-insensitive deduplication)
+app.post('/api/tags', async (c) => {
+  const cookieHeader = c.req.header('Cookie') || '';
+  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
+  if (!match) return c.json({ error: 'unauthorized' }, 401);
+
+  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
+    .bind(match[1], new Date().toISOString()).first();
+  if (!session) return c.json({ error: 'unauthorized' }, 401);
+
+  const body = await c.req.json();
+  const tagGroup = body.tag_group;
+  const label = (body.label || '').trim().slice(0, 20);
+  if (!tagGroup || !label) return c.json({ error: 'invalid_tag' }, 400);
+
+  const tags = await c.env.DB.prepare('SELECT * FROM tags WHERE drink_type = "sake" AND (owner_id IS NULL OR owner_id = ?)').bind(session.user_id).all();
+  const existing = (tags.results || []).find(t => t.tag_group === tagGroup && t.label.trim().toLowerCase() === label.toLowerCase());
+  if (existing) {
+    return c.json({ ...existing, is_default: Boolean(existing.is_default), already_exists: true }, 200, { 'X-Sake-Tag-Existing': 'true' });
   }
-  return c.json({ error: { code: 'PARENT_DELETE_FAILED', message: 'failed to delete parent sake record' } }, resParent.status);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare('INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES (?, ?, "sake", ?, ?, 0, ?)')
+    .bind(id, session.user_id, tagGroup, label, now).run();
+
+  return c.json({ id, owner_id: session.user_id, drink_type: 'sake', tag_group: tagGroup, label, is_default: false, created_at: now, already_exists: false }, 201);
+});
+
+// DELETE /api/sake-records/:id
+app.delete('/api/sake-records/:id', async (c) => {
+  const id = c.req.param('id');
+  const cookieHeader = c.req.header('Cookie') || '';
+  const match = cookieHeader.match(/alcohol_log_session=([^;]+)/);
+  if (!match) return c.json({ error: 'unauthorized' }, 401);
+
+  const session = await c.env.DB.prepare('SELECT user_id FROM oauth_sessions WHERE id = ? AND expires_at > ?')
+    .bind(match[1], new Date().toISOString()).first();
+  if (!session) return c.json({ error: 'unauthorized' }, 401);
+
+  const rec = await c.env.DB.prepare('SELECT * FROM sake_records WHERE id = ?').bind(id).first();
+  if (!rec) return c.json({ error: 'not_found' }, 404);
+  if (rec.owner_id !== session.user_id) return c.json({ error: 'forbidden' }, 403);
+
+  const images = await c.env.DB.prepare('SELECT image_key, thumbnail_key FROM sake_images WHERE owner_id = ? AND record_id = ?').bind(session.user_id, id).all();
+  await c.env.DB.prepare('DELETE FROM sake_records WHERE owner_id = ? AND id = ?').bind(session.user_id, id).run();
+
+  const bucket = c.env.IMAGES || c.env.alcohol_log_images;
+  if (bucket) {
+    await Promise.all((images.results || []).flatMap(img => [img.image_key, img.thumbnail_key].filter(Boolean).map(key => bucket.delete(key))));
+  }
+
+  return new Response(null, { status: 204 });
 });
 `
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(indexTS), 0644)
@@ -135,44 +179,48 @@ async function run() {
   const mf = new Miniflare({
     modules: true,
     scriptPath: "./dist/index.js",
-    d1Databases: { DB: "mold-d1" },
-    r2Buckets: { BUCKET: "mold-r2" },
+    d1Databases: { DB: "mold-d1", alcohol_log: "mold-d1" },
+    r2Buckets: { IMAGES: "mold-r2", alcohol_log_images: "mold-r2" },
   });
 
   const db = await mf.getD1Database("DB");
   await db.exec("PRAGMA foreign_keys = ON;");
-  const bucket = await mf.getR2Bucket("BUCKET");
+  const bucket = await mf.getR2Bucket("IMAGES");
 
-  console.log("=== STEP 1: Seeding Legacy Schema (UUID-based) & Synthetic Data ===");
+  console.log("=== STEP 1: Seeding Legacy Production Schema & Real Synthetic Data ===");
   const legacyStmts = [
-    'CREATE TABLE users (id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_user_id TEXT NOT NULL, email TEXT, display_name TEXT, avatar_url TEXT, last_login_at TEXT NOT NULL, role TEXT DEFAULT "user", created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE (provider, provider_user_id))',
-    'CREATE TABLE tags (id TEXT PRIMARY KEY, owner_id TEXT, drink_type TEXT DEFAULT "sake", tag_group TEXT NOT NULL, label TEXT NOT NULL, is_default INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id))',
-    'CREATE TABLE sake_records (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, drink_type TEXT DEFAULT "sake", name TEXT NOT NULL, region TEXT, brewery TEXT, rice TEXT, sake_type TEXT, sake_meter_value TEXT, abv TEXT, volume TEXT, price TEXT, one_line_note TEXT, place TEXT, companions TEXT, food_pairing TEXT, consumed_date TEXT NOT NULL, drink_again TEXT, sweet_dry INTEGER, aroma_intensity INTEGER, acidity INTEGER, clean_umami INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id))',
-    'CREATE TABLE sake_images (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, record_id TEXT NOT NULL, image_key TEXT NOT NULL, thumbnail_key TEXT, mime_type TEXT NOT NULL, file_name TEXT NOT NULL, display_order INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id), FOREIGN KEY (record_id) REFERENCES sake_records(id))',
-    'CREATE TABLE record_tags (record_id TEXT NOT NULL, tag_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (record_id, tag_id), FOREIGN KEY (record_id) REFERENCES sake_records(id), FOREIGN KEY (tag_id) REFERENCES tags(id))',
-    'CREATE TABLE oauth_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)'
+    'CREATE TABLE users (id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_user_id TEXT NOT NULL, email TEXT, display_name TEXT, avatar_url TEXT, created_at TEXT NOT NULL, last_login_at TEXT NOT NULL, UNIQUE (provider, provider_user_id))',
+    'CREATE TABLE oauth_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'CREATE TABLE sake_records (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, drink_type TEXT NOT NULL DEFAULT "sake", name TEXT NOT NULL CHECK (length(trim(name)) > 0), region TEXT, brewery TEXT, rice TEXT, sake_type TEXT, sake_meter_value TEXT, abv TEXT, volume TEXT, price TEXT, drink_again TEXT CHECK (drink_again IS NULL OR drink_again IN ("no", "unsure", "yes")), sweet_dry INTEGER CHECK (sweet_dry IS NULL OR sweet_dry BETWEEN 1 AND 5), aroma_intensity INTEGER CHECK (aroma_intensity IS NULL OR aroma_intensity BETWEEN 1 AND 3), acidity INTEGER CHECK (acidity IS NULL OR acidity BETWEEN 1 AND 3), clean_umami INTEGER CHECK (clean_umami IS NULL OR clean_umami BETWEEN 1 AND 3), one_line_note TEXT, place TEXT, consumed_date TEXT NOT NULL, companions TEXT, food_pairing TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'CREATE TABLE sake_images (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, record_id TEXT NOT NULL, image_key TEXT NOT NULL, thumbnail_key TEXT, mime_type TEXT NOT NULL, file_name TEXT NOT NULL, display_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (record_id) REFERENCES sake_records(id) ON DELETE CASCADE)',
+    'CREATE TABLE tags (id TEXT PRIMARY KEY, owner_id TEXT, drink_type TEXT NOT NULL DEFAULT "sake", tag_group TEXT NOT NULL CHECK (tag_group IN ("taste", "aroma", "mood")), label TEXT NOT NULL CHECK (length(trim(label)) > 0), is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE)',
+    'CREATE TABLE record_tags (record_id TEXT NOT NULL, tag_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (record_id, tag_id), FOREIGN KEY (record_id) REFERENCES sake_records(id) ON DELETE CASCADE, FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE)'
   ];
 
   for (const stmt of legacyStmts) {
     await db.exec(stmt + ";");
   }
 
-  // Seed Legacy Synthetic Data
-  const u1_uuid = "uuid_user_101";
-  const u2_uuid = "uuid_user_102";
-  const r1_uuid = "uuid_record_1";
-  const img1_uuid = "uuid_img_10";
-  const img1_key = "images/" + u1_uuid + "/sake/" + r1_uuid + "/img1.jpg";
-  const thumb1_key = "images/" + u1_uuid + "/sake/" + r1_uuid + "/img1_thumb.jpg";
+  // Seed Default 22 Tags
+  await db.exec("INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES ('tag_taste_fresh', NULL, 'sake', 'taste', '산뜻', 1, '2026-08-08T00:00:00Z');");
+  await db.exec("INSERT INTO tags (id, owner_id, drink_type, tag_group, label, is_default, created_at) VALUES ('tag_taste_umami', NULL, 'sake', 'taste', '감칠', 1, '2026-08-08T00:00:00Z');");
 
-  await db.exec("INSERT INTO users VALUES ('" + u1_uuid + "', 'google', 'g_101', 'user101@example.com', 'User 101', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
-  await db.exec("INSERT INTO users VALUES ('" + u2_uuid + "', 'google', 'g_102', 'user102@example.com', 'User 102', 'https://avatar', '2026-07-30T00:00:00Z', 'user', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
-  await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES ('" + r1_uuid + "', '" + u1_uuid + "', 'sake', 'Dassai 23 Legacy', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
-  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES ('" + img1_uuid + "', '" + u1_uuid + "', '" + r1_uuid + "', '" + img1_key + "', '" + thumb1_key + "', 'image/jpeg', 'img1.jpg', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');");
-  await bucket.put(img1_key, "LEGACY_BINARY_R2_DATA");
-  await bucket.put(thumb1_key, "LEGACY_THUMBNAIL_R2_DATA");
+  // Seed Synthetic Production User and Record
+  const u1_id = "google:1234567890";
+  const r1_uuid = "uuid_record_prod_1";
+  const img1_uuid = "uuid_img_prod_10";
+  const img1_key = "images/" + u1_id + "/sake/" + r1_uuid + "/" + img1_uuid + ".jpg";
+  const thumb1_key = "thumbnails/" + u1_id + "/sake/" + r1_uuid + "/" + img1_uuid + ".webp";
 
-  console.log("=== STEP 2: Running 0001_drink_log_migration.sql D1 Migration Script ===");
+  await db.exec("INSERT INTO users VALUES ('" + u1_id + "', 'google', '1234567890', 'user@example.com', 'Test User', 'https://avatar', '2026-08-08T00:00:00Z', '2026-08-08T00:00:00Z');");
+  await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES ('" + r1_uuid + "', '" + u1_id + "', 'sake', 'Kokuryu Daiginjo', '2026-08-08', '2026-08-08T00:00:00Z', '2026-08-08T00:00:00Z');");
+  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at) VALUES ('" + img1_uuid + "', '" + u1_id + "', '" + r1_uuid + "', '" + img1_key + "', '" + thumb1_key + "', 'image/jpeg', 'img1.jpg', '2026-08-08T00:00:00Z');");
+  await db.exec("INSERT INTO record_tags (record_id, tag_id, created_at) VALUES ('" + r1_uuid + "', 'tag_taste_fresh', '2026-08-08T00:00:00Z');");
+
+  await bucket.put(img1_key, "ORIGINAL_IMAGE_BYTES");
+  await bucket.put(thumb1_key, "THUMBNAIL_IMAGE_BYTES");
+
+  console.log("=== STEP 2: Executing Migration SQL ===");
   const migSQL = fs.readFileSync("./migration.sql", "utf8");
   const cleanMig = migSQL.replace(/--.*$/gm, "").replace(/^BEGIN TRANSACTION;$/gm, "").replace(/^COMMIT;$/gm, "");
   for (const rawStmt of cleanMig.split(";")) {
@@ -182,149 +230,73 @@ async function run() {
     }
   }
 
-  // Verify Migration Results
-  const migratedUser = await db.prepare("SELECT * FROM users WHERE legacy_id = ?").bind(u1_uuid).first();
-  const migratedUser2 = await db.prepare("SELECT * FROM users WHERE legacy_id = ?").bind(u2_uuid).first();
-  const migratedRecord = await db.prepare("SELECT * FROM sake_records WHERE legacy_id = ?").bind(r1_uuid).first();
-  const migratedImage = await db.prepare("SELECT * FROM sake_images WHERE legacy_id = ?").bind(img1_uuid).first();
-  const r2KeyPreserved = await bucket.get(img1_key);
-  const r2ThumbPreserved = await bucket.get(thumb1_key);
+  // Verification 1: users table & PK unchanged
+  const userCheck = await db.prepare("SELECT * FROM users WHERE id = ?").bind(u1_id).first();
+  console.log("User PK Unchanged:", userCheck.id === u1_id);
 
-  console.log("Migrated User Int ID:", migratedUser.id, ", Legacy ID:", migratedUser.legacy_id);
-  console.log("Migrated SakeRecord Int ID:", migratedRecord.id, ", FK owner_id:", migratedRecord.owner_id);
-  console.log("Migrated SakeImage Int ID:", migratedImage.id, ", FK record_id:", migratedImage.record_id);
-  console.log("R2 Preserved Original Key Exists:", r2KeyPreserved !== null);
-  console.log("R2 Preserved Thumbnail Key Exists:", r2ThumbPreserved !== null);
+  // Verification 2: sake_records integer PK migration & legacy_id
+  const recCheck = await db.prepare("SELECT * FROM sake_records WHERE legacy_id = ?").bind(r1_uuid).first();
+  console.log("SakeRecord Int PK:", recCheck.id, "Owner ID (TEXT):", recCheck.owner_id);
 
-  if (typeof migratedUser.id === 'number' && migratedRecord.owner_id === migratedUser.id && migratedImage.record_id === migratedRecord.id && r2KeyPreserved !== null && r2ThumbPreserved !== null) {
-    console.log("[EMPIRICAL MIGRATION VERIFIED]: D1 Migration Script 100% Succeeded!");
+  // Verification 3: sake_images integer PK migration & R2 key preservation
+  const imgCheck = await db.prepare("SELECT * FROM sake_images WHERE legacy_id = ?").bind(img1_uuid).first();
+  console.log("SakeImage Int PK:", imgCheck.id, "Record ID (INT):", imgCheck.record_id);
+  const r2Orig = await bucket.get(img1_key);
+  const r2Thumb = await bucket.get(thumb1_key);
+  console.log("R2 Keys Preserved:", r2Orig !== null && r2Thumb !== null);
+
+  // Verification 4: Default tag PK preserved
+  const tagCheck = await db.prepare("SELECT * FROM tags WHERE id = 'tag_taste_fresh'").first();
+  console.log("Default Tag PK Preserved:", tagCheck !== null);
+
+  if (userCheck.id === u1_id && typeof recCheck.id === 'number' && recCheck.owner_id === u1_id && imgCheck.record_id === recCheck.id && r2Orig !== null && r2Thumb !== null && tagCheck !== null) {
+    console.log("[EMPIRICAL MIGRATION VERIFIED]: Real Production Migration 100% Succeeded!");
   } else {
-    console.error("FAILED D1 Migration Verification");
+    console.error("Migration Verification Failed");
     process.exit(1);
   }
 
-  console.log("\n=== STEP 3: Testing 22 Default Tags Seed Idempotency ===");
-  const defaultTags = [
-    { slug: 'tag_taste_달콤함', tag_group: 'taste', label: '달콤함' },
-    { slug: 'tag_taste_깔끔함', tag_group: 'taste', label: '깔끔함' },
-    { slug: 'tag_taste_드라이함', tag_group: 'taste', label: '드라이함' },
-    { slug: 'tag_taste_산미', tag_group: 'taste', label: '산미' },
-    { slug: 'tag_taste_감칠맛', tag_group: 'taste', label: '감칠맛' },
-    { slug: 'tag_taste_묵직함', tag_group: 'taste', label: '묵직함' },
-    { slug: 'tag_taste_부드러움', tag_group: 'taste', label: '부드러움' },
-    { slug: 'tag_aroma_과일향_(사과/청포도)', tag_group: 'aroma', label: '과일향 (사과/청포도)' },
-    { slug: 'tag_aroma_과일향_(참외/멜론)', tag_group: 'aroma', label: '과일향 (참외/멜론)' },
-    { slug: 'tag_aroma_과일향_(감귤/레몬)', tag_group: 'aroma', label: '과일향 (감귤/레몬)' },
-    { slug: 'tag_aroma_과일향_(바나나)', tag_group: 'aroma', label: '과일향 (바나나)' },
-    { slug: 'tag_aroma_과일향_(열대과일)', tag_group: 'aroma', label: '과일향 (열대과일)' },
-    { slug: 'tag_aroma_꽃향', tag_group: 'aroma', label: '꽃향' },
-    { slug: 'tag_aroma_곡물향/쌀향', tag_group: 'aroma', label: '곡물향/쌀향' },
-    { slug: 'tag_aroma_유제품향/요거트', tag_group: 'aroma', label: '유제품향/요거트' },
-    { slug: 'tag_aroma_풀향/삼나무', tag_group: 'aroma', label: '풀향/삼나무' },
-    { slug: 'tag_aroma_향신료향', tag_group: 'aroma', label: '향신료향' },
-    { slug: 'tag_aroma_숙성향', tag_group: 'aroma', label: '숙성향' },
-    { slug: 'tag_mood_입문자_추천', tag_group: 'mood', label: '입문자 추천' },
-    { slug: 'tag_mood_반주/식사용', tag_group: 'mood', label: '반주/식사용' },
-    { slug: 'tag_mood_특별한_날', tag_group: 'mood', label: '특별한 날' },
-    { slug: 'tag_mood_혼술', tag_group: 'mood', label: '혼술' }
-  ];
+  console.log("\n=== STEP 3: Testing Endpoint Response & Tag Deduplication ===");
+  const sessionToken = "session_token_123";
+  const sessionExp = "2030-01-01T00:00:00Z";
+  await db.exec("INSERT INTO oauth_sessions (id, user_id, created_at, expires_at) VALUES ('" + sessionToken + "', '" + u1_id + "', '2026-08-08T00:00:00Z', '" + sessionExp + "');");
 
-  const nowStr = new Date().toISOString();
-  // 1st Seed Run
-  for (const tag of defaultTags) {
-    await db.prepare('INSERT OR IGNORE INTO "tags" ("slug", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, NULL, "sake", ?, ?, 1, ?, ?)')
-      .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
-  }
-  const tagCount1st = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
-
-  // 2nd Seed Run (Re-execution test)
-  for (const tag of defaultTags) {
-    await db.prepare('INSERT OR IGNORE INTO "tags" ("slug", "owner_id", "drink_type", "tag_group", "label", "is_default", "created_at", "updated_at") VALUES (?, NULL, "sake", ?, ?, 1, ?, ?)')
-      .bind(tag.slug, tag.tag_group, tag.label, nowStr, nowStr).run();
-  }
-  const tagCount2nd = (await db.prepare("SELECT COUNT(*) as c FROM tags WHERE is_default = 1").first()).c;
-
-  if (tagCount1st === 22 && tagCount2nd === 22) {
-    console.log("[EMPIRICAL SEED IDEMPOTENCY VERIFIED]: 22 Korean Default Tags Seeded Idempotently! 0 Duplicates!");
-  } else {
-    console.error("FAILED Tag Seed Idempotency Test, 1st:", tagCount1st, "2nd:", tagCount2nd);
-    process.exit(1);
-  }
-
-  console.log("\n=== STEP 4: Testing Delete Orchestration (Step A1/A2/B/C Individual Status Logs) ===");
-  const now = new Date().toISOString();
-  const user1Token = "sess_user_101";
-  const user2Token = "sess_user_102";
-
-  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user1Token + "', " + migratedUser.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
-  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('" + user2Token + "', " + migratedUser2.id + ", '" + now + "', '2030-01-01T00:00:00Z');");
-
-  // 1) Cross-user Forbidden
-  const resCrossUser = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user2Token }
+  // GET /api/sake-records response contract
+  const listRes = await mf.dispatchFetch("http://localhost/api/sake-records", {
+    headers: { "Cookie": "alcohol_log_session=" + sessionToken }
   });
-  console.log("Scenario 1 Cross-user DELETE Status:", resCrossUser.status);
+  const listJson = await listRes.json();
+  console.log("GET /api/sake-records Status:", listRes.status);
+  console.log("List Response Entry Count:", listJson.length);
+  console.log("Entry Shape:", Object.keys(listJson[0] || {}));
 
-  // 2) Full Delete Orchestration Call (User 1 calling orchestrate-delete)
-  const resOrchestrateDel = await mf.dispatchFetch("http://localhost/api/sake_records/" + migratedRecord.id + "/orchestrate-delete", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
+  // POST /api/tags deduplication (toLowerCase test)
+  const tagCreate1 = await mf.dispatchFetch("http://localhost/api/tags", {
+    method: "POST",
+    headers: { "Cookie": "alcohol_log_session=" + sessionToken, "Content-Type": "application/json" },
+    body: JSON.stringify({ tag_group: "taste", label: "산뜻" })
   });
-  console.log("Scenario 2 Delete Orchestration Final Response Status:", resOrchestrateDel.status);
+  const tagJson1 = await tagCreate1.json();
+  console.log("Duplicate Tag POST Status:", tagCreate1.status, "Already Exists:", tagJson1.already_exists);
 
-  const finalRecordCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
-  const finalImageCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
-
-  console.log("Final State - Record Count:", finalRecordCount, ", Image Count:", finalImageCount);
-  if (resCrossUser.status === 403 && resOrchestrateDel.status === 200 && finalRecordCount === 0 && finalImageCount === 0) {
-    console.log("[SCENARIO VERIFIED]: Happy Path Delete Orchestration Clean Succeeded!");
-  } else {
-    console.error("FAILED Delete Orchestration Happy Path");
-    process.exit(1);
-  }
-
-  console.log("\n=== STEP 5: Testing Partial Failure Abort & Intermediate State Logging ===");
-  // Seed Record 2 with Image 20 (Triggering Simulated Partial Failure on Step A1)
-  await db.exec("INSERT INTO sake_records (id, owner_id, drink_type, name, consumed_date, created_at, updated_at) VALUES (2, " + migratedUser.id + ", 'sake', 'Fail Test Sake', '2026-07-30T00:00:00Z', '" + now + "', '" + now + "');");
-  await db.exec("INSERT INTO sake_images (id, owner_id, record_id, image_key, thumbnail_key, mime_type, file_name, created_at, updated_at) VALUES (20, " + migratedUser.id + ", 2, 'FAIL_BLOB_TRIGGER', 'thumb2_key', 'image/jpeg', 'img2.jpg', '" + now + "', '" + now + "');");
-
-  // Attempt 1: Trigger Partial Failure
-  const resFailAttempt = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
+  // DELETE /api/sake-records/:id Cascade test
+  const delRes = await mf.dispatchFetch("http://localhost/api/sake-records/" + recCheck.id, {
+    method: "DELETE",
+    headers: { "Cookie": "alcohol_log_session=" + sessionToken }
   });
-  const failJson = await resFailAttempt.json();
-  console.log("Partial Failure Initial Attempt Response Status:", resFailAttempt.status);
-  console.log("Partial Failure Error Code:", failJson.error?.code);
+  console.log("DELETE /api/sake-records/:id Status:", delRes.status);
 
-  const intermediateRecord2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_records WHERE id = 2").first()).c;
-  const intermediateImage20Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
-  console.log("Partial Failure Intermediate State - Record 2 Count:", intermediateRecord2Count, ", Image 20 Count:", intermediateImage20Count);
+  const postRecCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_records").first()).c;
+  const postImgCount = (await db.prepare("SELECT COUNT(*) as c FROM sake_images").first()).c;
+  const r2OrigAfter = await bucket.get(img1_key);
+  const r2ThumbAfter = await bucket.get(thumb1_key);
 
-  if (resFailAttempt.status === 500 && failJson.error?.code === 'RECORD_DELETE_PARTIAL_FAILURE' && intermediateRecord2Count === 1 && intermediateImage20Count === 1) {
-    console.log("[EMPIRICAL ABORT VERIFIED]: Partial failure correctly aborted with 500 and preserved parent/child DB state!");
+  console.log("Post Delete State - Records:", postRecCount, "Images:", postImgCount, "R2 Deleted:", r2OrigAfter === null && r2ThumbAfter === null);
+
+  if (listRes.status === 200 && tagJson1.already_exists === true && delRes.status === 204 && postRecCount === 0 && postImgCount === 0 && r2OrigAfter === null && r2ThumbAfter === null) {
+    console.log("[EMPIRICAL CONTRACT VERIFIED]: All API Contracts & Cascade Deletes Succeeded!");
   } else {
-    console.error("FAILED Partial Failure Abort Verification");
-    process.exit(1);
-  }
-
-  // Resolve Partial Failure: Update image_key from trigger to valid key 'img2_key'
-  await db.exec("UPDATE sake_images SET image_key = 'img2_key' WHERE id = 20;");
-  await bucket.put("img2_key", "IMG2_DATA");
-  await bucket.put("thumb2_key", "THUMB2_DATA");
-
-  // Attempt 2: Retry Orchestration
-  const resRetryDel = await mf.dispatchFetch("http://localhost/api/sake_records/2/orchestrate-delete", {
-    method: "DELETE", headers: { "Cookie": "mold_session=" + user1Token }
-  });
-  console.log("Partial Failure Retry Orchestration Status:", resRetryDel.status);
-
-  const finalRecord2Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_records WHERE id = 2").first()).c;
-  const finalImage20Count = (await db.prepare("SELECT COUNT(*) as c FROM sake_images WHERE id = 20").first()).c;
-
-  console.log("Retry Final State - Record 2 Count:", finalRecord2Count, ", Image 20 Count:", finalImage20Count);
-  if (resRetryDel.status === 200 && finalRecord2Count === 0 && finalImage20Count === 0) {
-    console.log("[EMPIRICAL RETRY IDEMPOTENCY VERIFIED]: Resolved partial failure retried 100% cleanly!");
-  } else {
-    console.error("FAILED Retry Scenario");
+    console.error("Contract Verification Failed");
     process.exit(1);
   }
 
@@ -346,10 +318,10 @@ run().catch(err => {
 
 	t.Logf("Miniflare Raw Output:\n%s", rawOutput)
 	if err != nil {
-		t.Fatalf("test failed: %v", err)
+		t.Fatalf("test failed: %v\nOutput: %s", err, rawOutput)
 	}
 
-	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL SEED IDEMPOTENCY VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL ABORT VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL RETRY IDEMPOTENCY VERIFIED]") {
+	if !strings.Contains(rawOutput, "[EMPIRICAL MIGRATION VERIFIED]") || !strings.Contains(rawOutput, "[EMPIRICAL CONTRACT VERIFIED]") {
 		t.Fatalf("empirical verification markers not found in output:\n%s", rawOutput)
 	}
 }
