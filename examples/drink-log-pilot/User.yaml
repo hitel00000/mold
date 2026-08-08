@@ -5,11 +5,6 @@ resource:
   soft_delete: false
 
 fields:
-  - name: legacy_id
-    type: string
-    nullable: true
-    constraints:
-      unique: true
   - name: provider
     type: string
     nullable: false
@@ -27,7 +22,7 @@ fields:
     nullable: true
   - name: last_login_at
     type: datetime
-    nullable: true
+    nullable: false
   - name: role
     type: enum
     nullable: false

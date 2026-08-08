@@ -11,7 +11,7 @@ fields:
     constraints:
       unique: true
   - name: owner_id
-    type: int
+    type: string
     nullable: false
   - name: record_id
     type: int

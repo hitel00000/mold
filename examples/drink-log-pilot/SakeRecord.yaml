@@ -11,7 +11,7 @@ fields:
     constraints:
       unique: true
   - name: owner_id
-    type: int
+    type: string
     nullable: false
   - name: drink_type
     type: string
@@ -49,24 +49,18 @@ fields:
   - name: one_line_note
     type: text
     nullable: true
-  - name: notes
-    type: text
-    nullable: true
-  - name: rating
-    type: float
-    nullable: true
   - name: place
     type: string
     nullable: true
+  - name: consumed_date
+    type: datetime
+    nullable: false
   - name: companions
     type: string
     nullable: true
   - name: food_pairing
     type: string
     nullable: true
-  - name: consumed_date
-    type: datetime
-    nullable: false
   - name: drink_again
     type: enum
     nullable: true

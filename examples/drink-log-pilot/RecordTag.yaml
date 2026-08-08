@@ -9,7 +9,7 @@ fields:
     type: int
     nullable: false
   - name: tag_id
-    type: int
+    type: string
     nullable: false
 
 relations:

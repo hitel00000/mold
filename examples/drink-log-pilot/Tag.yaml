@@ -10,13 +10,8 @@ fields:
     nullable: true
     constraints:
       unique: true
-  - name: slug
-    type: string
-    nullable: true
-    constraints:
-      unique: true
   - name: owner_id
-    type: int
+    type: string
     nullable: true
   - name: drink_type
     type: string
