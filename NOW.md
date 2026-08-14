@@ -21,9 +21,9 @@
 
 ---
 
-## 현재 상태 (2026-08-07 기준)
+## 현재 상태 (2026-08-15 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 (복합 Unique Constraint, N:M Join Resource, OAuth 세션발급 Escape Hatch, Nullable Ownership 패리티, List Owner 필터링, 관계 조인 조회 `?include=`) 완결, 및 **Phase 6 Task 6.1 `drink-log` 실제 프로덕션 이관 완결 (Option C INTEGER AUTOINCREMENT PK, R2 키 보존, `tags` `slug` + `unique_together` Idempotency, 5개 테이블 `soft_delete: true`, Delete Orchestration 세션 HTTP API Abort 계약, Miniflare E2E 6대 시나리오 100% PASS)**, **Task 6.2 [독립 bugfix] Cloudflare TS Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 명시적 강제 픽스 완결**, **Task 8.1/8.2 소유권 CREATE-time 자동 주입 및 `client_writable: false` 전파 완결**, **Task 8.4 얇은 Auth 레이어 (`authglue` 패키지: `/signup`, OAuth 콜백, Pre-Account Hijacking 방지, 계정 스쿼팅 known constraint 문서화, 코어 0줄 변경) 완결**.  
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, 및 **Phase 9 `drink-log` Mold Native 방식 전면 이관 완결 (Glue Layer 폐기, Mold Native REST API + 프론트엔드 데이터 레이어 교체, `RecordTag.owner_id` 선언적 권한 적용, `fetchAllPages` 페이징 안전장치, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백, real Go HTTP backend + frontend data layer E2E 100% PASS, 회고 `docs/retrospectives/mold-native-migration.md` 수립)**.  
 👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
 
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.

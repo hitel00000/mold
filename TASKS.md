@@ -13,6 +13,7 @@
 * [x] **Milestone 4. Default View**: List/Detail View 및 Form SSR 렌더링, XSS Sanitization
 * [x] **Milestone 5. Identity & Security**: SQLite Session, bcrypt 비밀번호 해싱, 3단계 ACL Engine (`auth.Can`)
 * [x] **Milestone 6. AI Workflow**: `resource-guide.md`, `AGENTS.md`, Go 코드 수정 0줄 기반 Pure YAML Reload E2E 검증 완료
+* [x] **Phase 9. Drink-Log Mold Native Migration**: Glue Layer 폐기, 백엔드 Mold 네이티브 REST API 전면 적용, 프론트엔드 데이터 레이어 교체, `RecordTag.owner_id` 선언적 인가, All-Fetch 루프 페이징, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백, real Go HTTP backend + frontend data layer E2E 100% PASS (`docs/retrospectives/mold-native-migration.md`)
 
 ---
 
