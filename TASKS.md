@@ -14,6 +14,7 @@
 * [x] **Milestone 5. Identity & Security**: SQLite Session, bcrypt 비밀번호 해싱, 3단계 ACL Engine (`auth.Can`)
 * [x] **Milestone 6. AI Workflow**: `resource-guide.md`, `AGENTS.md`, Go 코드 수정 0줄 기반 Pure YAML Reload E2E 검증 완료
 * [x] **Phase 9. Drink-Log Mold Native Migration**: Glue Layer 폐기, 백엔드 Mold 네이티브 REST API 전면 적용, 프론트엔드 데이터 레이어 교체, `RecordTag.owner_id` 선언적 인가, All-Fetch 루프 페이징, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백, real Go HTTP backend + frontend data layer E2E 100% PASS (`docs/retrospectives/mold-native-migration.md`)
+* [x] **Phase 10. Drink-Log Production Cutover**: 프로덕션 D1/R2 실데이터 이관(데이터 유실 0건), 통합 라우터 및 Google OAuth/세션 연동, Base64 R2 자동 업로드, 이미지 렌더링 URL 맵핑, `main` `--no-ff` 머지 및 GitHub 푸시 완료 (`docs/retrospectives/drink-log-production-cutover.md`)
 
 ---
 
@@ -357,3 +358,40 @@
     5. **Provider 충돌 에러 분기**: 기존 계정이 다른 OAuth Provider(예: GitHub)로 가입된 경우 `OAUTH_PROVIDER_CONFLICT` (`"email is already registered with provider 'github'"`)로 정확히 분기.
     6. **Known Constraint 문서화**: `/signup` 이메일 인증 발송 미실시에 따른 계정 스쿼팅(Account Squatting) 및 `409 ACCOUNT_LINKING_REQUIRED` 거부 트레이드오프를 `authglue/README.md`에 명시적 기록.
     7. **E2E 테스트 & 회귀 실측**: soft-delete된 계정 이메일 동일 재가입 허용 (`201 Created`), 중복 이메일 가입 사전 조회 거부 (`409 EMAIL_ALREADY_EXISTS`), OAuth provider 충돌, 권한 승격 차단, 세션 쿠키 보호 리소스 접근 실측 raw HTTP 로그 검증 통과. `docs/retrospectives/thin-auth-glue-layer.md` 회고 수립.
+
+### Phase 9: `drink-log` Mold Native 전면 이관 (Glue Layer 폐기)
+
+- [x] **Task 9.1: Glue Layer 폐기 및 Mold Native REST API 전면 적용**
+  - **작업 내용**:
+    1. `functions/api/sake-records/*` 및 `functions/api/logs/*` 레거시 Glue 코드 완전 삭제.
+    2. Mold Sub-App Hono Router(`mold_app.ts`)를 Pages Functions에 마운트하여 `/api/sake_records`, `/api/sake_images`, `/api/tags`, `/api/record_tags`를 표준 Mold REST API로 직접 서빙.
+    3. `src/lib/storage.ts` 프론트엔드 데이터 레이어를 Mold Native REST API 호출 구조로 전면 재작성.
+    4. `RecordTag.owner_id` 선언적 권한 적용, `fetchAllPages` 무한루프 안전장치, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백 구현.
+    5. 회고 문서 `docs/retrospectives/mold-native-migration.md` 수립.
+
+### Phase 10: `drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 완결 (Production Cutover)
+
+- [x] **Task 10.1: 프로덕션 D1 마이그레이션 적용 및 데이터 무결성 실측 검증**
+  - **작업 내용**:
+    1. Cloudflare 원격 프로덕션 D1(`alcohol-log`)에 `0001_drink_log_migration.sql` 무중단/원자적 적용.
+    2. `users` 2건, `sake_records` 19건, `sake_images` 18건, `tags` 24건, `record_tags` 95건 100% 무결 보존 및 정수 PK 변환 확인 (데이터 유실 0건).
+    3. 기본 태그 22개 Seed 멱등성 2회 연속 실행 실측 검증 완료.
+- [x] **Task 10.2: Pages Functions 통합 라우터 및 OAuth/세션 연동**
+  - **작업 내용**:
+    1. `functions/api/[[path]].ts` 단일 통합 라우터로 OAuth(`google/login`, `google-callback`, `logout`), 세션 조회(`me`), 이미지 서빙(`images`), Mold Native REST API 엔드포인트 통합.
+    2. Google OAuth 코드 교환 ➔ 세션 쿠키 발급 ➔ 클라우드 스토리지 모드 활성화 파이프라인 정상화.
+- [x] **Task 10.3: Base64 Data URL ➔ Cloudflare R2 자동 업로드 및 D1 `image_key NOT NULL` 해결**
+  - **작업 내용**:
+    1. `POST /api/sake_images` 핸들러에 `parseDataUrl` 파서 탑재.
+    2. Base64 이미지 바이너리 디코딩 ➔ R2 버킷 자동 업로드 ➔ D1 정규 R2 키(`images/...`) 저장을 원자적으로 수행하여 `400 INVALID_INPUT (NOT NULL constraint failed)` 결함 원천 해결.
+- [x] **Task 10.4: `buildSakeRecordEntry` 프론트엔드 이미지 렌더링 URL 자동 맵핑**
+  - **작업 내용**:
+    1. `src/lib/storage.ts` 내 `buildSakeRecordEntry`에서 `image_key` 및 `thumbnail_key`를 감지하여 R2 서빙 엔드포인트(`/api/images?key=...`)로 `data_url`/`thumbnail_data_url`을 자동 합성.
+    2. UI 렌더링 시 `img alt`만 출력되던 결함을 수정하여 브라우저에서 이미지 렌더링 100% 정상화.
+- [x] **Task 10.5: `drink-log` 프로덕션 `main` 브랜치 `--no-ff` 머지 및 GitHub 원격 푸시**
+  - **작업 내용**:
+    1. `feature/mold-migration` 브랜치를 `main` 브랜치에 `--no-ff` 머지 완료 (머지 커밋: `d91c045`).
+    2. 원격 GitHub 저장소(`https://github.com/hitel00000/drink-log`) `main` 및 `feature/mold-migration` 푸시 완료.
+    3. 실 프로덕션([https://drink-log.pages.dev](https://drink-log.pages.dev)) 배포 및 E2E 정상 동작 확인.
+    4. 회고 문서 `docs/retrospectives/drink-log-production-cutover.md` 수립.
+

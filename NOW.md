@@ -16,14 +16,15 @@
 5. `docs/resource-guide.md` — Resource YAML 작성 스펙 및 Good/Bad 패턴 가이드
 6. `TASKS.md` — MVP 완료 상태, 가설과 완료 조건을 담은 실증 백로그
 7. `docs/tasks/drink-log-migration-analysis.md` — drink-log 프로덕션 이관 분석 명세서 (Revision 1~10)
-8. `docs/retrospectives/drink-log-migration.md` — drink-log 이관 회고 문서 (10차례 분석/구현 교훈)
-9. 이 문서(NOW.md)의 "다음 할 일" 섹션
+8. `docs/retrospectives/drink-log-production-cutover.md` — drink-log 실제 프로덕션 컷오버 및 실배포 회고
+9. `docs/retrospectives/mold-native-migration.md` — drink-log Mold 네이티브 이관 회고 (Phase 9)
+10. 이 문서(NOW.md)의 "다음 할 일" 섹션
 
 ---
 
-## 현재 상태 (2026-08-15 기준)
+## 현재 상태 (2026-08-18 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, 및 **Phase 9 `drink-log` Mold Native 방식 전면 이관 완결 (Glue Layer 폐기, Mold Native REST API + 프론트엔드 데이터 레이어 교체, `RecordTag.owner_id` 선언적 권한 적용, `fetchAllPages` 페이징 안전장치, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백, real Go HTTP backend + frontend data layer E2E 100% PASS, 회고 `docs/retrospectives/mold-native-migration.md` 수립)**.  
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`, D1 데이터 0건 유실 무결성 보존, 통합 API 라우터, R2 이미지 Base64 자동 업로드 & 서빙, `main` `--no-ff` 머지 및 푸시 완료, 회고 `docs/retrospectives/drink-log-production-cutover.md` 수립)**.  
 👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
 
 **추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
@@ -50,5 +51,6 @@
 4. [x] ~~**Task 8.1: Ownership Field CREATE-time 자동 주입**~~ (완료: 커밋 `8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`)
 5. [x] ~~**Task 8.2: Client-Writable 필드 차단 (`client_writable: false`)**~~ (완료: Option A Field-level IR 확장 + 400 Bad Request 거부 + `CLIENT_WRITE_FORBIDDEN` + `ErrClientWriteForbidden` sentinel error + 5개 타깃 일관 전파)
 6. [x] ~~**Task 8.4: 얇은 Auth 레이어 (`authglue`) 및 세션 발급 핸들러**~~ (완료: 코어 0줄 변경, Pre-Account Takeover/Hijacking 차단, `authglue/README.md` 알려진 제약 문서화, `docs/retrospectives/thin-auth-glue-layer.md` 회고 수립)
-7. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+7. [x] ~~**Phase 9 & 10: `drink-log` Mold Native 전면 이관 및 프로덕션 D1/R2 실배포 완결**~~ (완료: `https://drink-log.pages.dev` 실배포, `main` `--no-ff` 머지 및 푸시 완결, `docs/retrospectives/drink-log-production-cutover.md` 회고 수립)
+8. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
    - **사유**: 다중 Storage 백엔드 확장 (마세라티 원칙에 따라 필요성 확인 후 세션 시작 시 확정).
