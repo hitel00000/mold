@@ -183,7 +183,7 @@ func TestDrinkLog_RealHTTPE2E(t *testing.T) {
 
 	createRecordTagPayload := map[string]any{
 		"sake_record_id": recID,
-		"tag_id":         tagID,
+		"tag_id":         fmt.Sprint(tagID),
 	}
 	rtBytes, _ := json.Marshal(createRecordTagPayload)
 	rtResp, err := doAuthRequest(http.MethodPost, "/api/record_tags", rtBytes)

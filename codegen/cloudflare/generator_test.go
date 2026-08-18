@@ -93,8 +93,8 @@ func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
     "title" TEXT NOT NULL,
     "body" TEXT NOT NULL,
     "author_id" INTEGER NOT NULL,
-    "created_at" TEXT NOT NULL,
-    "updated_at" TEXT NOT NULL,
+    "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted_at" TEXT,
     FOREIGN KEY ("author_id") REFERENCES "users"("id") ON DELETE RESTRICT
 );`
@@ -104,8 +104,8 @@ func TestCloudflareGenerator_SchemaSQLGoldenParity(t *testing.T) {
     "body" TEXT NOT NULL,
     "post_id" INTEGER NOT NULL,
     "author_id" INTEGER NOT NULL,
-    "created_at" TEXT NOT NULL,
-    "updated_at" TEXT NOT NULL,
+    "created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted_at" TEXT,
     FOREIGN KEY ("post_id") REFERENCES "posts"("id") ON DELETE RESTRICT,
     FOREIGN KEY ("author_id") REFERENCES "users"("id") ON DELETE RESTRICT
@@ -771,6 +771,9 @@ func TestCloudflareGenerator_IncludeQuery(t *testing.T) {
 }
 
 func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
 	tagRes := &resource.Resource{
 		Name:          "Tag",
 		Table:         "tags",

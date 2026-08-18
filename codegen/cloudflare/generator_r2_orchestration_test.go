@@ -12,6 +12,9 @@ import (
 )
 
 func TestCloudflareCodegen_MiniflareR2DeleteOrchestrationEmpirical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
 	nodePath, err := exec.LookPath("node")
 	if err != nil || nodePath == "" {
 		t.Skip("node not found in PATH")

@@ -114,8 +114,8 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 		}
 
 		if p.Timestamps {
-			sb.WriteString(",\n    \"created_at\" TEXT NOT NULL")
-			sb.WriteString(",\n    \"updated_at\" TEXT NOT NULL")
+			sb.WriteString(",\n    \"created_at\" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+			sb.WriteString(",\n    \"updated_at\" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
 		}
 		if p.SoftDelete {
 			sb.WriteString(",\n    \"deleted_at\" TEXT")
