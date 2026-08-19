@@ -17,6 +17,29 @@ import (
 	"github.com/hitel00000/mold/runtime"
 )
 
+func TestGenerateDrinkLogMoldApp(t *testing.T) {
+	drinkLogDir := filepath.Join("..", "..", "..", "drink-log")
+	resDir := filepath.Join(drinkLogDir, "resources")
+	if _, err := os.Stat(resDir); os.IsNotExist(err) {
+		t.Skip("drink-log directory not found")
+	}
+	reg, err := resource.LoadAll(resDir)
+	if err != nil {
+		t.Fatalf("failed loading drink-log resources: %v", err)
+	}
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed generating cloudflare code: %v", err)
+	}
+	moldAppPath := filepath.Join(drinkLogDir, "functions", "_shared", "generated", "mold_app.ts")
+	tsContent := out.IndexTS + "\nexport { app as moldApp };\n"
+	if err := os.WriteFile(moldAppPath, []byte(tsContent), 0644); err != nil {
+		t.Fatalf("failed writing mold_app.ts: %v", err)
+	}
+	t.Logf("Successfully regenerated %s", moldAppPath)
+}
+
 func TestCloudflareGenerator_DirectIRConsumption(t *testing.T) {
 	// 1. Load IR directly via resource.LoadAll using relative path examples/blog
 	relResourceDir := filepath.Join("..", "..", "examples", "blog")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -45,7 +46,7 @@ func (r *Registry) Get(name string) (*Resource, bool) {
 	return res, ok
 }
 
-// List returns a slice of all registered Resource IRs.
+// List returns a slice of all registered Resource IRs, sorted deterministically by Name.
 func (r *Registry) List() []*Resource {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -54,6 +55,9 @@ func (r *Registry) List() []*Resource {
 	for _, res := range r.resources {
 		list = append(list, res)
 	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name < list[j].Name
+	})
 	return list
 }
 

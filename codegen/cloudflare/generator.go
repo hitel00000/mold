@@ -274,9 +274,9 @@ async function getAuthUser(c: any): Promise<AuthUser | null> {
   if (match) {
     const token = match[1];
     try {
-      const sess = await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first<{ user_id: any }>();
+      const sess = (await c.env.DB.prepare('SELECT user_id FROM "_mold_sessions" WHERE id = ? AND expires_at > ?').bind(token, new Date().toISOString()).first()) as { user_id: any } | null;
       if (sess && sess.user_id != null) {
-        const u = await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first<any>();
+        const u = (await c.env.DB.prepare('SELECT * FROM "users" WHERE id = ?').bind(sess.user_id).first()) as any;
         if (u) {
           return { id: u.id, role: u.role || 'user' };
         }
@@ -1225,6 +1225,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  const body: any = {};\n")
 		sb.WriteString("  formData.forEach((value, key) => { body[key] = value; });\n")
 		sb.WriteString("  const now = new Date().toISOString();\n")
+		sb.WriteString(fmt.Sprintf("  const insertSql = `INSERT INTO \"%s\" (%s) VALUES (%s)`;\n", table, strings.Join(cols, ", "), strings.Join(bindVars, ", ")))
 		sb.WriteString(fmt.Sprintf("  await c.env.DB.prepare(insertSql).bind(%s).run();\n", strings.Join(vals, ", ")))
 		sb.WriteString(fmt.Sprintf("  return c.redirect('/view/%s', 303);\n", table))
 		sb.WriteString("});\n")
