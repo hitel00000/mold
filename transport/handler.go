@@ -318,6 +318,21 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 					}
 				case []map[string]any:
 					rawItems = v
+				case string:
+					var parsedList []any
+					if err := json.Unmarshal([]byte(v), &parsedList); err == nil {
+						for itemIdx, item := range parsedList {
+							itemMap, ok := item.(map[string]any)
+							if !ok {
+								WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested record #%d in '%s' must be a JSON object", itemIdx+1, rel.Name), nil)
+								return
+							}
+							rawItems = append(rawItems, itemMap)
+						}
+					} else {
+						WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested relation '%s' must be an array of objects", rel.Name), nil)
+						return
+					}
 				default:
 					WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested relation '%s' must be an array of objects", rel.Name), nil)
 					return

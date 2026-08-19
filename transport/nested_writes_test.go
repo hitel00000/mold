@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/hitel00000/mold/adapters/fsblob"
 	"github.com/hitel00000/mold/adapters/sqlite"
 	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
@@ -601,4 +605,228 @@ func TestNestedWrites_ClientWritable_Rejection(t *testing.T) {
 		t.Errorf("expected 0 users in DB, got %d", userCount)
 	}
 }
+
+func TestNestedWrites_ChildPermissionDenied_ZeroDanglingRows(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_nested_writes_child_perm.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	parentRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "audits", Kind: resource.KindHasMany, Target: "AuditLog", ForeignKey: "post_id"},
+		},
+	}
+
+	childRes := &resource.Resource{
+		Name:  "AuditLog",
+		Table: "audit_logs",
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "action", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "role:admin", // Locked to admin only!
+				Read:   "role:admin",
+			},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, parentRes)
+	_ = store.EnsureSchema(ctx, childRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(parentRes, store)
+	reg.Register(childRes, store)
+
+	router := transport.NewRouter(reg)
+	sm, err := auth.NewSessionManager(store.DB())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+	router.SetSessionManager(sm)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Non-admin user (role: "user") tries to nested-write child with create: role:admin
+	sess, err := sm.CreateSession(ctx, 101, "normaluser", "user")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	payload := map[string]any{
+		"title": "Unprivileged Nested Write",
+		"audits": []map[string]any{
+			{"action": "ILLEGAL_ADMIN_ACTION"},
+		},
+	}
+	payloadBytes, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/posts", bytes.NewReader(payloadBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{
+		Name:  "_mold_session",
+		Value: sess.ID,
+	})
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("failed POST /api/posts: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	t.Logf("=== [RAW HTTP PROOF - Child Permission Denied 403 FORBIDDEN Response] ===")
+	t.Logf("HTTP Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("HTTP Response Body:\n%s", string(bodyBytes))
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden, got %d", resp.StatusCode)
+	}
+
+	// Verify ZERO dangling parent posts and ZERO child audit logs in DB
+	var postCount, auditCount int
+	_ = store.DB().QueryRow("SELECT COUNT(*) FROM posts").Scan(&postCount)
+	_ = store.DB().QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&auditCount)
+
+	if postCount != 0 {
+		t.Errorf("expected 0 posts in DB (zero dangling parent), got %d", postCount)
+	}
+	if auditCount != 0 {
+		t.Errorf("expected 0 audit_logs in DB, got %d", auditCount)
+	}
+	t.Logf("=== [RAW PROOF: 0 Posts, 0 AuditLogs in DB - Zero Dangling Parent/Child on Pre-validation 403] ===")
+}
+
+func TestNestedWrites_WithParentBlobUpload(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_nested_writes_blob.db")
+	blobDir := filepath.Join(tmpDir, "blobs")
+	_ = os.MkdirAll(blobDir, 0755)
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	blobStore, err := fsblob.New(blobDir)
+	if err != nil {
+		t.Fatalf("failed to create blob store: %v", err)
+	}
+
+	ctx := context.Background()
+
+	parentRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "cover_image", Type: resource.TypeBlob, Nullable: true, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+		},
+	}
+
+	childRes := &resource.Resource{
+		Name:  "Comment",
+		Table: "comments",
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, parentRes)
+	_ = store.EnsureSchema(ctx, childRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(parentRes, store)
+	reg.Register(childRes, store)
+
+	router := transport.NewRouter(reg)
+	router.SetBlobStore(blobStore)
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Build multipart request with title + cover_image file + nested comments JSON
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	_ = w.WriteField("title", "Post with Blob and Nested Comments")
+	_ = w.WriteField("comments", `[{"body": "First nested comment with blob parent"}, {"body": "Second nested comment"}]`)
+
+	part, err := w.CreateFormFile("cover_image", "cover.jpg")
+	if err != nil {
+		t.Fatalf("failed creating form file: %v", err)
+	}
+	_, _ = part.Write([]byte("FAKE_JPEG_IMAGE_DATA_12345"))
+	_ = w.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/posts", &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("failed POST /api/posts: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	t.Logf("=== [RAW HTTP PROOF - Parent Blob + Nested Writes 201 Created Response] ===")
+	t.Logf("HTTP Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("HTTP Response Body:\n%s", string(bodyBytes))
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var respEnvelope struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(bodyBytes, &respEnvelope)
+
+	// Verify parent blob key attached
+	coverKey, ok := respEnvelope.Data["cover_image"].(string)
+	if !ok || !strings.HasPrefix(coverKey, "blobs/posts/") {
+		t.Errorf("expected cover_image blob key in response, got: %v", respEnvelope.Data["cover_image"])
+	}
+
+	// Verify embedded comments attached
+	comments, ok := respEnvelope.Data["comments"].([]any)
+	if !ok || len(comments) != 2 {
+		t.Fatalf("expected comments array with 2 items, got: %v", respEnvelope.Data["comments"])
+	}
+
+	// Verify 1 post, 2 comments in DB
+	var postCount, commentCount int
+	_ = store.DB().QueryRow("SELECT COUNT(*) FROM posts").Scan(&postCount)
+	_ = store.DB().QueryRow("SELECT COUNT(*) FROM comments").Scan(&commentCount)
+	if postCount != 1 {
+		t.Errorf("expected 1 post in DB, got %d", postCount)
+	}
+	if commentCount != 2 {
+		t.Errorf("expected 2 comments in DB, got %d", commentCount)
+	}
+}
+
 
