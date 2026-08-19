@@ -38,6 +38,11 @@ func TestAllRoutesSideBySideABDiffEmpirical(t *testing.T) {
 		t.Fatalf("failed getting abs drink-log path: %v", err)
 	}
 
+	gluePath := filepath.Join(absDrinkLogDir, "functions", "_shared", "glue.ts")
+	if _, err := os.Stat(gluePath); os.IsNotExist(err) {
+		t.Skip("skipping side-by-side test: drink-log glue.ts not found at " + gluePath)
+	}
+
 	moldAppPath := filepath.Join(absDrinkLogDir, "functions", "_shared", "generated", "mold_app.ts")
 	tsContent := out.IndexTS + "\nexport { app as moldApp };\n"
 	if err := os.WriteFile(moldAppPath, []byte(tsContent), 0644); err != nil {
