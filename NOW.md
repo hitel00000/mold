@@ -24,8 +24,8 @@
 
 ## 현재 상태 (2026-08-19 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**.  
-👉 **현재 상태: Phase 11 관계형 기능 확장 완결 및 회고 수립 완료 (`docs/retrospectives/phase11-eager-loading-nested-writes.md`)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**, **Task 12.1 Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 100% 완결**.  
+👉 **현재 상태: Task 12.1 완결 및 Task 12.2 표준 `POST /_mold/batch` 배치 엔드포인트 착수 준비**
 
 ---
 
@@ -39,13 +39,11 @@
 
 ---
 
-## 다음 할 일 (향후 백로그 후보)
+## 다음 할 일 (Phase 12 진행 목록)
 
-1. **Task 12.1: Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 완결**
-   - `codegen/cloudflare`에서 `type: blob` 필드에 대한 1-Step `multipart/form-data` 파싱 및 R2 버킷 업로드 코드 생성 완결.
-2. **Task 12.2: 표준 `POST /_mold/batch` 원자적 배치 트랜잭션 엔드포인트 구현**
-   - 다중 CUD 작업을 단일 RTT로 실행하는 트랜잭션 배치 엔드포인트 (Go 및 Cloudflare 타깃).
-3. **Task 12.3: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+1. **Task 12.2: 표준 `POST /_mold/batch` 원자적 배치 트랜잭션 엔드포인트 구현**
+   - 다중 CUD 작업을 단일 HTTP RTT로 묶어 서버 단일 트랜잭션(D1 `env.DB.batch()` / SQLite 트랜잭션) 내에서 All-or-Nothing으로 실행하는 배치 엔드포인트 수립 (Go 및 Cloudflare TS 타깃).
+2. **Task 12.3: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
    - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
 
 

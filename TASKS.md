@@ -419,14 +419,16 @@
 
 ### Phase 12: 스토리지 1-Step Multipart 완결 및 원자적 배치 확장
 
-- [ ] **Task 12.1: Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 완결**
+- [x] **Task 12.1: Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 완결**
   - **배경**: Go 런타임에 구현된 1-Step Multipart Blob 업로드(`docs/ir-spec.md` 5.5절)를 Cloudflare TS 타깃에도 동기화하여, `type: blob` 필드 보유 리소스 생성 시 R2 `bucket.put`과 D1 저장을 순수 컴파일러 코드로 자동 완결한다.
   - **작업 내용**:
     1. `codegen/cloudflare/generator.go`에 `multipart/form-data` 파싱 및 R2 바인딩(`c.env.BUCKET.put`) 생성 로직 탑재.
-    2. Multipart 요청 내 JSON 페이로드(`payload`) 파싱 및 top-level / nested writes 연계 지원.
-    3. R2 업로드 실패 시 D1 DB 잔여 행 보상 롤백 검증.
-    4. Miniflare E2E 테스트 수립 및 `go test ./...` 검증.
-  - **완료 조건**: Cloudflare TS 타깃에서 별도 수동 게이트웨이 없이 1-Step Multipart Blob 생성이 100% 통과할 것.
+    2. Multipart 요청 내 JSON 페이로드(`payload` / `data`) 파싱 및 top-level / nested writes 연계 지원.
+    3. 바이너리 세이프 `arrayBuffer()` 기반 R2 바인딩 파이프라인 수립.
+    4. `file` 파라미터명 fallback 지원 (1-step 생성 및 2-step 덮어쓰기 양쪽).
+    5. R2 업로드 실패 시 D1 DB 잔여 행 보상 롤백 및 중첩 쓰기(`nestedWrites`) 실패 시 업로드된 R2 부모 blob 보상 삭제(고아 객체 방지) 완결.
+    6. Miniflare E2E 테스트(`TestCloudflareCodegen_MultipartFormBlobAndNestedWritesMiniflareEmpirical`) 수립 및 `go test ./...` 100% 검증.
+  - **완료 조건**: Cloudflare TS 타깃에서 별도 수동 게이트웨이 없이 1-Step Multipart Blob 생성이 100% 통과할 것. (완료)
 
 - [ ] **Task 12.2: 표준 `POST /_mold/batch` 원자적 배치 트랜잭션 엔드포인트 구현**
   - **배경**: 모바일 클라이언트의 다중 CUD 작업을 단 1회의 HTTP RTT로 묶어 서버 단일 트랜잭션(D1 `env.DB.batch()` / SQLite 트랜잭션) 내에서 All-or-Nothing으로 실행한다.
