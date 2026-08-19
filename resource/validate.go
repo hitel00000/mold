@@ -29,6 +29,7 @@ var validRelationKinds = map[RelationKind]bool{
 var validOnDeleteActions = map[OnDeleteAction]bool{
 	OnDeleteRestrict:    true,
 	OnDeleteSoftCascade: true,
+	OnDeleteCascade:     true,
 }
 
 // Validate performs metaschema validation on a single Resource IR.

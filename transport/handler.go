@@ -740,6 +740,65 @@ func (rt *Router) handleDelete(w http.ResponseWriter, req *http.Request, res *re
 		return
 	}
 
+	// Cascade deletions & Blob cleanups for related child resources
+	reg := rt.CurrentRegistry()
+	if reg != nil {
+		for _, entry := range reg.entries {
+			childRes := entry.Resource
+			childStore := entry.Store
+			if childRes == nil || childStore == nil || childRes.Name == res.Name {
+				continue
+			}
+			for _, rel := range childRes.Relations {
+				if rel.Kind == resource.KindBelongsTo && rel.Target == res.Name && rel.ForeignKey != "" {
+					isCascade := (rel.OnDelete == resource.OnDeleteCascade || rel.OnDelete == resource.OnDeleteSoftCascade)
+					if !isCascade {
+						for _, parentRel := range res.Relations {
+							if parentRel.Kind == resource.KindHasMany && parentRel.Target == childRes.Name && parentRel.ForeignKey == rel.ForeignKey {
+								if parentRel.OnDelete == resource.OnDeleteCascade || parentRel.OnDelete == resource.OnDeleteSoftCascade {
+									isCascade = true
+								}
+								break
+							}
+						}
+					}
+					if isCascade {
+						childList, lErr := childStore.List(req.Context(), childRes, storage.Query{
+							Filter: map[string]any{rel.ForeignKey: id},
+							Limit:  1000,
+						})
+						if lErr == nil {
+							for _, childRec := range childList {
+								childID := childRec["id"]
+								if rt.blobStore != nil {
+									for _, cf := range childRes.Fields {
+										if cf.Type == resource.TypeBlob && !cf.Deprecated {
+											if kVal, ok := childRec[cf.Name].(string); ok && kVal != "" {
+												_ = rt.blobStore.Delete(req.Context(), kVal)
+											}
+										}
+									}
+								}
+								_ = childStore.SoftDelete(req.Context(), childRes, childID)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Parent Blob cleanup if non-soft-delete
+	if !res.SoftDelete && rt.blobStore != nil {
+		for _, f := range res.Fields {
+			if f.Type == resource.TypeBlob && !f.Deprecated {
+				if kVal, ok := rec[f.Name].(string); ok && kVal != "" {
+					_ = rt.blobStore.Delete(req.Context(), kVal)
+				}
+			}
+		}
+	}
+
 	err = store.SoftDelete(req.Context(), res, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

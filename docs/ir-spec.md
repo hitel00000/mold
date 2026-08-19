@@ -136,7 +136,7 @@ relations:
     kind: has_many          # has_many | belongs_to | has_and_belongs_to_many
     target: Comment
     foreign_key: post_id     # target 쪽에 생성되는 FK 컬럼
-    on_delete: restrict       # restrict | soft_cascade  (append-only라 hard cascade는 없음)
+    on_delete: restrict       # restrict | soft_cascade | cascade
 ```
 
 ```yaml
@@ -159,6 +159,7 @@ relations:
 ```
 
 * `on_delete: soft_cascade` — 부모가 soft-delete되면 자식도 함께 soft-delete 마킹 (append-only 정책과 일관)
+* `on_delete: cascade` — 부모 삭제 시 자식 물리 삭제 및 자식 소유 Blob 파일(R2/FS) 원자적 자동 청소
 * N:M은 1차 스트레스 테스트에서는 제외하고, has_many/belongs_to만으로 Milestone 2~4를 완주한 뒤 추가 여부 결정 (마세라티 원칙)
 
 ---

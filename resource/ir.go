@@ -73,6 +73,7 @@ type OnDeleteAction string
 const (
 	OnDeleteRestrict    OnDeleteAction = "restrict"
 	OnDeleteSoftCascade OnDeleteAction = "soft_cascade"
+	OnDeleteCascade     OnDeleteAction = "cascade"
 )
 
 // Relation represents a relationship between resources.

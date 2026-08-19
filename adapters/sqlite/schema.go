@@ -73,7 +73,13 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 	for _, rel := range p.Relations {
 		if rel.Kind == resource.KindBelongsTo && rel.ForeignKey != "" {
 			targetTable := toSnakeCase(rel.Target) + "s"
-			constraints = append(constraints, fmt.Sprintf(`FOREIGN KEY ("%s") REFERENCES "%s"("id")`, rel.ForeignKey, targetTable))
+			onDel := ""
+			if rel.OnDelete == resource.OnDeleteCascade {
+				onDel = " ON DELETE CASCADE"
+			} else if rel.OnDelete == resource.OnDeleteRestrict {
+				onDel = " ON DELETE RESTRICT"
+			}
+			constraints = append(constraints, fmt.Sprintf(`FOREIGN KEY ("%s") REFERENCES "%s"("id")%s`, rel.ForeignKey, targetTable, onDel))
 		}
 	}
 

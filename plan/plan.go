@@ -24,6 +24,7 @@ type RelationPlan struct {
 	Kind       resource.RelationKind
 	Target     string
 	ForeignKey string
+	OnDelete   resource.OnDeleteAction
 }
 
 // Plan represents the target-agnostic execution plan derived from a single Resource IR.
@@ -78,6 +79,7 @@ func Build(res *resource.Resource) *Plan {
 			Kind:       rel.Kind,
 			Target:     rel.Target,
 			ForeignKey: rel.ForeignKey,
+			OnDelete:   rel.OnDelete,
 		})
 	}
 

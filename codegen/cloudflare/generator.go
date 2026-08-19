@@ -124,14 +124,33 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 		for _, rel := range p.Relations {
 			if rel.Kind == "belongs_to" && rel.ForeignKey != "" {
 				var targetTable string
+				onDel := "RESTRICT"
+				if rel.OnDelete == "cascade" {
+					onDel = "CASCADE"
+				} else if rel.OnDelete == "set_null" {
+					onDel = "SET NULL"
+				}
+
 				for _, r := range resources {
 					if r.Name == rel.Target {
 						targetTable = r.Table
+						if onDel == "RESTRICT" {
+							for _, parentRel := range r.Relations {
+								if parentRel.Kind == "has_many" && parentRel.Target == p.ResourceName && parentRel.ForeignKey == rel.ForeignKey {
+									if parentRel.OnDelete == "cascade" {
+										onDel = "CASCADE"
+									} else if parentRel.OnDelete == "set_null" {
+										onDel = "SET NULL"
+									}
+									break
+								}
+							}
+						}
 						break
 					}
 				}
 				if targetTable != "" {
-					sb.WriteString(fmt.Sprintf(",\n    FOREIGN KEY (\"%s\") REFERENCES \"%s\"(\"id\") ON DELETE RESTRICT", rel.ForeignKey, targetTable))
+					sb.WriteString(fmt.Sprintf(",\n    FOREIGN KEY (\"%s\") REFERENCES \"%s\"(\"id\") ON DELETE %s", rel.ForeignKey, targetTable, onDel))
 				}
 			}
 		}
@@ -1160,6 +1179,80 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString(fmt.Sprintf("  if (!authUser || authUser.role !== '%s') {\n", role))
 			sb.WriteString("    return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
 			sb.WriteString("  }\n")
+		}
+
+		// Cascade deletions and Blob cleanups
+		type childCascadeInfo struct {
+			childTable string
+			foreignKey string
+			softDelete bool
+			blobFields []string
+		}
+		var cascades []childCascadeInfo
+
+		for _, r := range resources {
+			if r.Name == p.ResourceName {
+				continue
+			}
+			for _, rel := range r.Relations {
+				if rel.Kind == "belongs_to" && rel.Target == p.ResourceName && rel.ForeignKey != "" {
+					isCascade := (rel.OnDelete == "cascade" || rel.OnDelete == "soft_cascade")
+					if !isCascade {
+						for _, parentRel := range p.Relations {
+							if parentRel.Kind == "has_many" && parentRel.Target == r.Name && parentRel.ForeignKey == rel.ForeignKey {
+								if parentRel.OnDelete == "cascade" || parentRel.OnDelete == "soft_cascade" {
+									isCascade = true
+								}
+								break
+							}
+						}
+					}
+					if isCascade {
+						var childBlobs []string
+						for _, cf := range r.Fields {
+							if cf.Type == resource.TypeBlob && !cf.Deprecated {
+								childBlobs = append(childBlobs, cf.Name)
+							}
+						}
+						cascades = append(cascades, childCascadeInfo{
+							childTable: r.Table,
+							foreignKey: rel.ForeignKey,
+							softDelete: r.SoftDelete,
+							blobFields: childBlobs,
+						})
+					}
+				}
+			}
+		}
+
+		for _, cas := range cascades {
+			if len(cas.blobFields) > 0 {
+				cols := make([]string, len(cas.blobFields))
+				for i, bf := range cas.blobFields {
+					cols[i] = fmt.Sprintf("\"%s\"", bf)
+				}
+				sb.WriteString(fmt.Sprintf("  const childRows_%s = await c.env.DB.prepare('SELECT %s FROM \"%s\" WHERE \"%s\" = ?').bind(id).all();\n", cas.childTable, strings.Join(cols, ", "), cas.childTable, cas.foreignKey))
+				sb.WriteString(fmt.Sprintf("  for (const row of childRows_%s.results || []) {\n", cas.childTable))
+				for _, bf := range cas.blobFields {
+					sb.WriteString(fmt.Sprintf("    if (row['%s']) { try { await c.env.BUCKET.delete(row['%s']); } catch (_) {} }\n", bf, bf))
+				}
+				sb.WriteString("  }\n")
+			}
+			if cas.softDelete {
+				sb.WriteString("  const nowForChild = new Date().toISOString();\n")
+				sb.WriteString(fmt.Sprintf("  await c.env.DB.prepare('UPDATE \"%s\" SET \"deleted_at\" = ? WHERE \"%s\" = ? AND \"deleted_at\" IS NULL').bind(nowForChild, id).run();\n", cas.childTable, cas.foreignKey))
+			} else {
+				sb.WriteString(fmt.Sprintf("  await c.env.DB.prepare('DELETE FROM \"%s\" WHERE \"%s\" = ?').bind(id).run();\n", cas.childTable, cas.foreignKey))
+			}
+		}
+
+		// Parent Blob cleanup (if hard delete)
+		if !p.SoftDelete {
+			for _, f := range p.Fields {
+				if f.Type == resource.TypeBlob && !f.Deprecated {
+					sb.WriteString(fmt.Sprintf("  if ((existing as any)['%s']) { try { await c.env.BUCKET.delete((existing as any)['%s']); } catch (_) {} }\n", f.Name, f.Name))
+				}
+			}
 		}
 
 		if p.SoftDelete {

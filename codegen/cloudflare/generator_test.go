@@ -1819,5 +1819,260 @@ run().catch(err => {
 	}
 }
 
+func TestCloudflareCodegen_CascadeDeleteWithBlobCleanupMiniflareEmpirical(t *testing.T) {
+	reg := resource.NewRegistry()
+
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		Timestamps:    true,
+		SoftDelete:    false,
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeString, Nullable: false, Default: "user", ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "id",
+			Permissions: resource.Permissions{
+				Create: "public",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+	}
+
+	postRes := &resource.Resource{
+		Name:          "Post",
+		Table:         "posts",
+		Timestamps:    true,
+		SoftDelete:    false,
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "cover_image", Type: resource.TypeBlob, Nullable: true, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "author_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id", OnDelete: resource.OnDeleteCascade},
+			{Name: "images", Kind: resource.KindHasMany, Target: "PostImage", ForeignKey: "post_id", OnDelete: resource.OnDeleteCascade},
+		},
+	}
+
+	commentRes := &resource.Resource{
+		Name:          "Comment",
+		Table:         "comments",
+		Timestamps:    true,
+		SoftDelete:    false,
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "author_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id", OnDelete: resource.OnDeleteCascade},
+		},
+	}
+
+	imageRes := &resource.Resource{
+		Name:          "PostImage",
+		Table:         "post_images",
+		Timestamps:    true,
+		SoftDelete:    false,
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "image_key", Type: resource.TypeBlob, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "author_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id", OnDelete: resource.OnDeleteCascade},
+		},
+	}
+
+	reg.Register(userRes)
+	reg.Register(postRes)
+	reg.Register(commentRes)
+	reg.Register(imageRes)
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed generate: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(output.PackageJSON), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
+
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	}
+	cmdNpm.Dir = tmpDir
+	if out, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
+	}
+
+	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdBuild = exec.Command("npx", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	}
+	cmdBuild.Dir = tmpDir
+	if out, err := cmdBuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild bundle failed: %v\nOutput: %s", err, string(out))
+	}
+
+	workerJSPath := filepath.Join(tmpDir, "dist", "worker.js")
+	miniflareURL := filepath.ToSlash(workerJSPath)
+
+	runnerJS := fmt.Sprintf(`
+import { Miniflare } from "miniflare";
+import fs from "node:fs";
+
+async function run() {
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: "%s",
+    d1Databases: { DB: "test-db" },
+    r2Buckets: { BUCKET: "test-bucket" },
+    compatibilityFlags: ["nodejs_compat"],
+  });
+
+  const db = await mf.getD1Database("DB");
+  const bucket = await mf.getR2Bucket("BUCKET");
+  const schemaSQL = fs.readFileSync("schema.sql", "utf8");
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
+  }
+
+  // Seed user and session
+  await db.prepare("INSERT INTO users (id, email, role, created_at, updated_at) VALUES (101, 'author@example.com', 'user', datetime('now'), datetime('now'))").run();
+  await db.prepare("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('sess_author_101', 101, datetime('now'), datetime('now', '+1 day'))").run();
+
+  // 1. Seed Parent Post with Cover Image
+  const parentBlobKey = "blobs/posts/1/cover_123.png";
+  await bucket.put(parentBlobKey, "PARENT_COVER_BYTES");
+  await db.prepare("INSERT INTO posts (id, title, author_id, cover_image, created_at, updated_at) VALUES (1, 'Parent Post 1', 101, '" + parentBlobKey + "', datetime('now'), datetime('now'))").run();
+
+  // 2. Seed Child Comments
+  await db.prepare("INSERT INTO comments (id, body, post_id, author_id, created_at, updated_at) VALUES (10, 'Comment 1', 1, 101, datetime('now'), datetime('now'))").run();
+  await db.prepare("INSERT INTO comments (id, body, post_id, author_id, created_at, updated_at) VALUES (11, 'Comment 2', 1, 101, datetime('now'), datetime('now'))").run();
+
+  // 3. Seed Child PostImages with R2 Blobs
+  const childBlobKey1 = "blobs/post_images/201/img1.png";
+  const childBlobKey2 = "blobs/post_images/202/img2.png";
+  await bucket.put(childBlobKey1, "CHILD_IMAGE_1_BYTES");
+  await bucket.put(childBlobKey2, "CHILD_IMAGE_2_BYTES");
+  await db.prepare("INSERT INTO post_images (id, post_id, image_key, author_id, created_at, updated_at) VALUES (201, 1, '" + childBlobKey1 + "', 101, datetime('now'), datetime('now'))").run();
+  await db.prepare("INSERT INTO post_images (id, post_id, image_key, author_id, created_at, updated_at) VALUES (202, 1, '" + childBlobKey2 + "', 101, datetime('now'), datetime('now'))").run();
+
+  // 4. Call DELETE /api/posts/1
+  const resDel = await mf.dispatchFetch("http://localhost/api/posts/1", {
+    method: "DELETE",
+    headers: { "Cookie": "mold_session=sess_author_101" }
+  });
+  console.log("Miniflare Parent Delete HTTP Status:", resDel.status);
+  const jsonDel = await resDel.json();
+  console.log("Miniflare Parent Delete Response:", JSON.stringify(jsonDel));
+
+  if (resDel.status !== 200 || !jsonDel.data || !jsonDel.data.deleted) {
+    console.error("Expected 200 OK for DELETE, got", resDel.status, jsonDel);
+    process.exit(1);
+  }
+
+  // 5. Verify D1 Database Cascade
+  const checkPost = await db.prepare("SELECT COUNT(*) as c FROM posts WHERE id = 1").first();
+  if (checkPost.c !== 0) {
+    console.error("Parent post was not deleted from D1:", checkPost);
+    process.exit(1);
+  }
+  const checkComments = await db.prepare("SELECT COUNT(*) as c FROM comments WHERE post_id = 1").first();
+  if (checkComments.c !== 0) {
+    console.error("Child comments were not cascade deleted:", checkComments);
+    process.exit(1);
+  }
+  const checkImages = await db.prepare("SELECT COUNT(*) as c FROM post_images WHERE post_id = 1").first();
+  if (checkImages.c !== 0) {
+    console.error("Child post_images were not cascade deleted:", checkImages);
+    process.exit(1);
+  }
+
+  // 6. Verify R2 Blobs were completely cleaned up
+  const pBlob = await bucket.get(parentBlobKey);
+  if (pBlob !== null) {
+    console.error("Parent cover image blob was NOT deleted from R2:", parentBlobKey);
+    process.exit(1);
+  }
+  const cBlob1 = await bucket.get(childBlobKey1);
+  if (cBlob1 !== null) {
+    console.error("Child blob 1 was NOT deleted from R2:", childBlobKey1);
+    process.exit(1);
+  }
+  const cBlob2 = await bucket.get(childBlobKey2);
+  if (cBlob2 !== null) {
+    console.error("Child blob 2 was NOT deleted from R2:", childBlobKey2);
+    process.exit(1);
+  }
+
+  console.log("Miniflare Cascade Deletion & R2 Blob Cleanup 100%% VERIFIED!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error("Fatal Miniflare runner error:", err);
+  process.exit(1);
+});
+`, miniflareURL)
+
+	runnerPath3 := filepath.Join(tmpDir, "runner3.mjs")
+	if err := os.WriteFile(runnerPath3, []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing runner3.mjs: %v", err)
+	}
+
+	cmdRun3 := exec.Command("node", "runner3.mjs")
+	cmdRun3.Dir = tmpDir
+	outputBytes3, err := cmdRun3.CombinedOutput()
+	t.Logf("Miniflare Cascade Raw Log Output:\n%s", string(outputBytes3))
+	if err != nil {
+		t.Fatalf("Miniflare cascade test runner failed: %v", err)
+	}
+}
+
 
 
