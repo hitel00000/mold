@@ -41,8 +41,11 @@
 
 ## 다음 할 일 (향후 백로그 후보)
 
-1. [x] ~~**Task 11.1: `has_many` 관계 Eager Loading (`?include=`) 확장**~~ (완료: Go 및 Cloudflare TS 런타임 100% 동기화, 50건 초과 시 `400 INCLUDE_TOO_LARGE` 거절, 점 체이닝 거절, 10,051건 무절단 회귀 실측 검증)
-2. [x] ~~**Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B - 순차 생성 + 보상 롤백)**~~ (완료: `storage.Store` 인터페이스 무변경, 사전 검증으로 403/400 시 부모 DB 0건 보장, 실패 시 물리적 보상 롤백 `HardDeletePhysically`, Go/Miniflare E2E 100% 검증)
-3. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: 다중 Storage 백엔드 확장 (필요성 대두 시 진행).
+1. **Task 12.1: Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 완결**
+   - `codegen/cloudflare`에서 `type: blob` 필드에 대한 1-Step `multipart/form-data` 파싱 및 R2 버킷 업로드 코드 생성 완결.
+2. **Task 12.2: 표준 `POST /_mold/batch` 원자적 배치 트랜잭션 엔드포인트 구현**
+   - 다중 CUD 작업을 단일 RTT로 실행하는 트랜잭션 배치 엔드포인트 (Go 및 Cloudflare 타깃).
+3. **Task 12.3: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+   - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
+
 

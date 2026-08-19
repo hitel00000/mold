@@ -15,6 +15,7 @@
 * [x] **Milestone 6. AI Workflow**: `resource-guide.md`, `AGENTS.md`, Go 코드 수정 0줄 기반 Pure YAML Reload E2E 검증 완료
 * [x] **Phase 9. Drink-Log Mold Native Migration**: Glue Layer 폐기, 백엔드 Mold 네이티브 REST API 전면 적용, 프론트엔드 데이터 레이어 교체, `RecordTag.owner_id` 선언적 인가, All-Fetch 루프 페이징, FK RESTRICT 사전 자식 삭제, Client-side 보상 트랜잭션 롤백, real Go HTTP backend + frontend data layer E2E 100% PASS (`docs/retrospectives/mold-native-migration.md`)
 * [x] **Phase 10. Drink-Log Production Cutover**: 프로덕션 D1/R2 실데이터 이관(데이터 유실 0건), 통합 라우터 및 Google OAuth/세션 연동, Base64 R2 자동 업로드, 이미지 렌더링 URL 맵핑, `main` `--no-ff` 머지 및 GitHub 푸시 완료 (`docs/retrospectives/drink-log-production-cutover.md`)
+* [x] **Phase 11. 관계형 기능 확장 (Eager Loading & Nested Writes)**: `has_many` 1-depth 배치 쿼리 Eager Loading (`?include=`), 부모-자식 원자적 중첩 생성 (`POST` Nested Writes Option B - 순차 생성 + 보상 롤백 `HardDeletePhysically`), Cloudflare TS 타깃 검증 패리티 달성 (`docs/retrospectives/phase11-eager-loading-nested-writes.md`)
 
 ---
 
@@ -415,6 +416,29 @@
     4. **Multipart Form 부모 Blob 업로드 + Nested Writes 결합 지원**: `multipart/form-data` 요청 시 폼 필드의 JSON 배열 문자열을 파싱하여 부모 Blob 업로드와 자식 생성을 단일 요청으로 원자적 완결.
     5. **Drink-log 파일럿 및 전체 회귀 테스트 통과**: `examples/drink-log-pilot/pilot_test.go` 내 1-Step Nested Write E2E 테스트 및 전체 저장소 무캐시 테스트(`go test -count=1 ./...`) 100% PASS.
     6. **회고 문서 수립**: `docs/retrospectives/phase11-eager-loading-nested-writes.md` 수립.
+
+### Phase 12: 스토리지 1-Step Multipart 완결 및 원자적 배치 확장
+
+- [ ] **Task 12.1: Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 완결**
+  - **배경**: Go 런타임에 구현된 1-Step Multipart Blob 업로드(`docs/ir-spec.md` 5.5절)를 Cloudflare TS 타깃에도 동기화하여, `type: blob` 필드 보유 리소스 생성 시 R2 `bucket.put`과 D1 저장을 순수 컴파일러 코드로 자동 완결한다.
+  - **작업 내용**:
+    1. `codegen/cloudflare/generator.go`에 `multipart/form-data` 파싱 및 R2 바인딩(`c.env.BUCKET.put`) 생성 로직 탑재.
+    2. Multipart 요청 내 JSON 페이로드(`payload`) 파싱 및 top-level / nested writes 연계 지원.
+    3. R2 업로드 실패 시 D1 DB 잔여 행 보상 롤백 검증.
+    4. Miniflare E2E 테스트 수립 및 `go test ./...` 검증.
+  - **완료 조건**: Cloudflare TS 타깃에서 별도 수동 게이트웨이 없이 1-Step Multipart Blob 생성이 100% 통과할 것.
+
+- [ ] **Task 12.2: 표준 `POST /_mold/batch` 원자적 배치 트랜잭션 엔드포인트 구현**
+  - **배경**: 모바일 클라이언트의 다중 CUD 작업을 단 1회의 HTTP RTT로 묶어 서버 단일 트랜잭션(D1 `env.DB.batch()` / SQLite 트랜잭션) 내에서 All-or-Nothing으로 실행한다.
+  - **작업 내용**:
+    1. Go Transport (`POST /_mold/batch`) 핸들러 구현 및 개별 REST 핸들러 재사용.
+    2. Cloudflare TS 타깃 `/_mold/batch` 생성기 구현 및 D1 Batch 트랜잭션 연계.
+    3. 단 1건이라도 권한 거부/유효성 실패 시 전체 롤백 검증.
+  - **완료 조건**: Go 및 Cloudflare 양쪽에서 `/_mold/batch` E2E 테스트 100% 통과.
+
+- [ ] **Task 12.3: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+  - **배경**: `docs/philosophy.md` Adapter 우선 원칙에 입각하여, 동일한 Resource YAML이 PostgreSQL DDL 및 쿼리로 무결하게 컴파일되는지 실증한다.
+
 
 
 
