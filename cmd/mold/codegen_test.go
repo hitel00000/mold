@@ -1,16 +1,44 @@
 package main_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+var moldBinaryPath string
+
+func TestMain(m *testing.M) {
+	tmpDir, err := os.MkdirTemp("", "mold-cli-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir for CLI binary: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	binName := "mold"
+	if runtime.GOOS == "windows" {
+		binName = "mold.exe"
+	}
+	moldBinaryPath = filepath.Join(tmpDir, binName)
+
+	buildCmd := exec.Command("go", "build", "-o", moldBinaryPath, ".")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build mold binary for tests: %v\nOutput: %s\n", err, string(out))
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	os.Exit(code)
+}
+
 func TestMoldCLI_VersionAndHelp(t *testing.T) {
 	// 1. Test version flag
-	cmdVer := exec.Command("go", "run", "./cmd/mold", "version")
+	cmdVer := exec.Command(moldBinaryPath, "version")
 	cmdVer.Dir = filepath.Join("..", "..")
 	outVer, err := cmdVer.CombinedOutput()
 	if err != nil {
@@ -21,7 +49,7 @@ func TestMoldCLI_VersionAndHelp(t *testing.T) {
 	}
 
 	// 2. Test help flag
-	cmdHelp := exec.Command("go", "run", "./cmd/mold", "help")
+	cmdHelp := exec.Command(moldBinaryPath, "help")
 	cmdHelp.Dir = filepath.Join("..", "..")
 	outHelp, err := cmdHelp.CombinedOutput()
 	if err != nil {
@@ -89,7 +117,7 @@ relations:
 
 	// Execute: mold codegen -d <resDir> -o <outTS> --schema-out <outSQL>
 	cmdCodegen := exec.Command(
-		"go", "run", "./cmd/mold",
+		moldBinaryPath,
 		"codegen",
 		"--target", "cloudflare",
 		"--dir", resDir,
@@ -135,7 +163,7 @@ relations:
 }
 
 func TestMoldCLI_Codegen_InvalidDirectory(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/mold", "codegen", "--dir", "./non_existent_directory_12345")
+	cmd := exec.Command(moldBinaryPath, "codegen", "--dir", "./non_existent_directory_12345")
 	cmd.Dir = filepath.Join("..", "..")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
