@@ -5,6 +5,7 @@
 > - **채택 근거**: `storage.Store` 인터페이스 변경 없이 기존 Blob rollback 패턴(Task 4.4)을 그대로 재사용 가능하며, Go/Cloudflare 양쪽 패리티 구현 난이도가 낮고, 짧은 중간 상태 노출 트레이드오프는 `drink-log` 같은 개인 소유 레코드 중심 서비스에서 감수 가능함.
 > - **자식 개수 상한**: `?include=`와의 일관성을 위해 부모당 최대 50건으로 확정.
 > - **사전 검증 (Pre-validation)**: 부모 생성 전 자식 레코드 전체에 대해 스키마 검증, 권한 검증(`auth.Evaluate(ActionCreate)`), 50건 상한 검증을 선행하여 롤백 발생 확률을 최소화함.
+> - **응답 형태**: 생성 성공 시 별도 재조회 왕복 없이 생성된 부모와 자식 레코드 전체를 embed 형태(예: `"images": [...]`, `"record_tags": [...]`)로 포함한 201 Created 일체형 응답 반환 확정 (`?include=` 표준 응답 형태와 일관성 유지).
 >
 > 원출처: `docs/tasks/2026-08-19-drink-log-feedback-eager-loading-and-blob-streaming.md`
 > (drink-log 프로덕션 연동 피드백 RFC) 중 "3.2 중첩 쓰기(Nested Writes & Atomic
