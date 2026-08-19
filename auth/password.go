@@ -8,12 +8,24 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// BcryptCost is the hashing cost used by HashPassword. Defaults to bcrypt.DefaultCost.
+var BcryptCost = bcrypt.DefaultCost
+
+// SetBcryptCostForTest overrides the bcrypt cost for testing purposes.
+func SetBcryptCostForTest(cost int) func() {
+	prev := BcryptCost
+	BcryptCost = cost
+	return func() {
+		BcryptCost = prev
+	}
+}
+
 // HashPassword generates a bcrypt hash from a plain text password.
 func HashPassword(password string) (string, error) {
 	if len([]byte(password)) > 72 {
 		return "", fmt.Errorf("password exceeds maximum allowed bcrypt length of 72 bytes")
 	}
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
 		return "", fmt.Errorf("failed to hash password: %w", err)
 	}

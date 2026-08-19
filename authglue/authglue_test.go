@@ -11,10 +11,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/authglue"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
+	"golang.org/x/crypto/bcrypt"
 )
+
+func init() {
+	auth.SetBcryptCostForTest(bcrypt.MinCost)
+}
 
 func setupTestApp(t *testing.T) (*runtime.App, string) {
 	t.Helper()

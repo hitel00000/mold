@@ -24,7 +24,12 @@ import (
 	"github.com/hitel00000/mold/view"
 	"strings"
 	_ "modernc.org/sqlite"
+	"golang.org/x/crypto/bcrypt"
 )
+
+func init() {
+	auth.SetBcryptCostForTest(bcrypt.MinCost)
+}
 
 func TestPermissionMatrix_Coverage(t *testing.T) {
 	tmpDir := t.TempDir()
