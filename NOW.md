@@ -24,8 +24,8 @@
 
 ## 현재 상태 (2026-08-19 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` 관계 Eager Loading (`?include=`) 100% 완결**.  
-👉 **현재 진행 중: Phase 11 Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B)**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**.  
+👉 **현재 상태: Phase 11 관계형 기능 확장 완결 및 회고 수립 완료 (`docs/retrospectives/phase11-eager-loading-nested-writes.md`)**
 
 ---
 
@@ -39,12 +39,10 @@
 
 ---
 
-## 다음 할 일 (Phase 11: 관계형 기능 확장)
+## 다음 할 일 (향후 백로그 후보)
 
 1. [x] ~~**Task 11.1: `has_many` 관계 Eager Loading (`?include=`) 확장**~~ (완료: Go 및 Cloudflare TS 런타임 100% 동기화, 50건 초과 시 `400 INCLUDE_TOO_LARGE` 거절, 점 체이닝 거절, 10,051건 무절단 회귀 실측 검증)
-2. 👉 **Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B - 순차 생성 + 보상 롤백)**:
-   - **사유**: `POST /api/{parent}` 페이로드 내 중첩된 `has_many` 자식 레코드 동시 생성 지원.
-   - **설계**: `storage.Store` 인터페이스 무변경, 사전 검증 후 순차 생성, 중간 실패 시 `HardDeletePhysically` 기반 물리적 보상 롤백.
+2. [x] ~~**Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B - 순차 생성 + 보상 롤백)**~~ (완료: `storage.Store` 인터페이스 무변경, 사전 검증으로 403/400 시 부모 DB 0건 보장, 실패 시 물리적 보상 롤백 `HardDeletePhysically`, Go/Miniflare E2E 100% 검증)
 3. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
    - **사유**: 다중 Storage 백엔드 확장 (필요성 대두 시 진행).
 

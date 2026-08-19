@@ -407,13 +407,14 @@
     6. **대규모 데이터셋(10,051건) 무절단 회귀 검증 및 E2E 실측**: 전역 상한 없이 10,051건 데이터셋에서도 51번째 자식 초과를 정확히 감지하여 400 거부하고, 100개 부모의 5,000건 자식 레코드를 0건 절단 없이 100% 임베드함을 실측.
     7. **회고 문서 수립**: 보고서 diff 수동 합성 사고 분석 회고 `docs/retrospectives/has-many-include-diff-fabrication-incident.md` 수립.
 
-- [ ] **Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B)**
-  - **가설**: `storage.Store` 인터페이스를 단일 레코드 CRUD로 순수하게 유지하면서, HTTP Transport 레이어의 순차 생성 및 보상 롤백(`HardDeletePhysically`) 오케스트레이션으로 SQLite 및 Cloudflare D1 양쪽에서 중첩 쓰기를 안전하게 지원할 수 있다.
-  - **완료 조건**:
-    1. `POST /api/{parent}` 요청 본문에 `has_many` 관계명 키로 자식 레코드 배열이 전달될 때, 부모 생성 후 자식 레코드들을 순차적으로 생성.
-    2. 부모 생성 전 자식 레코드들의 스키마 유효성 및 권한(`auth.Evaluate(ActionCreate)`), 최대 개수(50개)를 사전 검증(`pre-validation`).
-    3. 자식 레코드 생성 도중 실패 시, 이미 생성된 레코드들을 물리적으로 역순 삭제(`HardDeletePhysically`)하여 보상 롤백 수행.
-    4. 생성 성공 시 생성된 부모와 자식 레코드 전체를 201 Created로 응답.
-    5. Go 런타임 및 Cloudflare TS 런타임 동시 구현 및 E2E 테스트 검증.
+- [x] **Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B)**
+  - **작업 내용**:
+    1. **Go Transport 계층 사전 검증 및 순차 생성 / 보상 롤백 구현**: `transport/handler.go`의 `handleCreate`에서 1-depth `has_many` 자식 레코드 배열(최대 50건)을 추출하여 부모 생성 전 권한(`auth.Evaluate(ActionCreate)`), `client_writable: false` 위반, 타입 및 제약조건(`min_length`, `enum values` 등)을 사전 검증. 부모 생성 후 자식 레코드 순차 생성 및 FK/소유권 자동 주입. 중간 실패 시 생성 역순 물리적 하드 딜리트(`HardDeletePhysically`)로 보상 롤백 수행.
+    2. **Cloudflare Workers TS 타깃 생성기 동기화 및 제약조건 검증 패리티**: `codegen/cloudflare/generator.go`에 `generateFieldValidationTS` 헬퍼 함수를 도입하여 top-level 및 nested writes 양쪽에 `min_length`, `max_length`, `pattern`, `min`, `max`, `enum values`, `datetime` 제약조건 검증을 100% 통합.
+    3. **독립적 자식 권한 거부 및 무결성 실측**: 부모 `create: authenticated`, 자식 `create: role:admin` 시나리오에서 일반 유저 시도 시 `403 Forbidden` 반환 및 부모/자식 DB 0건 보존을 Go 및 Cloudflare Miniflare E2E 양쪽에서 실측 검증.
+    4. **Multipart Form 부모 Blob 업로드 + Nested Writes 결합 지원**: `multipart/form-data` 요청 시 폼 필드의 JSON 배열 문자열을 파싱하여 부모 Blob 업로드와 자식 생성을 단일 요청으로 원자적 완결.
+    5. **Drink-log 파일럿 및 전체 회귀 테스트 통과**: `examples/drink-log-pilot/pilot_test.go` 내 1-Step Nested Write E2E 테스트 및 전체 저장소 무캐시 테스트(`go test -count=1 ./...`) 100% PASS.
+    6. **회고 문서 수립**: `docs/retrospectives/phase11-eager-loading-nested-writes.md` 수립.
+
 
 
