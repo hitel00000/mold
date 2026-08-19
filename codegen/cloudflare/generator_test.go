@@ -852,14 +852,7 @@ func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
 		}
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(outBytes))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	// Transpile & bundle src/index.ts to src/index.js using esbuild
 	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
@@ -1015,6 +1008,9 @@ run().catch(err => {
 // Legacy UUID format R2 key ("images/{uuid-owner}/sake/{uuid-record}/{uuid-image}.jpg")
 // stored in D1's image_key column for record id=1 (INTEGER AUTOINCREMENT) is fetched successfully via Miniflare R2 binding.
 func TestCloudflareCodegen_MiniflareR2KeyIndirectionEmpirical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
 	nodePath, err := exec.LookPath("node")
 	if err != nil || nodePath == "" {
 		t.Skip("node not found in PATH, skipping Miniflare R2 key indirection empirical test")
@@ -1053,14 +1049,7 @@ func TestCloudflareCodegen_MiniflareR2KeyIndirectionEmpirical(t *testing.T) {
 		t.Fatalf("failed writing index.ts: %v", err)
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if out, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	// Run esbuild
 	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/index.js", "--external:node:*")
@@ -1350,14 +1339,7 @@ func TestCloudflareCodegen_MiniflareNestedWritesConstraintsAndAuthE2E(t *testing
 		}
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(outBytes))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
 	if os.Getenv("OS") != "Windows_NT" {
@@ -1605,14 +1587,7 @@ func TestCloudflareCodegen_MultipartFormBlobAndNestedWritesMiniflareEmpirical(t 
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if out, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
 	if os.Getenv("OS") != "Windows_NT" {
@@ -1820,6 +1795,9 @@ run().catch(err => {
 }
 
 func TestCloudflareCodegen_CascadeDeleteWithBlobCleanupMiniflareEmpirical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
 	reg := resource.NewRegistry()
 
 	userRes := &resource.Resource{
@@ -1936,14 +1914,7 @@ func TestCloudflareCodegen_CascadeDeleteWithBlobCleanupMiniflareEmpirical(t *tes
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if out, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
 	if os.Getenv("OS") != "Windows_NT" {
@@ -2135,14 +2106,7 @@ func TestCloudflareCodegen_MiniflareStringPrimaryKeyE2E(t *testing.T) {
 		t.Fatalf("failed writing wrangler.json: %v", err)
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if npmOut, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(npmOut))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
 	if os.Getenv("OS") != "Windows_NT" {

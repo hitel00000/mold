@@ -89,14 +89,7 @@ func TestCloudflareCodegen_MiniflareR2DeleteOrchestrationEmpirical(t *testing.T)
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
-	}
-	cmdNpm.Dir = tmpDir
-	if out, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/index.js", "--external:node:*")
 	if os.Getenv("OS") != "Windows_NT" {

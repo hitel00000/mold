@@ -128,11 +128,7 @@ export default app;
 		t.Fatalf("failed writing package.json: %v", err)
 	}
 
-	cmdNpm := exec.Command("npm", "install")
-	cmdNpm.Dir = tmpDir
-	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
-		t.Fatalf("npm install failed: %v, log: %s", err, string(outBytes))
-	}
+	linkSharedNodeModules(t, tmpDir)
 
 	cmdEsbuild := exec.Command("cmd", "/C", "set NODE_PATH=node_modules&& npx esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=dist/index.js --external:node:*")
 	cmdEsbuild.Dir = tmpDir
