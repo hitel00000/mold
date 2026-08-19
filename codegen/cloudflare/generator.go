@@ -1232,7 +1232,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 					cols[i] = fmt.Sprintf("\"%s\"", bf)
 				}
 				sb.WriteString(fmt.Sprintf("  const childRows_%s = await c.env.DB.prepare('SELECT %s FROM \"%s\" WHERE \"%s\" = ?').bind(id).all();\n", cas.childTable, strings.Join(cols, ", "), cas.childTable, cas.foreignKey))
-				sb.WriteString(fmt.Sprintf("  for (const row of childRows_%s.results || []) {\n", cas.childTable))
+				sb.WriteString(fmt.Sprintf("  for (const row of (childRows_%s.results || []) as any[]) {\n", cas.childTable))
 				for _, bf := range cas.blobFields {
 					sb.WriteString(fmt.Sprintf("    if (row['%s']) { try { await c.env.BUCKET.delete(row['%s']); } catch (_) {} }\n", bf, bf))
 				}
