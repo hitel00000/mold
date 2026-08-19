@@ -281,3 +281,15 @@ AI 에이전트는 Resource YAML을 작성/수정할 때 아래의 **잘못된 �
 | :--- | :--- |
 | ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>fields:<br>  - name: email<br>    type: email<br>  - name: role<br>    type: enum<br>    nullable: false<br>    default: "user"<br>    constraints:<br>      values: ["admin", "user"]<br>    # ❌ client_writable 속성 누락!<br>    # public 회원가입 시 role: "admin" 전송하면 승격 위험<br><br>auth:<br>  permissions:<br>    create: public<br>``` | ```yaml<br># User.yaml<br>resource:<br>  name: User<br><br>fields:<br>  - name: email<br>    type: email<br>  - name: role<br>    type: enum<br>    nullable: false<br>    default: "user"<br>    client_writable: false  # ✅ 클라이언트 페이로드 쓰기 완전 차단!<br>    constraints:<br>      values: ["admin", "user"]<br><br>auth:<br>  permissions:<br>    create: public  # ✅ permissions.create: public이어도 안심하고 개방 가능<br>``` |
 
+---
+
+### 패턴 9: 연관 관계 Eager Loading (`?include=`)의 2-Depth 체이닝 시도
+
+> **위험성**: Mold는 N+1 쿼리 폭풍 및 순환 조인을 방어하기 위해 1-depth 직계 관계만 허용함. `?include=record_tags.tag`와 같은 2-depth 점 체이닝(dot-chaining)을 시도하면 즉시 HTTP 400 Bad Request (`INVALID_INCLUDE`)로 요청이 거부됨.
+> **올바른 패턴**: 직계 관계인 `?include=record_tags`를 조회하고, 마스터 엔티티(`Tag`)는 클라이언트 사이드에서 캐싱하거나 Join Resource(`record_tags`)의 `belongs_to`를 각각 독립적으로 조회해야 함.
+
+| ❌ Bad (잘못된 요청) | ✅ Good (올바른 요청) |
+| :--- | :--- |
+| `GET /api/sake_records?include=record_tags.tag`<br>*(❌ 2-depth 점 체이닝 시도 ➔ 400 INVALID_INCLUDE 거부)* | `GET /api/sake_records?include=sake_images,record_tags`<br>*(✅ 1-depth 직계 관계만 쉼표로 나열 ➔ 200 OK)* |
+
+
