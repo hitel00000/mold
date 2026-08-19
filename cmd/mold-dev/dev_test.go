@@ -144,7 +144,7 @@ fields:
 	}
 
 	// Wait for watcher poll + debounce (50ms poll + 100ms debounce + safety margin)
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 
 	// Verify /api/comments NOW exists and returns 200 OK (reloaded automatically!)
 	resp, err = client.Get(baseURL + "/api/comments")
@@ -230,7 +230,7 @@ resource:
 	}
 
 	// Wait for watcher poll + debounce
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 
 	// Existing IR must remain active (200 OK for /api/posts)
 	resp, err = client.Get(baseURL + "/api/posts")
