@@ -1186,3 +1186,50 @@ func TestCloudflareGenerator_ClientWritableTS(t *testing.T) {
 	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS CODE SNIPPET (CLIENT_WRITE_FORBIDDEN) ===")
 	t.Logf("%s", expectedSnippet)
 }
+
+func TestCloudflareGenerator_NestedWritesTS(t *testing.T) {
+	parentRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+		},
+	}
+
+	childRes := &resource.Resource{
+		Name:  "Comment",
+		Table: "comments",
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	reg.Register(parentRes)
+	reg.Register(childRes)
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	if !strings.Contains(output.IndexTS, "if (body['comments'] !== undefined && body['comments'] !== null)") {
+		t.Fatalf("expected generated IndexTS to contain nested writes check for comments")
+	}
+
+	if !strings.Contains(output.IndexTS, "nestedWrites.push({ relName: 'comments', targetTable: 'comments', fkField: 'post_id'") {
+		t.Fatalf("expected generated IndexTS to push nested write item for comments")
+	}
+
+	if !strings.Contains(output.IndexTS, "DELETE FROM \"${createdChildTrackers[j].table}\" WHERE id = ?") {
+		t.Fatalf("expected generated IndexTS to contain compensating rollback query")
+	}
+
+	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS NESTED WRITES CODE VERIFIED ===")
+}
+

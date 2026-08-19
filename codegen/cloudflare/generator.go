@@ -292,9 +292,13 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 `)
 
 	resourceMap := make(map[string]*resource.Resource)
+	planMap := make(map[string]*plan.Plan)
 	for _, res := range resources {
+		p := plan.Build(res)
 		resourceMap[res.Name] = res
 		resourceMap[res.Table] = res
+		planMap[res.Name] = p
+		planMap[res.Table] = p
 	}
 
 	sb.WriteString("\nconst relMetadata: Record<string, Record<string, { kind: string; targetTable: string; fk: string; permRead: string; ownershipField: string; softDelete: boolean; pwdFields: string[] }>> = {\n")
@@ -677,6 +681,105 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("  }\n")
 		}
 
+		var hasManyRels []plan.RelationPlan
+		for _, rel := range p.Relations {
+			if rel.Kind == resource.KindHasMany {
+				hasManyRels = append(hasManyRels, rel)
+			}
+		}
+
+		if len(hasManyRels) > 0 {
+			sb.WriteString("\n  // 1. Extract and pre-validate nested writes for has_many relations\n")
+			sb.WriteString("  const nestedWrites: { relName: string; targetTable: string; fkField: string; items: any[]; targetPwdFields: string[] }[] = [];\n")
+
+			for _, rel := range hasManyRels {
+				targetPlan := planMap[rel.Target]
+				if targetPlan == nil {
+					continue
+				}
+
+				targetTable := targetPlan.Table
+				targetOwnership := ""
+				targetPermCreate := "public"
+				if targetPlan.Auth != nil {
+					targetOwnership = targetPlan.Auth.OwnershipField
+					if targetPlan.Auth.Permissions.Create != "" {
+						targetPermCreate = targetPlan.Auth.Permissions.Create
+					}
+				}
+
+				var targetPwdFields []string
+				for _, tf := range targetPlan.Fields {
+					if tf.Type == resource.TypePassword {
+						targetPwdFields = append(targetPwdFields, fmt.Sprintf("'%s'", tf.Name))
+					}
+				}
+				targetPwdFieldsJS := fmt.Sprintf("[%s]", strings.Join(targetPwdFields, ", "))
+
+				sb.WriteString(fmt.Sprintf("\n  if (body['%s'] !== undefined && body['%s'] !== null) {\n", rel.Name, rel.Name))
+				sb.WriteString(fmt.Sprintf("    if (!Array.isArray(body['%s'])) {\n", rel.Name))
+				sb.WriteString(fmt.Sprintf("      return writeError(c, 400, 'INVALID_INPUT', \"nested relation '%s' must be an array of objects\");\n", rel.Name))
+				sb.WriteString("    }\n")
+				sb.WriteString(fmt.Sprintf("    const rawItems_%s = body['%s'];\n", rel.Name, rel.Name))
+				sb.WriteString(fmt.Sprintf("    if (rawItems_%s.length > 50) {\n", rel.Name))
+				sb.WriteString(fmt.Sprintf("      return writeError(c, 400, 'NESTED_WRITE_TOO_LARGE', \"nested records for relation '%s' exceed limit of 50\");\n", rel.Name))
+				sb.WriteString("    }\n")
+
+				if targetPermCreate != "public" {
+					sb.WriteString("    if (!authUser) {\n")
+					sb.WriteString("      return writeError(c, 401, 'UNAUTHORIZED', 'authentication required');\n")
+					sb.WriteString("    }\n")
+				}
+				if strings.HasPrefix(targetPermCreate, "role:") {
+					role := strings.TrimPrefix(targetPermCreate, "role:")
+					sb.WriteString(fmt.Sprintf("    if (!authUser || authUser.role !== '%s') {\n", role))
+					sb.WriteString("      return writeError(c, 403, 'FORBIDDEN', 'forbidden');\n")
+					sb.WriteString("    }\n")
+				}
+
+				sb.WriteString(fmt.Sprintf("    for (let idx = 0; idx < rawItems_%s.length; idx++) {\n", rel.Name))
+				sb.WriteString(fmt.Sprintf("      const item = rawItems_%s[idx];\n", rel.Name))
+				sb.WriteString("      if (typeof item !== 'object' || item === null || Array.isArray(item)) {\n")
+				sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in '%s' must be a JSON object`);\n", rel.Name))
+				sb.WriteString("      }\n")
+
+				for _, tf := range targetPlan.Fields {
+					if tf.Deprecated {
+						continue
+					}
+					if !tf.ClientWritable {
+						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined) {\n", tf.Name))
+						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', `nested record #${idx+1} in '%s': field '%s' is not client-writable`);\n", rel.Name, tf.Name))
+						sb.WriteString("      }\n")
+						continue
+					}
+					if !tf.Nullable && tf.Default == nil && tf.Type != resource.TypeBlob && tf.Name != rel.ForeignKey && tf.Name != targetOwnership {
+						sb.WriteString(fmt.Sprintf("      if (item['%s'] === undefined || item['%s'] === null) {\n", tf.Name, tf.Name))
+						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s is required`);\n", rel.Name, tf.Name))
+						sb.WriteString("      }\n")
+					}
+					switch tf.Type {
+					case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword:
+						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'string') {\n", tf.Name, tf.Name, tf.Name))
+						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a string`);\n", rel.Name, tf.Name))
+						sb.WriteString("      }\n")
+					case resource.TypeInt, resource.TypeFloat:
+						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'number') {\n", tf.Name, tf.Name, tf.Name))
+						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a number`);\n", rel.Name, tf.Name))
+						sb.WriteString("      }\n")
+					case resource.TypeBool:
+						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'boolean') {\n", tf.Name, tf.Name, tf.Name))
+						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a boolean`);\n", rel.Name, tf.Name))
+						sb.WriteString("      }\n")
+					}
+				}
+				sb.WriteString("    }\n")
+				sb.WriteString(fmt.Sprintf("    nestedWrites.push({ relName: '%s', targetTable: '%s', fkField: '%s', items: rawItems_%s, targetPwdFields: %s });\n", rel.Name, targetTable, rel.ForeignKey, rel.Name, targetPwdFieldsJS))
+				sb.WriteString(fmt.Sprintf("    delete body['%s'];\n", rel.Name))
+				sb.WriteString("  }\n")
+			}
+		}
+
 		// Field Loop #2 & Type Dispatch #2 (Validation derived via plan.Plan)
 		for _, f := range p.Fields {
 			if f.Deprecated {
@@ -840,8 +943,116 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			sb.WriteString("  }\n")
 		}
 
-		sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(created, %s) }, 201);\n", pwdFieldsJS))
-		sb.WriteString("});\n")
+		if len(hasManyRels) > 0 {
+			sb.WriteString("\n  // 5. Sequentially create nested child records with compensating rollback on failure\n")
+			sb.WriteString("  const createdChildTrackers: { table: string; id: any }[] = [];\n")
+			sb.WriteString("  const embeddedChildrenMap: Record<string, any[]> = {};\n\n")
+			sb.WriteString("  for (const nw of nestedWrites) {\n")
+			sb.WriteString("    const createdForRel: any[] = [];\n")
+
+			for _, rel := range hasManyRels {
+				targetPlan := planMap[rel.Target]
+				if targetPlan == nil {
+					continue
+				}
+				targetTable := targetPlan.Table
+				targetOwnership := ""
+				if targetPlan.Auth != nil {
+					targetOwnership = targetPlan.Auth.OwnershipField
+				}
+
+				childCols := []string{}
+				childVals := []string{}
+				childBindVars := []string{}
+
+				for _, tf := range targetPlan.Fields {
+					if tf.Deprecated {
+						continue
+					}
+					childCols = append(childCols, fmt.Sprintf("\"%s\"", tf.Name))
+					childBindVars = append(childBindVars, "?")
+
+					defaultVal := "null"
+					if tf.Default != nil {
+						if tf.Type == resource.TypeBool || tf.Type == resource.TypeInt || tf.Type == resource.TypeFloat {
+							defaultVal = fmt.Sprintf("%v", tf.Default)
+						} else {
+							defaultVal = fmt.Sprintf("'%v'", tf.Default)
+						}
+					}
+
+					switch tf.Type {
+					case resource.TypeBool:
+						childVals = append(childVals, fmt.Sprintf("childPayload['%s'] !== undefined ? (childPayload['%s'] ? 1 : 0) : %s", tf.Name, tf.Name, defaultVal))
+					case resource.TypeBlob:
+						childVals = append(childVals, "null")
+					default:
+						childVals = append(childVals, fmt.Sprintf("childPayload['%s'] !== undefined ? childPayload['%s'] : %s", tf.Name, tf.Name, defaultVal))
+					}
+				}
+
+				if targetPlan.Timestamps {
+					childCols = append(childCols, "\"created_at\"", "\"updated_at\"")
+					childBindVars = append(childBindVars, "?", "?")
+					childVals = append(childVals, "now", "now")
+				}
+
+				sb.WriteString(fmt.Sprintf("    if (nw.relName === '%s') {\n", rel.Name))
+				sb.WriteString("      for (let idx = 0; idx < nw.items.length; idx++) {\n")
+				sb.WriteString("        const childPayload: any = { ...nw.items[idx] };\n")
+				sb.WriteString(fmt.Sprintf("        childPayload['%s'] = created.id;\n", rel.ForeignKey))
+				if targetOwnership != "" && targetOwnership != "id" {
+					sb.WriteString("        if (authUser) {\n")
+					sb.WriteString(fmt.Sprintf("          childPayload['%s'] = authUser.id;\n", targetOwnership))
+					sb.WriteString("        } else {\n")
+					sb.WriteString(fmt.Sprintf("          delete childPayload['%s'];\n", targetOwnership))
+					sb.WriteString("        }\n")
+				}
+				for _, tf := range targetPlan.Fields {
+					if tf.Type == resource.TypePassword {
+						sb.WriteString(fmt.Sprintf("        if (childPayload['%s'] !== undefined && childPayload['%s'] !== null && childPayload['%s'] !== '') {\n", tf.Name, tf.Name, tf.Name))
+						sb.WriteString(fmt.Sprintf("          childPayload['%s'] = await hashPassword(String(childPayload['%s']));\n", tf.Name, tf.Name))
+						sb.WriteString("        }\n")
+					}
+				}
+
+				sb.WriteString(fmt.Sprintf("        const childInsertSql = `INSERT INTO \"%s\" (%s) VALUES (%s) RETURNING *`;\n", targetTable, strings.Join(childCols, ", "), strings.Join(childBindVars, ", ")))
+				sb.WriteString("        try {\n")
+				sb.WriteString(fmt.Sprintf("          const childCreated = await c.env.DB.prepare(childInsertSql).bind(%s).first<any>();\n", strings.Join(childVals, ", ")))
+				sb.WriteString(fmt.Sprintf("          createdChildTrackers.push({ table: '%s', id: childCreated.id });\n", targetTable))
+				sb.WriteString("          createdForRel.push(sanitizeRecord(childCreated, nw.targetPwdFields));\n")
+				sb.WriteString("        } catch (childErr: any) {\n")
+				sb.WriteString("          // Compensating rollback: delete created children in reverse order, then delete parent\n")
+				sb.WriteString("          for (let j = createdChildTrackers.length - 1; j >= 0; j--) {\n")
+				sb.WriteString("            try {\n")
+				sb.WriteString("              await c.env.DB.prepare(`DELETE FROM \"${createdChildTrackers[j].table}\" WHERE id = ?`).bind(createdChildTrackers[j].id).run();\n")
+				sb.WriteString("            } catch (_) {}\n")
+				sb.WriteString("          }\n")
+				sb.WriteString("          try {\n")
+				sb.WriteString(fmt.Sprintf("            await c.env.DB.prepare('DELETE FROM \"%s\" WHERE id = ?').bind(created.id).run();\n", table))
+				sb.WriteString("          } catch (_) {}\n")
+				sb.WriteString("          const childErrMsg = String(childErr?.message || childErr);\n")
+				sb.WriteString("          if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {\n")
+				sb.WriteString(fmt.Sprintf("            return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in '%s' unique constraint failed: ${childErrMsg}`);\n", rel.Name))
+				sb.WriteString("          }\n")
+				sb.WriteString(fmt.Sprintf("          return writeError(c, 400, 'INVALID_INPUT', `failed creating nested record #${idx+1} in '%s': ${childErrMsg}`);\n", rel.Name))
+				sb.WriteString("        }\n")
+				sb.WriteString("      }\n")
+				sb.WriteString("    }\n")
+			}
+
+			sb.WriteString("    embeddedChildrenMap[nw.relName] = createdForRel;\n")
+			sb.WriteString("  }\n\n")
+			sb.WriteString(fmt.Sprintf("  const responseData = sanitizeRecord(created, %s);\n", pwdFieldsJS))
+			sb.WriteString("  for (const [relName, childrenList] of Object.entries(embeddedChildrenMap)) {\n")
+			sb.WriteString("    responseData[relName] = childrenList;\n")
+			sb.WriteString("  }\n")
+			sb.WriteString("  return c.json({ data: responseData }, 201);\n")
+			sb.WriteString("});\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  return c.json({ data: sanitizeRecord(created, %s) }, 201);\n", pwdFieldsJS))
+			sb.WriteString("});\n")
+		}
 
 		// 4. PUT /api/{table}/:id (Update)
 		sb.WriteString(fmt.Sprintf("\n// UPDATE /api/%s/:id\n", table))
