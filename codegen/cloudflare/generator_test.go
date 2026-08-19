@@ -829,9 +829,9 @@ func TestCloudflareCodegen_MiniflareIncludeE2E(t *testing.T) {
 		}
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
 	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
 	}
 	cmdNpm.Dir = tmpDir
 	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
@@ -859,11 +859,14 @@ async function run() {
   const { Miniflare } = miniflareModule;
 
   const mf = new Miniflare({
-    modules: true,
-    scriptPath: "./src/index.js",
-    d1Databases: ["DB"],
-    d1Persist: false,
-    compatibilityFlags: ["nodejs_compat"]
+    workers: [
+      {
+        modules: true,
+        scriptPath: "./src/index.js",
+        d1Databases: ["DB"],
+        compatibilityFlags: ["nodejs_compat"]
+      }
+    ]
   });
 
   const db = await mf.getD1Database("DB");
@@ -933,16 +936,28 @@ async function run() {
   const jsonErr = await resErr.json();
   console.log("Miniflare Invalid Include Response:", JSON.stringify(jsonErr, null, 2));
 
-  // 3. Test has_many relation: GET /api/tags?include=record_tags -> 400
+  // 3. Test dot-chaining relation: ?include=record_tags.tag -> 400
+  const resDot = await mf.dispatchFetch("http://localhost/api/tags?include=record_tags.tag");
+  if (resDot.status !== 400) {
+    console.error("Expected 400 for dot-chaining include, got", resDot.status);
+    process.exit(1);
+  }
+
+  // 4. Test has_many relation: GET /api/tags?include=record_tags -> 200 with array
   const resHasMany = await mf.dispatchFetch("http://localhost/api/tags?include=record_tags");
-  if (resHasMany.status !== 400) {
-    console.error("Expected 400 for has_many include, got", resHasMany.status);
+  if (resHasMany.status !== 200) {
+    console.error("Expected 200 for has_many include, got", resHasMany.status);
     process.exit(1);
   }
   const jsonHasMany = await resHasMany.json();
   console.log("Miniflare HasMany Include Response:", JSON.stringify(jsonHasMany, null, 2));
+  const tag1Rec = jsonHasMany.data.find(t => t.id === 1);
+  if (!tag1Rec || !Array.isArray(tag1Rec.record_tags) || tag1Rec.record_tags.length !== 1) {
+    console.error("Expected tag 1 to have 1 embedded record_tag, got:", tag1Rec);
+    process.exit(1);
+  }
 
-  // 4. Test SSR View GET /view/record_tags?include=tag
+  // 5. Test SSR View GET /view/record_tags?include=tag
   const resView = await mf.dispatchFetch("http://localhost/view/record_tags?include=tag");
   if (resView.status !== 200) {
     console.error("Expected 200 for SSR View, got", resView.status);
@@ -1015,9 +1030,9 @@ func TestCloudflareCodegen_MiniflareR2KeyIndirectionEmpirical(t *testing.T) {
 		t.Fatalf("failed writing index.ts: %v", err)
 	}
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund")
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "esbuild@^0.24.0")
 	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund")
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "esbuild@^0.24.0")
 	}
 	cmdNpm.Dir = tmpDir
 	if out, err := cmdNpm.CombinedOutput(); err != nil {
@@ -1046,10 +1061,14 @@ async function run() {
   const { Miniflare } = miniflareModule;
 
   const mf = new Miniflare({
-    modules: true,
-    scriptPath: "./dist/index.js",
-    d1Databases: { DB: "mold-d1" },
-    r2Buckets: { BUCKET: "mold-r2" },
+    workers: [
+      {
+        modules: true,
+        scriptPath: "./dist/index.js",
+        d1Databases: { DB: "mold-d1" },
+        r2Buckets: { BUCKET: "mold-r2" },
+      }
+    ]
   });
 
   const db = await mf.getD1Database("DB");

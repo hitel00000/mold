@@ -89,9 +89,9 @@ func TestCloudflareCodegen_MiniflareR2DeleteOrchestrationEmpirical(t *testing.T)
 	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
 	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
 
-	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
 	if os.Getenv("OS") != "Windows_NT" {
-		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare", "hono", "esbuild")
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
 	}
 	cmdNpm.Dir = tmpDir
 	if out, err := cmdNpm.CombinedOutput(); err != nil {
@@ -118,10 +118,14 @@ async function run() {
   const { Miniflare } = miniflareModule;
 
   const mf = new Miniflare({
-    modules: true,
-    scriptPath: "./dist/index.js",
-    d1Databases: { DB: "mold-d1" },
-    r2Buckets: { BUCKET: "mold-r2" },
+    workers: [
+      {
+        modules: true,
+        scriptPath: "./dist/index.js",
+        d1Databases: { DB: "mold-d1" },
+        r2Buckets: { BUCKET: "mold-r2" },
+      }
+    ]
   });
 
   const db = await mf.getD1Database("DB");

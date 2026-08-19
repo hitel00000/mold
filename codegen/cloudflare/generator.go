@@ -354,71 +354,136 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
   const validRels: Array<{ name: string; info: any }> = [];
   for (const item of items) {
+    if (item.includes('.')) {
+      return writeError(c, 400, 'INVALID_INCLUDE', ` + "`" + `invalid relation '${item}' for include` + "`" + `);
+    }
     const info = currentRels[item];
-    if (!info || info.kind !== 'belongs_to') {
+    if (!info || (info.kind !== 'belongs_to' && info.kind !== 'has_many')) {
       return writeError(c, 400, 'INVALID_INCLUDE', ` + "`" + `invalid relation '${item}' for include` + "`" + `);
     }
     validRels.push({ name: item, info });
   }
 
   for (const rel of validRels) {
-    const fkCol = rel.info.fk;
-    const targetTable = rel.info.targetTable;
-    const fkVals = Array.from(new Set(records.map(r => r[fkCol]).filter(v => v !== null && v !== undefined && v !== '')));
+    if (rel.info.kind === 'belongs_to') {
+      const fkCol = rel.info.fk;
+      const targetTable = rel.info.targetTable;
+      const fkVals = Array.from(new Set(records.map(r => r[fkCol]).filter(v => v !== null && v !== undefined && v !== '')));
 
-    for (const r of records) {
-      r[rel.name] = null;
-    }
+      for (const r of records) {
+        r[rel.name] = null;
+      }
 
-    if (fkVals.length === 0) continue;
+      if (fkVals.length === 0) continue;
 
-    const placeholders = fkVals.map(() => '?').join(', ');
-    const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
-    const sql = ` + "`" + `SELECT * FROM "${targetTable}" WHERE id IN (${placeholders})${softCond}` + "`" + `;
-    const { results } = await c.env.DB.prepare(sql).bind(...fkVals).all();
+      const placeholders = fkVals.map(() => '?').join(', ');
+      const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
+      const sql = ` + "`" + `SELECT * FROM "${targetTable}" WHERE id IN (${placeholders})${softCond}` + "`" + `;
+      const { results } = await c.env.DB.prepare(sql).bind(...fkVals).all();
 
-    const targetMap = new Map<any, any>();
-    for (const tRec of (results || []) as any[]) {
-      const idVal = tRec.id;
-      if (idVal === null || idVal === undefined) continue;
+      const targetMap = new Map<any, any>();
+      for (const tRec of (results || []) as any[]) {
+        const idVal = tRec.id;
+        if (idVal === null || idVal === undefined) continue;
 
-      let allowed = true;
-      if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
-        const ownerVal = tRec[rel.info.ownershipField];
-        if (ownerVal !== null && ownerVal !== undefined) {
-          if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+        let allowed = true;
+        if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
+          const ownerVal = tRec[rel.info.ownershipField];
+          if (ownerVal !== null && ownerVal !== undefined) {
+            if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+              allowed = false;
+            }
+          }
+        } else if (rel.info.permRead.startsWith('role:')) {
+          const role = rel.info.permRead.substring(5);
+          if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
+            allowed = false;
+          }
+        } else if (rel.info.permRead === 'authenticated') {
+          if (!authUser) {
             allowed = false;
           }
         }
-      } else if (rel.info.permRead.startsWith('role:')) {
-        const role = rel.info.permRead.substring(5);
-        if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
-          allowed = false;
-        }
-      } else if (rel.info.permRead === 'authenticated') {
-        if (!authUser) {
-          allowed = false;
+
+        if (allowed) {
+          targetMap.set(idVal, sanitizeRecord(tRec, rel.info.pwdFields));
         }
       }
 
-      if (allowed) {
-        targetMap.set(idVal, sanitizeRecord(tRec, rel.info.pwdFields));
+      for (const r of records) {
+        const fkVal = r[fkCol];
+        if (fkVal !== null && fkVal !== undefined && targetMap.has(fkVal)) {
+          r[rel.name] = targetMap.get(fkVal);
+        } else {
+          r[rel.name] = null;
+        }
       }
-    }
+    } else if (rel.info.kind === 'has_many') {
+      const fkCol = rel.info.fk;
+      const targetTable = rel.info.targetTable;
+      const parentIDs = Array.from(new Set(records.map(r => r.id).filter(v => v !== null && v !== undefined && v !== '')));
 
-    for (const r of records) {
-      const fkVal = r[fkCol];
-      if (fkVal !== null && fkVal !== undefined && targetMap.has(fkVal)) {
-        r[rel.name] = targetMap.get(fkVal);
-      } else {
-        r[rel.name] = null;
+      for (const r of records) {
+        r[rel.name] = [];
+      }
+
+      if (parentIDs.length === 0 || !fkCol) continue;
+
+      const placeholders = parentIDs.map(() => '?').join(', ');
+      const softCond = rel.info.softDelete ? ' AND "deleted_at" IS NULL' : '';
+      const sql = ` + "`" + `SELECT * FROM "${targetTable}" WHERE "${fkCol}" IN (${placeholders})${softCond}` + "`" + `;
+      const { results } = await c.env.DB.prepare(sql).bind(...parentIDs).all();
+
+      const childMap = new Map<any, any[]>();
+      for (const cRec of (results || []) as any[]) {
+        const parentFK = cRec[fkCol];
+        if (parentFK === null || parentFK === undefined) continue;
+
+        let allowed = true;
+        if (rel.info.permRead === 'owner' && rel.info.ownershipField) {
+          const ownerVal = cRec[rel.info.ownershipField];
+          if (ownerVal !== null && ownerVal !== undefined) {
+            if (!authUser || (authUser.role !== 'admin' && ownerVal != authUser.id)) {
+              allowed = false;
+            }
+          }
+        } else if (rel.info.permRead.startsWith('role:')) {
+          const role = rel.info.permRead.substring(5);
+          if (!authUser || (authUser.role !== role && authUser.role !== 'admin')) {
+            allowed = false;
+          }
+        } else if (rel.info.permRead === 'authenticated') {
+          if (!authUser) {
+            allowed = false;
+          }
+        }
+
+        if (allowed) {
+          const sanitized = sanitizeRecord(cRec, rel.info.pwdFields);
+          if (!childMap.has(parentFK)) {
+            childMap.set(parentFK, []);
+          }
+          const list = childMap.get(parentFK)!;
+          list.push(sanitized);
+          if (list.length > 50) {
+            return writeError(c, 400, 'INCLUDE_TOO_LARGE', ` + "`" + `nested records for relation '${rel.name}' exceed limit of 50` + "`" + `);
+          }
+        }
+      }
+
+      for (const r of records) {
+        const pID = r.id;
+        if (pID !== null && pID !== undefined && childMap.has(pID)) {
+          r[rel.name] = childMap.get(pID);
+        } else {
+          r[rel.name] = [];
+        }
       }
     }
   }
 
   return null;
 }
-
 `)
 
 	for _, res := range resources {
