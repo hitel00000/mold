@@ -288,6 +288,139 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
+	// 1. Extract and pre-validate nested writes for has_many relations
+	type nestedRelationPayload struct {
+		rel         plan.RelationPlan
+		targetEntry ResourceEntry
+		rawItems    []map[string]any
+	}
+	var nestedWrites []nestedRelationPayload
+
+	p := plan.Build(res)
+	if p != nil && len(p.Relations) > 0 {
+		for _, rel := range p.Relations {
+			if rel.Kind == resource.KindHasMany {
+				val, exists := input[rel.Name]
+				if !exists || val == nil {
+					continue
+				}
+
+				var rawItems []map[string]any
+				switch v := val.(type) {
+				case []any:
+					for itemIdx, item := range v {
+						itemMap, ok := item.(map[string]any)
+						if !ok {
+							WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested record #%d in '%s' must be a JSON object", itemIdx+1, rel.Name), nil)
+							return
+						}
+						rawItems = append(rawItems, itemMap)
+					}
+				case []map[string]any:
+					rawItems = v
+				default:
+					WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested relation '%s' must be an array of objects", rel.Name), nil)
+					return
+				}
+
+				if len(rawItems) > MaxNestedRecordsPerParent {
+					WriteError(w, http.StatusBadRequest, "NESTED_WRITE_TOO_LARGE", fmt.Sprintf("nested records for relation '%s' exceed limit of %d", rel.Name, MaxNestedRecordsPerParent), nil)
+					return
+				}
+
+				targetEntry, found := rt.CurrentRegistry().LookupResource(rel.Target)
+				if !found || targetEntry.Resource == nil || targetEntry.Store == nil {
+					WriteError(w, http.StatusBadRequest, "INVALID_RELATION", fmt.Sprintf("target resource '%s' for relation '%s' not registered", rel.Target, rel.Name), nil)
+					return
+				}
+
+				nestedWrites = append(nestedWrites, nestedRelationPayload{
+					rel:         rel,
+					targetEntry: targetEntry,
+					rawItems:    rawItems,
+				})
+
+				// Remove nested relation field from parent input so store.Create does not fail on unknown field validation
+				delete(input, rel.Name)
+			}
+		}
+	}
+
+	// 2. Pre-validate child payloads and permissions before creating parent record
+	for _, nw := range nestedWrites {
+		childRes := nw.targetEntry.Resource
+		for idx, childItem := range nw.rawItems {
+			childCopy := make(map[string]any)
+			for k, v := range childItem {
+				childCopy[k] = v
+			}
+
+			// Provide placeholder FK so ValidateRecord passes non-null check if client omitted it
+			if _, hasFK := childCopy[nw.rel.ForeignKey]; !hasFK {
+				childCopy[nw.rel.ForeignKey] = 0
+			}
+
+			// If child has ownership_field and session exists, populate from session if omitted by client
+			if childRes.Auth != nil && childRes.Auth.OwnershipField != "" && childRes.Auth.OwnershipField != "id" {
+				if _, hasOwnership := childCopy[childRes.Auth.OwnershipField]; !hasOwnership && sess != nil {
+					val := sess.UserID
+					for _, f := range childRes.Fields {
+						if f.Name == childRes.Auth.OwnershipField {
+							if (f.Type == resource.TypeInt || f.Type == resource.TypeFloat) && val != nil {
+								if strVal, isStr := val.(string); isStr {
+									if parsedInt, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+										val = parsedInt
+									}
+								}
+							}
+							break
+						}
+					}
+					childCopy[childRes.Auth.OwnershipField] = val
+				}
+			}
+
+			// Pre-validate child schema & client_writable on client payload
+			if err := resource.ValidateRecord(childRes, childCopy, false); err != nil {
+				if isClientWriteForbiddenError(err) {
+					WriteError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", fmt.Sprintf("nested record #%d in '%s': %v", idx+1, nw.rel.Name, err), nil)
+					return
+				}
+				WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested record #%d in '%s' validation failed: %v", idx+1, nw.rel.Name, err), nil)
+				return
+			}
+
+			// Pre-assign ownership field if child has one for auth evaluation
+			if childRes.Auth != nil && childRes.Auth.OwnershipField != "" && childRes.Auth.OwnershipField != "id" {
+				if sess != nil {
+					val := sess.UserID
+					for _, f := range childRes.Fields {
+						if f.Name == childRes.Auth.OwnershipField {
+							if (f.Type == resource.TypeInt || f.Type == resource.TypeFloat) && val != nil {
+								if strVal, isStr := val.(string); isStr {
+									if parsedInt, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+										val = parsedInt
+									}
+								}
+							}
+							break
+						}
+					}
+					childCopy[childRes.Auth.OwnershipField] = val
+				} else {
+					delete(childCopy, childRes.Auth.OwnershipField)
+				}
+			}
+
+			// Pre-validate child create permission
+			status, allowed, err := auth.Evaluate(sess, childRes, auth.ActionCreate, nil, childCopy)
+			if !allowed {
+				rt.writeAuthError(w, status, fmt.Errorf("permission denied for nested record in '%s': %w", nw.rel.Name, err))
+				return
+			}
+		}
+	}
+
 	// Pre-populate placeholder for pending blob fields to satisfy non-nullable validation during store.Create
 	for _, pf := range pendingFiles {
 		if _, exists := input[pf.fieldName]; !exists {
@@ -295,7 +428,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		}
 	}
 
-	// 1. Create record in Store first to get actual record_id
+	// 3. Create parent record in Store
 	created, err := store.Create(req.Context(), res, input)
 	if err != nil {
 		if isClientWriteForbiddenError(err) {
@@ -315,11 +448,11 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 	}
 
 	recID := created["id"]
+	var uploadedKeys []string
 
-	// 2. Upload pending blobs with actual record_id: blobs/{table}/{record_id}/{field}_{ts}{ext}
+	// 4. Upload pending blobs with actual record_id: blobs/{table}/{record_id}/{field}_{ts}{ext}
 	if len(pendingFiles) > 0 {
 		blobUpdates := make(map[string]any)
-		var uploadedKeys []string
 
 		for _, pf := range pendingFiles {
 			file, err := pf.header.Open()
@@ -348,7 +481,7 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 			uploadedKeys = append(uploadedKeys, blobKey)
 		}
 
-		// 3. Update created record with generated blob keys
+		// Update created record with generated blob keys
 		updated, err := store.Update(req.Context(), res, recID, blobUpdates)
 		if err != nil {
 			rt.rollbackRecordCreation(w, req, res, store, recID, uploadedKeys, err, "failed to attach blob keys to record")
@@ -357,8 +490,107 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 		created = updated
 	}
 
+	// 5. Sequentially create nested child records with compensating rollback on failure
+	type createdChildTracker struct {
+		res   *resource.Resource
+		store storage.Store
+		id    any
+	}
+	var createdChildren []createdChildTracker
+	embeddedChildrenMap := make(map[string][]storage.Record)
+
+	for _, nw := range nestedWrites {
+		childRes := nw.targetEntry.Resource
+		childStore := nw.targetEntry.Store
+		var createdForRel []storage.Record
+
+		for idx, childItem := range nw.rawItems {
+			childPayload := make(map[string]any)
+			for k, v := range childItem {
+				childPayload[k] = v
+			}
+
+			// Inject actual parent ID as foreign key
+			childPayload[nw.rel.ForeignKey] = recID
+
+			// Inject ownership field
+			if childRes.Auth != nil && childRes.Auth.OwnershipField != "" && childRes.Auth.OwnershipField != "id" {
+				if sess != nil {
+					val := sess.UserID
+					for _, f := range childRes.Fields {
+						if f.Name == childRes.Auth.OwnershipField {
+							if (f.Type == resource.TypeInt || f.Type == resource.TypeFloat) && val != nil {
+								if strVal, isStr := val.(string); isStr {
+									if parsedInt, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+										val = parsedInt
+									}
+								}
+							}
+							break
+						}
+					}
+					childPayload[childRes.Auth.OwnershipField] = val
+				} else {
+					delete(childPayload, childRes.Auth.OwnershipField)
+				}
+			}
+
+			childCreated, err := childStore.Create(req.Context(), childRes, childPayload)
+			if err != nil {
+				// Compensating rollback: hard delete all created children in reverse order, then hard delete parent
+				for i := len(createdChildren) - 1; i >= 0; i-- {
+					cc := createdChildren[i]
+					if hd, ok := cc.store.(hardDeleter); ok {
+						_ = hd.HardDeletePhysically(req.Context(), cc.res, cc.id)
+					}
+				}
+				if hd, ok := store.(hardDeleter); ok {
+					_ = hd.HardDeletePhysically(req.Context(), res, recID)
+				}
+				for _, k := range uploadedKeys {
+					if rt.blobStore != nil {
+						_ = rt.blobStore.Delete(req.Context(), k)
+					}
+				}
+
+				if isClientWriteForbiddenError(err) {
+					WriteError(w, http.StatusBadRequest, "CLIENT_WRITE_FORBIDDEN", fmt.Sprintf("nested record #%d in '%s': %v", idx+1, nw.rel.Name, err), nil)
+					return
+				}
+				if isFKConstraintError(err) {
+					WriteError(w, http.StatusBadRequest, "INVALID_FOREIGN_KEY", fmt.Sprintf("nested record #%d in '%s' referenced foreign key target does not exist: %v", idx+1, nw.rel.Name, err), nil)
+					return
+				}
+				if isUniqueConstraintError(err) {
+					WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("nested record #%d in '%s' unique constraint failed: %v", idx+1, nw.rel.Name, err), nil)
+					return
+				}
+				WriteError(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("failed creating nested record #%d in '%s': %v", idx+1, nw.rel.Name, err), nil)
+				return
+			}
+
+			childID := childCreated["id"]
+			createdChildren = append(createdChildren, createdChildTracker{
+				res:   childRes,
+				store: childStore,
+				id:    childID,
+			})
+			sanitizedChild := SanitizeRecord(childRes, childCreated)
+			createdForRel = append(createdForRel, sanitizedChild)
+		}
+
+		embeddedChildrenMap[nw.rel.Name] = createdForRel
+	}
+
 	sanitized := SanitizeRecord(res, created)
+	for relName, childrenList := range embeddedChildrenMap {
+		sanitized[relName] = childrenList
+	}
 	WriteSuccess(w, http.StatusCreated, sanitized)
+}
+
+type hardDeleter interface {
+	HardDeletePhysically(ctx context.Context, res *resource.Resource, id any) error
 }
 
 func (rt *Router) rollbackRecordCreation(w http.ResponseWriter, req *http.Request, res *resource.Resource, store storage.Store, recID any, uploadedKeys []string, originalErr error, step string) {
@@ -366,10 +598,6 @@ func (rt *Router) rollbackRecordCreation(w http.ResponseWriter, req *http.Reques
 		if rt.blobStore != nil {
 			_ = rt.blobStore.Delete(req.Context(), k)
 		}
-	}
-
-	type hardDeleter interface {
-		HardDeletePhysically(ctx context.Context, res *resource.Resource, id any) error
 	}
 
 	hd, ok := store.(hardDeleter)
