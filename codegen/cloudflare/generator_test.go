@@ -1233,3 +1233,272 @@ func TestCloudflareGenerator_NestedWritesTS(t *testing.T) {
 	t.Logf("=== EMPIRICAL GENERATED CLOUDFLARE TS NESTED WRITES CODE VERIFIED ===")
 }
 
+func TestCloudflareCodegen_MiniflareNestedWritesConstraintsAndAuthE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not found in PATH, skipping Miniflare E2E test")
+	}
+
+	minLen := 5
+	postRes := &resource.Resource{
+		Name:          "Post",
+		Table:         "posts",
+		SchemaVersion: 1,
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+			{Name: "audits", Kind: resource.KindHasMany, Target: "AuditLog", ForeignKey: "post_id"},
+		},
+	}
+
+	commentRes := &resource.Resource{
+		Name:          "Comment",
+		Table:         "comments",
+		SchemaVersion: 1,
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{MinLength: &minLen}},
+			{Name: "status", Type: resource.TypeEnum, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{Values: []string{"approved", "pending"}}},
+		},
+	}
+
+	auditRes := &resource.Resource{
+		Name:          "AuditLog",
+		Table:         "audit_logs",
+		SchemaVersion: 1,
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "role:admin",
+				Read:   "role:admin",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "action", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{Values: []string{"admin", "user"}}},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	_ = reg.Register(postRes)
+	_ = reg.Register(commentRes)
+	_ = reg.Register(auditRes)
+	_ = reg.Register(userRes)
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	for relPath, content := range out.Files {
+		fullPath := filepath.Join(tmpDir, relPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("failed creating dir: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatalf("failed writing file %s: %v", relPath, err)
+		}
+	}
+
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	}
+	cmdNpm.Dir = tmpDir
+	if outBytes, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(outBytes))
+	}
+
+	cmdEsbuild := exec.Command("npx.cmd", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdEsbuild = exec.Command("npx", "esbuild", "src/index.ts", "--bundle", "--format=esm", "--target=es2022", "--outfile=src/index.js", "--external:node:*")
+	}
+	cmdEsbuild.Dir = tmpDir
+	if outBytes, err := cmdEsbuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild failed: %v, log: %s", err, string(outBytes))
+	}
+
+	miniflareURL := filepath.ToSlash(filepath.Join(tmpDir, "node_modules", "miniflare", "dist", "src", "index.js"))
+
+	runnerJS := fmt.Sprintf(`
+import { pathToFileURL } from "node:url";
+import fs from "node:fs";
+
+async function run() {
+  const miniflareModule = await import(pathToFileURL("%s").href);
+  const { Miniflare } = miniflareModule;
+
+  const mf = new Miniflare({
+    workers: [
+      {
+        modules: true,
+        scriptPath: "./src/index.js",
+        d1Databases: ["DB"],
+        compatibilityFlags: ["nodejs_compat"]
+      }
+    ]
+  });
+
+  const db = await mf.getD1Database("DB");
+  const schemaSQL = fs.readFileSync("./schema.sql", "utf8");
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
+  }
+
+  // Create session table and seed sessions
+  await db.exec("CREATE TABLE IF NOT EXISTS _mold_sessions (id TEXT PRIMARY KEY, user_id INTEGER, role TEXT, created_at TEXT, expires_at TEXT);");
+  const futureExp = new Date(Date.now() + 86400000).toISOString();
+  await db.exec("INSERT INTO users (id, email, role) VALUES (101, 'user@test.com', 'user');");
+  await db.exec("INSERT INTO users (id, email, role) VALUES (999, 'admin@test.com', 'admin');");
+  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('sess_user_101', 101, datetime('now'), '" + futureExp + "');");
+  await db.exec("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('sess_admin_999', 999, datetime('now'), '" + futureExp + "');");
+
+  // 1. Test child min_length constraint violation -> 400 VALIDATION_FAILED + 0 DB rows
+  const resMinLen = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Cookie": "mold_session=sess_user_101" },
+    body: JSON.stringify({
+      title: "Valid Post Title",
+      comments: [
+        { body: "hi", status: "approved" }
+      ]
+    })
+  });
+  console.log("Miniflare Child Constraint (min_length) Status:", resMinLen.status);
+  const jsonMinLen = await resMinLen.json();
+  console.log("Miniflare Child Constraint (min_length) Response:", JSON.stringify(jsonMinLen));
+  if (resMinLen.status !== 400) {
+    console.error("Expected 400 for child min_length violation, got", resMinLen.status);
+    process.exit(1);
+  }
+  const count1 = await db.prepare("SELECT COUNT(*) as c FROM posts").first();
+  if (count1.c !== 0) {
+    console.error("Expected 0 posts in DB, got", count1.c);
+    process.exit(1);
+  }
+
+  // 2. Test child enum constraint violation -> 400 VALIDATION_FAILED + 0 DB rows
+  const resEnum = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Cookie": "mold_session=sess_user_101" },
+    body: JSON.stringify({
+      title: "Valid Post Title",
+      comments: [
+        { body: "Valid comment body", status: "invalid_status" }
+      ]
+    })
+  });
+  console.log("Miniflare Child Constraint (enum) Status:", resEnum.status);
+  const jsonEnum = await resEnum.json();
+  console.log("Miniflare Child Constraint (enum) Response:", JSON.stringify(jsonEnum));
+  if (resEnum.status !== 400) {
+    console.error("Expected 400 for child enum violation, got", resEnum.status);
+    process.exit(1);
+  }
+
+  // 3. Test child role:admin permission denial by normal user -> 403 FORBIDDEN + 0 DB rows
+  const resPerm = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Cookie": "mold_session=sess_user_101" },
+    body: JSON.stringify({
+      title: "Unprivileged Post",
+      audits: [
+        { action: "ILLEGAL_ADMIN_ACTION" }
+      ]
+    })
+  });
+  console.log("Miniflare Child Permission Denial Status:", resPerm.status);
+  const jsonPerm = await resPerm.json();
+  console.log("Miniflare Child Permission Denial Response:", JSON.stringify(jsonPerm));
+  if (resPerm.status !== 403) {
+    console.error("Expected 403 for child permission denial, got", resPerm.status);
+    process.exit(1);
+  }
+  const count2 = await db.prepare("SELECT COUNT(*) as c FROM posts").first();
+  const count3 = await db.prepare("SELECT COUNT(*) as c FROM audit_logs").first();
+  if (count2.c !== 0 || count3.c !== 0) {
+    console.error("Expected 0 posts and 0 audit_logs in DB, got posts=" + count2.c + " audits=" + count3.c);
+    process.exit(1);
+  }
+
+  // 4. Test valid nested write -> 201 Created + 1 parent, 1 child in DB
+  const resValid = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Cookie": "mold_session=sess_user_101" },
+    body: JSON.stringify({
+      title: "Valid Post With Comment",
+      comments: [
+        { body: "Valid comment body", status: "approved" }
+      ]
+    })
+  });
+  console.log("Miniflare Valid Nested Write Status:", resValid.status);
+  const jsonValid = await resValid.json();
+  console.log("Miniflare Valid Nested Write Response:", JSON.stringify(jsonValid));
+  if (resValid.status !== 201) {
+    console.error("Expected 201 for valid nested write, got", resValid.status);
+    process.exit(1);
+  }
+  const count4 = await db.prepare("SELECT COUNT(*) as c FROM posts").first();
+  const count5 = await db.prepare("SELECT COUNT(*) as c FROM comments").first();
+  if (count4.c !== 1 || count5.c !== 1) {
+    console.error("Expected 1 post and 1 comment in DB, got posts=" + count4.c + " comments=" + count5.c);
+    process.exit(1);
+  }
+
+  console.log("Miniflare Nested Writes Constraints and Auth Tests 100%% PASS!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error("Fatal Miniflare runner error:", err);
+  process.exit(1);
+});
+`, miniflareURL)
+
+	runnerPath := filepath.Join(tmpDir, "runner.mjs")
+	if err := os.WriteFile(runnerPath, []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing runner.mjs: %v", err)
+	}
+
+	cmdRun := exec.Command("node", "runner.mjs")
+	cmdRun.Dir = tmpDir
+	outputBytes, err := cmdRun.CombinedOutput()
+	t.Logf("Miniflare Raw Log Output:\n%s", string(outputBytes))
+	if err != nil {
+		t.Fatalf("Miniflare test runner failed: %v", err)
+	}
+}
+
+
