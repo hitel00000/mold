@@ -447,7 +447,7 @@
        - `--package-out`, `--wrangler-out`: (선택) 메타 설정 파일 경로
     3. `mold dev` 및 `mold serve` 서브커맨드 라우팅 통합.
     4. `cmd/mold` E2E 통합 테스트 수립 (`cmd/mold/codegen_test.go`).
-- [ ] **Task 12.4: 선언적 `on_delete: cascade` 및 연관 Blob (R2 / FS) 자동 청소 엔진 구현**
+- [x] **Task 12.4: 선언적 `on_delete: cascade` 및 연관 Blob (R2 / FS) 자동 청소 엔진 구현**
   - **배경**: 부모 레코드 삭제 시 자식 D1 레코드 연쇄 삭제뿐만 아니라 자식이 보유한 R2/BlobStore 이미지 파일까지 원자적으로 자동 정리하여, 소비자의 커스텀 `handleEntriesDelete` 글루 코드를 완전히 해소하고 데이터 무결성을 보장한다.
   - **작업 내용**:
     1. Resource IR `resource.Relation`에 `on_delete` 명세(`cascade`, `restrict`, `set_null`) 지원 및 DDL `ON DELETE CASCADE` 연계.

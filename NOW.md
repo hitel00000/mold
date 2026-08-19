@@ -24,8 +24,8 @@
 
 ## 현재 상태 (2026-08-19 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**, **Task 12.1 Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 100% 완결**, **Task 12.2 `POST /_mold/batch` 폐기 (불필요한 미니 ORM화 방지 합의 완결)**, **Task 12.3 Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 100% 완결**.  
-👉 **현재 상태: Task 12.3 완결 및 README.md CLI 가이드 업데이트 완료**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**, **Task 12.1 Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 100% 완결**, **Task 12.2 `POST /_mold/batch` 폐기 (불필요한 미니 ORM화 방지 합의 완결)**, **Task 12.3 Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 100% 완결**, **Task 12.4 선언적 `on_delete: cascade` 및 연관 Blob (R2/FS) 자동 청소 엔진 100% 완결**.  
+👉 **현재 상태: Task 12.4 완결 및 drink-log 마이그레이션 가이드 (`pipe/mold-drinklog/2026-08-19-mold-to-drinklog-cascade-delete-guide.md`) 배포 완료**
 
 ---
 
@@ -41,9 +41,7 @@
 
 ## 다음 할 일 (Phase 12 진행 목록)
 
-1. **Task 12.4: 선언적 `on_delete: cascade` 및 연관 Blob (R2 / FS) 자동 청소 엔진 구현**
-   - 부모 리소스 `DELETE` 시 자식 D1 레코드 연쇄 삭제 및 자식 소유 R2 Blob 객체 원자적 자동 청소 지원 (Go 및 Cloudflare TS 타깃).
-2. **Task 12.5: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
-   - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
+1. **Task 12.5: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+   - `docs/philosophy.md` Adapter 우선 원칙에 입각하여, 동일한 Resource YAML이 PostgreSQL DDL 및 쿼리로 무결하게 컴파일되는지 실증.
 
 
