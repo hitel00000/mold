@@ -447,9 +447,16 @@
        - `--package-out`, `--wrangler-out`: (선택) 메타 설정 파일 경로
     3. `mold dev` 및 `mold serve` 서브커맨드 라우팅 통합.
     4. `cmd/mold` E2E 통합 테스트 수립 (`cmd/mold/codegen_test.go`).
-  - **완료 조건**: `mold codegen` 명령어가 임의의 디렉터리에서 정상적으로 TypeScript 및 Schema SQL을 생성하고 E2E 테스트 100% 통과할 것. (완료)
+- [ ] **Task 12.4: 선언적 `on_delete: cascade` 및 연관 Blob (R2 / FS) 자동 청소 엔진 구현**
+  - **배경**: 부모 레코드 삭제 시 자식 D1 레코드 연쇄 삭제뿐만 아니라 자식이 보유한 R2/BlobStore 이미지 파일까지 원자적으로 자동 정리하여, 소비자의 커스텀 `handleEntriesDelete` 글루 코드를 완전히 해소하고 데이터 무결성을 보장한다.
+  - **작업 내용**:
+    1. Resource IR `resource.Relation`에 `on_delete` 명세(`cascade`, `restrict`, `set_null`) 지원 및 DDL `ON DELETE CASCADE` 연계.
+    2. Cloudflare TS 타깃(`codegen/cloudflare`) `DELETE /api/:table/:id` 핸들러에서 연관 자식 리소스의 `TypeBlob` 필드를 탐색하여 R2 버킷(`c.env.BUCKET.delete`)에서 파일들을 일괄 자동 청소하는 로직 탑재.
+    3. Go 런타임(`transport/handler.go`) 및 SQLite 어댑터에서도 `on_delete: cascade` 시 연관 Blob 자동 삭제 연계.
+    4. Miniflare V8 E2E 테스트(`TestCloudflareCodegen_CascadeDeleteWithBlobCleanupMiniflareEmpirical`) 및 Go E2E 테스트로 부모 삭제 시 자식 DB 행 삭제 + R2 버킷 파일 삭제 실측 검증.
+  - **완료 조건**: 부모 리소스 `DELETE` 호출 시 자식 레코드와 자식 소유 R2 Blob이 100% 자동 정리될 것.
 
-- [ ] **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+- [ ] **Task 12.5: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
   - **배경**: `docs/philosophy.md` Adapter 우선 원칙에 입각하여, 동일한 Resource YAML이 PostgreSQL DDL 및 쿼리로 무결하게 컴파일되는지 실증한다.
 
 

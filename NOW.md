@@ -41,7 +41,9 @@
 
 ## 다음 할 일 (Phase 12 진행 목록)
 
-1. **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+1. **Task 12.4: 선언적 `on_delete: cascade` 및 연관 Blob (R2 / FS) 자동 청소 엔진 구현**
+   - 부모 리소스 `DELETE` 시 자식 D1 레코드 연쇄 삭제 및 자식 소유 R2 Blob 객체 원자적 자동 청소 지원 (Go 및 Cloudflare TS 타깃).
+2. **Task 12.5: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
    - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
 
 
