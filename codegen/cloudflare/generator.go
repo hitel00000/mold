@@ -846,9 +846,9 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			}
 		}
 
+		sb.WriteString("  const uploadedBlobKeys: string[] = [];\n")
 		if hasBlob {
 			sb.WriteString("  if (created && formData) {\n")
-			sb.WriteString("    const uploadedBlobKeys: string[] = [];\n")
 			sb.WriteString("    let blobUploadError: any = null;\n")
 			for _, f := range p.Fields {
 				if f.Type == resource.TypeBlob && !f.Deprecated {
@@ -1004,6 +1004,11 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				sb.WriteString("          try {\n")
 				sb.WriteString(fmt.Sprintf("            await c.env.DB.prepare('DELETE FROM \"%s\" WHERE id = ?').bind(created.id).run();\n", table))
 				sb.WriteString("          } catch (_) {}\n")
+				sb.WriteString("          for (const key of uploadedBlobKeys) {\n")
+				sb.WriteString("            try {\n")
+				sb.WriteString("              await c.env.BUCKET.delete(key);\n")
+				sb.WriteString("            } catch (_) {}\n")
+				sb.WriteString("          }\n")
 				sb.WriteString("          const childErrMsg = String(childErr?.message || childErr);\n")
 				sb.WriteString("          if (childErrMsg.includes('UNIQUE constraint failed') || childErrMsg.includes('SQLITE_CONSTRAINT')) {\n")
 				sb.WriteString(fmt.Sprintf("            return writeError(c, 400, 'INVALID_INPUT', `nested record #${idx+1} in '%s' unique constraint failed: ${childErrMsg}`);\n", rel.Name))

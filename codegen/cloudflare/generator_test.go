@@ -1749,6 +1749,52 @@ async function run() {
     process.exit(1);
   }
 
+  // 5. Test child failure with 1-Step Multipart Blob -> D1 parent rolled back + R2 blob cleaned up
+  const formFail = new FormData();
+  formFail.set("payload", JSON.stringify({
+    title: "Post with failing nested comment",
+    comments: [
+      { body: "12345" } // Comment body with valid string but let's test if child throws or constraint fails
+    ]
+  }));
+  const failImageBytes = new TextEncoder().encode("FAILING_POST_TEMP_IMAGE_DATA");
+  formFail.set("cover_image", new File([failImageBytes], "fail.png", { type: "image/png" }));
+
+  // We can inject a UNIQUE index or trigger a child failure
+  await db.exec("CREATE UNIQUE INDEX idx_comments_body_test ON comments(body);");
+  // First insert a comment with '12345'
+  await db.prepare("INSERT INTO comments (id, body, post_id, author_id, created_at, updated_at) VALUES (999, '12345', 1, 101, datetime('now'), datetime('now'))").run();
+
+  const resFailChild = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Cookie": "mold_session=sess_author_101" },
+    body: formFail
+  });
+  console.log("Miniflare Child Failure HTTP Status:", resFailChild.status);
+  if (resFailChild.status !== 400) {
+    console.error("Expected 400 for child failure, got", resFailChild.status);
+    process.exit(1);
+  }
+
+  // Verify parent record is rolled back in D1
+  const parentCheck = await db.prepare("SELECT COUNT(*) as c FROM posts WHERE title = 'Post with failing nested comment'").first();
+  if (parentCheck.c !== 0) {
+    console.error("Parent record was not rolled back from D1:", parentCheck);
+    process.exit(1);
+  }
+
+  // Verify no orphan R2 objects exist for post ID 3 or failing post
+  const listR2 = await bucket.list({ prefix: "blobs/posts/" });
+  for (const obj of listR2.objects) {
+    const data = await bucket.get(obj.key);
+    const content = new TextDecoder().decode(await data.arrayBuffer());
+    if (content === "FAILING_POST_TEMP_IMAGE_DATA") {
+      console.error("Orphan R2 blob was NOT cleaned up upon nested write rollback:", obj.key);
+      process.exit(1);
+    }
+  }
+  console.log("Miniflare Nested Write Failure R2 Compensating Rollback Verified Clean!");
+
   console.log("Miniflare 1-Step Multipart & Blob Tests 100%% PASS!");
   await mf.dispose();
 }
