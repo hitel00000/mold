@@ -77,8 +77,8 @@ fields:
 		Addr:        "127.0.0.1:0",
 		AdminEmail:  "admin@mold.dev",
 		AdminPass:   "adminpassword123",
-		DebounceMs:  100,
-		PollMs:      50,
+		DebounceMs:  30,
+		PollMs:      15,
 	}
 
 	ds, err := NewDevServer(cfg)
@@ -143,18 +143,20 @@ fields:
 		t.Fatalf("failed writing Comment.yaml: %v", err)
 	}
 
-	// Wait for watcher poll + debounce (50ms poll + 100ms debounce + safety margin)
-	time.Sleep(600 * time.Millisecond)
-
-	// Verify /api/comments NOW exists and returns 200 OK (reloaded automatically!)
-	resp, err = client.Get(baseURL + "/api/comments")
-	if err != nil {
-		t.Fatalf("post-reload GET /api/comments failed: %v", err)
+	// Poll until /api/comments becomes 200 OK (fast path)
+	var lastStatus int
+	ok := waitFor(1500*time.Millisecond, 20*time.Millisecond, func() bool {
+		r, e := client.Get(baseURL + "/api/comments")
+		if e != nil {
+			return false
+		}
+		lastStatus = r.StatusCode
+		r.Body.Close()
+		return r.StatusCode == http.StatusOK
+	})
+	if !ok {
+		t.Fatalf("expected 200 OK for /api/comments after dev watcher reload, got %d", lastStatus)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK for /api/comments after dev watcher reload, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
 
 	// HTML View test post-reload
 	resp, err = client.Get(baseURL + "/view/comments")
@@ -192,8 +194,8 @@ fields:
 		ResourceDir: resourceDir,
 		DBPath:      dbPath,
 		Addr:        "127.0.0.1:0",
-		DebounceMs:  100,
-		PollMs:      50,
+		DebounceMs:  30,
+		PollMs:      15,
 	}
 
 	ds, err := NewDevServer(cfg)
@@ -229,8 +231,8 @@ resource:
 		t.Fatalf("failed writing Corrupted.yaml: %v", err)
 	}
 
-	// Wait for watcher poll + debounce
-	time.Sleep(600 * time.Millisecond)
+	// Wait for watcher poll + debounce (30ms debounce + 15ms poll + small margin)
+	time.Sleep(100 * time.Millisecond)
 
 	// Existing IR must remain active (200 OK for /api/posts)
 	resp, err = client.Get(baseURL + "/api/posts")
@@ -241,4 +243,15 @@ resource:
 		t.Errorf("CRITICAL: expected 200 OK for /api/posts after invalid YAML reload failure, but got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func waitFor(timeout time.Duration, interval time.Duration, condition func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return true
+		}
+		time.Sleep(interval)
+	}
+	return condition()
 }
