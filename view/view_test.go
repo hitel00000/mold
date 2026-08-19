@@ -649,3 +649,78 @@ func TestView_ClientWritable_FormSubmission_E2E(t *testing.T) {
 		t.Errorf("expected badge to default to 'bronze', got %v", records[0]["badge"])
 	}
 }
+
+func TestView_HasMany_IncludeE2E(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_view_has_many.db")
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := t.Context()
+
+	postRes := &resource.Resource{
+		Name:          "Post",
+		Table:         "posts",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+		},
+	}
+
+	commentRes := &resource.Resource{
+		Name:          "Comment",
+		Table:         "comments",
+		SchemaVersion: 1,
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, postRes)
+	_ = store.EnsureSchema(ctx, commentRes)
+
+	p1, _ := store.Create(ctx, postRes, storage.Record{"title": "View Post 1"})
+	_, _ = store.Create(ctx, commentRes, storage.Record{"post_id": p1["id"], "body": "View Comment 101"})
+
+	reg := transport.NewRegistry()
+	reg.Register(postRes, store)
+	reg.Register(commentRes, store)
+
+	router := transport.NewRouter(reg)
+	vh, err := view.NewViewHandler(router, nil)
+	if err != nil {
+		t.Fatalf("failed NewViewHandler: %v", err)
+	}
+
+	ts := httptest.NewServer(vh)
+	defer ts.Close()
+
+	// 1. Test GET /view/posts?include=comments
+	resp, err := ts.Client().Get(ts.URL + "/view/posts?include=comments")
+	if err != nil {
+		t.Fatalf("failed GET /view/posts: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for SSR view with has_many include, got %d", resp.StatusCode)
+	}
+
+	// 2. Test GET /view/posts/:id?include=comments
+	respDetail, err := ts.Client().Get(fmt.Sprintf("%s/view/posts/%v?include=comments", ts.URL, p1["id"]))
+	if err != nil {
+		t.Fatalf("failed GET detail: %v", err)
+	}
+	defer respDetail.Body.Close()
+	if respDetail.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for SSR detail view with has_many include, got %d", respDetail.StatusCode)
+	}
+}
+

@@ -472,4 +472,123 @@ func TestDrinkLogPilot_CREATE_OwnershipAutoInjection_HTTP(t *testing.T) {
 	}
 }
 
+func TestDrinkLogPilot_HasMany_IncludeE2E(t *testing.T) {
+	resDir := filepath.Join("..", "drink-log-pilot")
+	dbPath := filepath.Join(t.TempDir(), "pilot_has_many.db")
+
+	app, err := runtime.New(runtime.Config{ResourceDir: resDir, DBPath: dbPath})
+	if err != nil {
+		t.Fatalf("failed initializing runtime App: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+
+	// 1. Seed User 501
+	userRec, err := app.CreateRecord(ctx, "User", map[string]any{
+		"provider":         "google",
+		"provider_user_id": "g_user_501",
+		"email":            "user501@example.com",
+		"role":             "user",
+	})
+	if err != nil {
+		t.Fatalf("failed creating User record: %v", err)
+	}
+	userID := userRec["id"].(int64)
+
+	cookieVal, _, err := app.IssueSessionForUser(ctx, userID, "admin")
+	if err != nil {
+		t.Fatalf("failed issuing session for user %d: %v", userID, err)
+	}
+
+	// 2. Create SakeRecord for User 501
+	sakeRec, err := app.CreateRecord(ctx, "SakeRecord", map[string]any{
+		"name":          "Dassai 23",
+		"consumed_date": "2026-08-19T12:00:00Z",
+		"owner_id":      fmt.Sprintf("%v", userID),
+	})
+	if err != nil {
+		t.Fatalf("failed creating SakeRecord: %v", err)
+	}
+	sakeID := sakeRec["id"]
+
+	// 3. Seed Tag
+	tagRec, err := app.CreateRecord(ctx, "Tag", map[string]any{
+		"tag_group": "taste",
+		"label":     "Fruity",
+		"owner_id":  nil,
+	})
+	if err != nil {
+		t.Fatalf("failed creating Tag: %v", err)
+	}
+	tagID := tagRec["id"]
+
+	// 4. Seed SakeImage and RecordTag pointing to SakeRecord
+	imgRec, err := app.CreateRecord(ctx, "SakeImage", map[string]any{
+		"record_id":     sakeID,
+		"owner_id":      fmt.Sprintf("%v", userID),
+		"mime_type":     "image/jpeg",
+		"file_name":     "img1.jpg",
+		"display_order": 0,
+	})
+	if err != nil {
+		t.Fatalf("failed creating SakeImage: %v", err)
+	}
+	_ = imgRec
+
+	recTag, err := app.CreateRecord(ctx, "RecordTag", map[string]any{
+		"sake_record_id": sakeID,
+		"tag_id":         fmt.Sprintf("%v", tagID),
+	})
+	if err != nil {
+		t.Fatalf("failed creating RecordTag: %v", err)
+	}
+	_ = recTag
+
+	// 5. Test HTTP GET /api/sake_records?include=images,record_tags
+	req, _ := http.NewRequest(http.MethodGet, "/api/sake_records?include=images,record_tags", nil)
+	req.Header.Set("Cookie", cookieVal)
+
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, req)
+
+	t.Logf("=== DRINK-LOG PILOT HAS_MANY INCLUDE RESPONSE ===")
+	t.Logf("Status: %d\nBody:\n%s", w.Code, w.Body.String())
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed decoding JSON: %v", err)
+	}
+
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 SakeRecord, got %d", len(resp.Data))
+	}
+
+	record := resp.Data[0]
+	images, ok := record["images"].([]any)
+	if !ok || len(images) != 1 {
+		t.Fatalf("expected images array with 1 item, got: %v", record["images"])
+	}
+	img0 := images[0].(map[string]any)
+	if img0["file_name"] != "img1.jpg" {
+		t.Errorf("expected file_name 'img1.jpg', got: %v", img0["file_name"])
+	}
+
+	recordTags, ok := record["record_tags"].([]any)
+	if !ok || len(recordTags) != 1 {
+		t.Fatalf("expected record_tags array with 1 item, got: %v", record["record_tags"])
+	}
+	recTag0 := recordTags[0].(map[string]any)
+	if recTag0["tag_id"] != fmt.Sprintf("%v", tagID) {
+		t.Errorf("expected tag_id %v, got: %v", tagID, recTag0["tag_id"])
+	}
+}
+
+
 

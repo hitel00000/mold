@@ -19,6 +19,7 @@ import (
 	"github.com/hitel00000/mold/auth"
 	"github.com/hitel00000/mold/resource"
 	"github.com/hitel00000/mold/runtime"
+	"github.com/hitel00000/mold/storage"
 	"github.com/hitel00000/mold/transport"
 	"github.com/hitel00000/mold/view"
 	"strings"
@@ -968,5 +969,43 @@ fields:
 	})
 }
 
+func BenchmarkEvaluate_1000Records(b *testing.B) {
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Auth: &resource.Auth{
+			OwnershipField: "owner_id",
+			Permissions: resource.Permissions{
+				Read: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString},
+			{Name: "owner_id", Type: resource.TypeInt, Nullable: true},
+		},
+	}
 
+	records := make([]storage.Record, 1000)
+	for i := 0; i < 1000; i++ {
+		records[i] = storage.Record{
+			"id":       i + 1,
+			"name":     fmt.Sprintf("Tag %d", i+1),
+			"owner_id": 501,
+		}
+	}
+	sess := &auth.Session{ID: "sess_501", UserID: 501, Role: "user"}
 
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		allowedCount := 0
+		for _, rec := range records {
+			_, allowed, _ := auth.Evaluate(sess, tagRes, auth.ActionRead, rec, nil)
+			if allowed {
+				allowedCount++
+			}
+		}
+		if allowedCount != 1000 {
+			b.Fatalf("unexpected allowed count: %d", allowedCount)
+		}
+	}
+}
