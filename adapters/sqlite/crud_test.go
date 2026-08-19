@@ -188,3 +188,55 @@ func TestList_IDsBatchQuery(t *testing.T) {
 	}
 }
 
+func TestList_FilterSliceINQuery(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:mem_crud_filter_in?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewStore(db)
+	childRes := &resource.Resource{
+		Name:  "ChildItem",
+		Table: "child_items",
+		Fields: []resource.Field{
+			{Name: "parent_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+	if err := store.EnsureSchema(ctx, childRes); err != nil {
+		t.Fatalf("EnsureSchema failed: %v", err)
+	}
+
+	_, _ = store.Create(ctx, childRes, storage.Record{"parent_id": 10, "name": "Child 10-A"})
+	_, _ = store.Create(ctx, childRes, storage.Record{"parent_id": 10, "name": "Child 10-B"})
+	_, _ = store.Create(ctx, childRes, storage.Record{"parent_id": 20, "name": "Child 20-A"})
+	_, _ = store.Create(ctx, childRes, storage.Record{"parent_id": 30, "name": "Child 30-A"})
+
+	// 1. Query with []any slice in Filter
+	list, err := store.List(ctx, childRes, storage.Query{
+		Filter: map[string]any{
+			"parent_id": []any{10, 20},
+		},
+	})
+	if err != nil {
+		t.Fatalf("List with slice filter failed: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 records for parent_id IN (10, 20), got %d", len(list))
+	}
+
+	// 2. Query with empty slice in Filter -> 0 results
+	emptyList, err := store.List(ctx, childRes, storage.Query{
+		Filter: map[string]any{
+			"parent_id": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("List with empty slice filter failed: %v", err)
+	}
+	if len(emptyList) != 0 {
+		t.Fatalf("expected 0 records for empty slice filter, got %d", len(emptyList))
+	}
+}

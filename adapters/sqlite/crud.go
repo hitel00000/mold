@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -126,6 +127,23 @@ func (s *Store) List(ctx context.Context, res *resource.Resource, query storage.
 	}
 
 	for k, v := range query.Filter {
+		if v == nil {
+			querySQL += fmt.Sprintf(` AND "%s" IS NULL`, k)
+			continue
+		}
+		if sliceVal, ok := toAnySlice(v); ok {
+			if len(sliceVal) == 0 {
+				querySQL += ` AND 1=0`
+			} else {
+				placeholders := make([]string, len(sliceVal))
+				for i, elem := range sliceVal {
+					placeholders[i] = "?"
+					args = append(args, elem)
+				}
+				querySQL += fmt.Sprintf(` AND "%s" IN (%s)`, k, strings.Join(placeholders, ", "))
+			}
+			continue
+		}
 		querySQL += fmt.Sprintf(` AND "%s" = ?`, k)
 		args = append(args, v)
 	}
@@ -295,3 +313,49 @@ func scanRows(rows *sql.Rows) ([]storage.Record, error) {
 
 	return results, rows.Err()
 }
+
+func toAnySlice(v any) ([]any, bool) {
+	if v == nil {
+		return nil, false
+	}
+	switch s := v.(type) {
+	case []any:
+		return s, true
+	case []int:
+		res := make([]any, len(s))
+		for i, item := range s {
+			res[i] = item
+		}
+		return res, true
+	case []int64:
+		res := make([]any, len(s))
+		for i, item := range s {
+			res[i] = item
+		}
+		return res, true
+	case []string:
+		res := make([]any, len(s))
+		for i, item := range s {
+			res[i] = item
+		}
+		return res, true
+	case []float64:
+		res := make([]any, len(s))
+		for i, item := range s {
+			res[i] = item
+		}
+		return res, true
+	}
+
+	val := reflect.ValueOf(v)
+	if val.Kind() == reflect.Slice {
+		res := make([]any, val.Len())
+		for i := 0; i < val.Len(); i++ {
+			res[i] = val.Index(i).Interface()
+		}
+		return res, true
+	}
+
+	return nil, false
+}
+
