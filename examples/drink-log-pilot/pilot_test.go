@@ -590,5 +590,155 @@ func TestDrinkLogPilot_HasMany_IncludeE2E(t *testing.T) {
 	}
 }
 
+func TestDrinkLogPilot_NestedWritesE2E(t *testing.T) {
+	resDir := filepath.Join("..", "drink-log-pilot")
+	dbPath := filepath.Join(t.TempDir(), "pilot_nested_writes.db")
+
+	cfg := runtime.Config{
+		ResourceDir: resDir,
+		DBPath:      dbPath,
+	}
+
+	app, err := runtime.New(cfg)
+	if err != nil {
+		t.Fatalf("failed initializing runtime App with pilot resources: %v", err)
+	}
+	defer app.Close()
+
+	ctx := context.Background()
+
+	// 1. Seed Admin User 501
+	userRec, err := app.CreateRecord(ctx, "User", map[string]any{
+		"provider":         "google",
+		"provider_user_id": "g_user_nested_writes",
+		"email":            "nested_writes_pilot@example.com",
+		"role":             "admin",
+	})
+	if err != nil {
+		t.Fatalf("failed creating User record: %v", err)
+	}
+
+	var userID int64
+	switch v := userRec["id"].(type) {
+	case int64:
+		userID = v
+	case float64:
+		userID = int64(v)
+	case int:
+		userID = int64(v)
+	default:
+		t.Fatalf("unexpected id type for User: %T", userRec["id"])
+	}
+
+	// 2. Issue session cookie
+	cookieVal, _, err := app.IssueSessionForUser(ctx, userID, "admin")
+	if err != nil {
+		t.Fatalf("failed IssueSessionForUser: %v", err)
+	}
+
+	// 3. Seed Tag
+	tagRec, err := app.CreateRecord(ctx, "Tag", map[string]any{
+		"drink_type": "sake",
+		"tag_group":  "taste",
+		"label":      "Sweet & Floral",
+		"owner_id":   nil,
+		"is_default": true,
+	})
+	if err != nil {
+		t.Fatalf("failed creating Tag record: %v", err)
+	}
+	tagID := fmt.Sprintf("%v", tagRec["id"])
+
+	// 4. Test 1-Step Nested Write POST /api/sake_records with 2 images and 1 record_tag
+	nestedPayload := map[string]any{
+		"name":          "Dassai 23 Junmai Daiginjo",
+		"drink_type":    "sake",
+		"consumed_date": "2026-08-19T17:00:00Z",
+		"one_line_note": "Aromatic melon notes with crystal clean finish",
+		"images": []map[string]any{
+			{
+				"mime_type":     "image/jpeg",
+				"file_name":     "dassai23_front.jpg",
+				"display_order": 1,
+			},
+			{
+				"mime_type":     "image/jpeg",
+				"file_name":     "dassai23_label.jpg",
+				"display_order": 2,
+			},
+		},
+		"record_tags": []map[string]any{
+			{
+				"tag_id": tagID,
+			},
+		},
+	}
+
+	payloadBytes, _ := json.Marshal(nestedPayload)
+	req, _ := http.NewRequest(http.MethodPost, "/api/sake_records", strings.NewReader(string(payloadBytes)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", cookieVal)
+
+	w := httptest.NewRecorder()
+	app.ServeHTTP(w, req)
+
+	t.Logf("=== [RAW HTTP PROOF - Drink-Log Pilot Nested Writes 201 Created Response] ===")
+	t.Logf("Status: %d\nBody:\n%s", w.Code, w.Body.String())
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed decoding JSON response: %v", err)
+	}
+
+	recordID := resp.Data["id"]
+	if recordID == nil {
+		t.Fatalf("expected created SakeRecord to have id")
+	}
+
+	// Verify embedded images array
+	images, ok := resp.Data["images"].([]any)
+	if !ok || len(images) != 2 {
+		t.Fatalf("expected images array with 2 items in response, got: %v", resp.Data["images"])
+	}
+	img1 := images[0].(map[string]any)
+	if img1["file_name"] != "dassai23_front.jpg" {
+		t.Errorf("expected file_name 'dassai23_front.jpg', got: %v", img1["file_name"])
+	}
+
+	// Verify embedded record_tags array
+	recordTags, ok := resp.Data["record_tags"].([]any)
+	if !ok || len(recordTags) != 1 {
+		t.Fatalf("expected record_tags array with 1 item in response, got: %v", resp.Data["record_tags"])
+	}
+	rt0 := recordTags[0].(map[string]any)
+	if rt0["tag_id"] != tagID {
+		t.Errorf("expected tag_id %v, got: %v", tagID, rt0["tag_id"])
+	}
+
+	// 5. Verify database records
+	var imageCount int
+	if err := app.Store().DB().QueryRow("SELECT COUNT(*) FROM sake_images WHERE record_id = ?", recordID).Scan(&imageCount); err != nil {
+		t.Fatalf("failed querying sake_images: %v", err)
+	}
+	if imageCount != 2 {
+		t.Errorf("expected 2 SakeImage rows in DB, got %d", imageCount)
+	}
+
+	var tagCount int
+	if err := app.Store().DB().QueryRow("SELECT COUNT(*) FROM record_tags WHERE sake_record_id = ?", recordID).Scan(&tagCount); err != nil {
+		t.Fatalf("failed querying record_tags: %v", err)
+	}
+	if tagCount != 1 {
+		t.Errorf("expected 1 RecordTag row in DB, got %d", tagCount)
+	}
+}
+
+
 
 
