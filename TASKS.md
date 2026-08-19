@@ -395,3 +395,25 @@
     3. 실 프로덕션([https://drink-log.pages.dev](https://drink-log.pages.dev)) 배포 및 E2E 정상 동작 확인.
     4. 회고 문서 `docs/retrospectives/drink-log-production-cutover.md` 수립.
 
+### Phase 11: 관계형 기능 확장 (Eager Loading & Nested Writes)
+
+- [x] **Task 11.1: `has_many` 관계 Eager Loading (`?include=`) 확장**
+  - **작업 내용**:
+    1. **Storage 어댑터 Slice IN 필터링 지원**: `adapters/sqlite/crud.go`의 `List`에서 `query.Filter[col]` 슬라이스 입력 시 `AND "col" IN (?, ?, ...)` 쿼리 빌드 및 빈 슬라이스 방어(`AND 1=0`) 추가.
+    2. **Transport `ProcessIncludes` 확장**: `transport/include.go`에서 `KindHasMany` 지원. 부모 레코드 ID를 모아 단일 DB 배치 쿼리(`WHERE fk IN (parentIDs)`) 실행.
+    3. **메모리 권한 검증 및 정제**: 각 자식 레코드별 `auth.Evaluate(ActionRead)` 및 `SanitizeRecord` 수행. 부모 레코드당 50건 초과 시 `400 INCLUDE_TOO_LARGE`로 거절. 자식이 0건인 경우 `[]` 빈 배열 반환.
+    4. **2-depth 점 체이닝 거절**: `?include=record_tags.tag` 요청 시 `400 INVALID_INCLUDE`로 명시적 거절.
+    5. **Cloudflare Workers TS 타깃 생성기 동기화**: `codegen/cloudflare/generator.go`의 `processIncludes` 함수 템플릿에 `has_many` D1 배치 쿼리, 50개 제한 검증(`INCLUDE_TOO_LARGE`), 권한 검증, 기본 `[]` 할당 구현 및 Miniflare E2E 검증 통과.
+    6. **대규모 데이터셋(10,051건) 무절단 회귀 검증 및 E2E 실측**: 전역 상한 없이 10,051건 데이터셋에서도 51번째 자식 초과를 정확히 감지하여 400 거부하고, 100개 부모의 5,000건 자식 레코드를 0건 절단 없이 100% 임베드함을 실측.
+    7. **회고 문서 수립**: 보고서 diff 수동 합성 사고 분석 회고 `docs/retrospectives/has-many-include-diff-fabrication-incident.md` 수립.
+
+- [ ] **Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B)**
+  - **가설**: `storage.Store` 인터페이스를 단일 레코드 CRUD로 순수하게 유지하면서, HTTP Transport 레이어의 순차 생성 및 보상 롤백(`HardDeletePhysically`) 오케스트레이션으로 SQLite 및 Cloudflare D1 양쪽에서 중첩 쓰기를 안전하게 지원할 수 있다.
+  - **완료 조건**:
+    1. `POST /api/{parent}` 요청 본문에 `has_many` 관계명 키로 자식 레코드 배열이 전달될 때, 부모 생성 후 자식 레코드들을 순차적으로 생성.
+    2. 부모 생성 전 자식 레코드들의 스키마 유효성 및 권한(`auth.Evaluate(ActionCreate)`), 최대 개수(50개)를 사전 검증(`pre-validation`).
+    3. 자식 레코드 생성 도중 실패 시, 이미 생성된 레코드들을 물리적으로 역순 삭제(`HardDeletePhysically`)하여 보상 롤백 수행.
+    4. 생성 성공 시 생성된 부모와 자식 레코드 전체를 201 Created로 응답.
+    5. Go 런타임 및 Cloudflare TS 런타임 동시 구현 및 E2E 테스트 검증.
+
+

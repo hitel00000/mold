@@ -22,13 +22,10 @@
 
 ---
 
-## 현재 상태 (2026-08-18 기준)
+## 현재 상태 (2026-08-19 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`, D1 데이터 0건 유실 무결성 보존, 통합 API 라우터, R2 이미지 Base64 자동 업로드 & 서빙, `main` `--no-ff` 머지 및 푸시 완료, 회고 `docs/retrospectives/drink-log-production-cutover.md` 수립)**.  
-👉 **Post-MVP: 다음 백로그 확정 (후보 (c) PostgreSQL/MySQL Storage Adapter 등)**
-
-**추가 진행**: `docs/getting-started.md` 튜토리얼 및 `examples/quickstart/` (basic / with-auth) 분리 작성 완료.
-튜토리얼 검증(dogfooding) 중 발견된 마찰에 대해 **Phase 7 전수 완결 (Task 7.1 IR 확장 기각 & glue 패턴 채택, Task 7.2 SessionUser Escape Hatch, Task 7.3 Login Email 라벨 정정, Task 7.4 Destructive Migration FAQ 및 회고 docs/retrospectives/phase7-field-level-auth-and-papercuts.md 수립)**.
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` 관계 Eager Loading (`?include=`) 100% 완결**.  
+👉 **현재 진행 중: Phase 11 Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B)**
 
 ---
 
@@ -38,19 +35,16 @@
 - **Dumb Target**: IR은 Target에 독립적이며, Target은 비즈니스 해석 없이 주어진 명세를 이행함.
 - **Invisible Infrastructure**: 개발자는 `generate`를 의식하지 않으며 소스 저장만으로 결과를 확인하는 DX를 다듬음 (`mold dev`로 가설 2 채택 완료).
 - **Explicit Layering**: `resource.NormalizeFields()` (Layer 0 IR 원천) ➔ `plan.Build()` (Layer 1 Execution Plan) ➔ Target Packages (Layer 2) 3단계 단방향 계층 형성.
+- **보고서 Diff 원칙 준수**: 보고서에 포함되는 모든 diff는 반드시 `git diff`, `git log -p`, `git show`의 raw stdout을 그대로 첨부하며, 수동 타이핑 및 편집을 영구 금지함 (`docs/retrospectives/has-many-include-diff-fabrication-incident.md`).
 
 ---
 
-## 다음 할 일 (Post-MVP - 다음 세션 시작 시 확정 필요)
+## 다음 할 일 (Phase 11: 관계형 기능 확장)
 
-*다음 후보 중 하나를 다음 세션 시작 시 사람이 최종 확정하여 진행합니다:*
+1. [x] ~~**Task 11.1: `has_many` 관계 Eager Loading (`?include=`) 확장**~~ (완료: Go 및 Cloudflare TS 런타임 100% 동기화, 50건 초과 시 `400 INCLUDE_TOO_LARGE` 거절, 점 체이닝 거절, 10,051건 무절단 회귀 실측 검증)
+2. 👉 **Task 11.2: Nested Writes (`관계형 중첩 쓰기` Option B - 순차 생성 + 보상 롤백)**:
+   - **사유**: `POST /api/{parent}` 페이로드 내 중첩된 `has_many` 자식 레코드 동시 생성 지원.
+   - **설계**: `storage.Store` 인터페이스 무변경, 사전 검증 후 순차 생성, 중간 실패 시 `HardDeletePhysically` 기반 물리적 보상 롤백.
+3. **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
+   - **사유**: 다중 Storage 백엔드 확장 (필요성 대두 시 진행).
 
-1. [x] ~~**Task 6.1: `drink-log` 실제 프로덕션 이관 구현 및 E2E 실측 검증**~~ (완료)
-2. [x] ~~**Task 6.2: Cloudflare Target D1 DDL `FOREIGN KEY ... ON DELETE RESTRICT` 강제 픽스**~~ (완료: 커밋 `9d74c02`)
-3. [x] ~~**Task 7.1~7.4: Field-level 권한 판정, SessionUser Escape Hatch, Login Email 라벨, Destructive Migration FAQ**~~ (완료: Phase 7 전수 완결)
-4. [x] ~~**Task 8.1: Ownership Field CREATE-time 자동 주입**~~ (완료: 커밋 `8e26d33`, `51752b1`, `e006899`, `25d6350`, `63b9701`)
-5. [x] ~~**Task 8.2: Client-Writable 필드 차단 (`client_writable: false`)**~~ (완료: Option A Field-level IR 확장 + 400 Bad Request 거부 + `CLIENT_WRITE_FORBIDDEN` + `ErrClientWriteForbidden` sentinel error + 5개 타깃 일관 전파)
-6. [x] ~~**Task 8.4: 얇은 Auth 레이어 (`authglue`) 및 세션 발급 핸들러**~~ (완료: 코어 0줄 변경, Pre-Account Takeover/Hijacking 차단, `authglue/README.md` 알려진 제약 문서화, `docs/retrospectives/thin-auth-glue-layer.md` 회고 수립)
-7. [x] ~~**Phase 9 & 10: `drink-log` Mold Native 전면 이관 및 프로덕션 D1/R2 실배포 완결**~~ (완료: `https://drink-log.pages.dev` 실배포, `main` `--no-ff` 머지 및 푸시 완결, `docs/retrospectives/drink-log-production-cutover.md` 회고 수립)
-8. 👉 **후보 (c) PostgreSQL / MySQL Storage Adapter 또는 Remote REST Backend Adapter 추가**:
-   - **사유**: 다중 Storage 백엔드 확장 (마세라티 원칙에 따라 필요성 확인 후 세션 시작 시 확정).
