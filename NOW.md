@@ -39,9 +39,11 @@
 
 ---
 
-## 다음 할 일 (향후 백로그 후보)
+## 다음 할 일 (Phase 12 진행 목록)
 
-1. **Task 12.3: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+1. **Task 12.3: Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 구현**
+   - 외부 Go 테스트 하네스 의존을 탈피하고, `mold codegen --dir ... --out ...` 단일 명령으로 TS 및 Schema SQL을 생성하는 공식 CLI 도구 수립.
+2. **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
    - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
 
 
