@@ -46,6 +46,9 @@ type Plan struct {
 
 	// UniqueTogether contains multi-column uniqueness constraints.
 	UniqueTogether [][]string
+
+	// HasStringID is true if the resource explicitly defines a string 'id' field (TEXT PK instead of INTEGER AUTOINCREMENT).
+	HasStringID bool
 }
 
 // Build constructs a target-agnostic Plan from a single resource.Resource IR.
@@ -86,6 +89,9 @@ func Build(res *resource.Resource) *Plan {
 	explicitNames := make(map[string]bool, len(res.Fields))
 	for _, f := range res.Fields {
 		explicitNames[f.Name] = true
+		if f.Name == "id" && f.Type == resource.TypeString {
+			p.HasStringID = true
+		}
 	}
 
 	// Single unified iteration over res.NormalizeFields() (explicit + derived FK fields)

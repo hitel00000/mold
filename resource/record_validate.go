@@ -63,9 +63,16 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	for k := range record {
 		if k == "id" {
 			if !isUpdate {
-				return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in create payload", r.Name)
+				hasStringID := false
+				if f, ok := validFields["id"]; ok && f.Type == TypeString {
+					hasStringID = true
+				}
+				if !hasStringID {
+					return fmt.Errorf("resource '%s': primary key 'id' cannot be explicitly provided in create payload", r.Name)
+				}
+			} else {
+				return fmt.Errorf("resource '%s': primary key 'id' cannot be included in update payload; pass it as the target id parameter instead", r.Name)
 			}
-			return fmt.Errorf("resource '%s': primary key 'id' cannot be included in update payload; pass it as the target id parameter instead", r.Name)
 		}
 		if systemFields[k] {
 			return fmt.Errorf("resource '%s': system column '%s' cannot be explicitly provided in write payload", r.Name, k)
@@ -86,8 +93,8 @@ func ValidateRecord(r *Resource, record map[string]any, isUpdate bool) error {
 	for name, f := range validFields {
 		val, exists := record[name]
 
-		// Required check for non-nullable fields without default values (only during Create)
-		if !isUpdate && !f.Nullable && f.Default == nil {
+		// Required check for non-nullable fields without default values (only during Create, skip 'id' PK)
+		if !isUpdate && !f.Nullable && f.Default == nil && f.Name != "id" {
 			if !exists || val == nil {
 				return fmt.Errorf("resource '%s': field '%s' is required", r.Name, f.Name)
 			}

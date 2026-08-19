@@ -109,3 +109,34 @@ func TestSQLiteSchema_GenerateIndexesSQL_UniqueTogether(t *testing.T) {
 		t.Errorf("hard_delete unique_together DDL mismatch!\nExpected:\n%s\nGot:\n%s", expectedHardIndex, indexesHard[0])
 	}
 }
+
+func TestSQLiteSchema_StringPrimaryKey(t *testing.T) {
+	tagRes := &resource.Resource{
+		Name:       "Tag",
+		Table:      "tags",
+		Timestamps: true,
+		SoftDelete: false,
+		Fields: []resource.Field{
+			{Name: "id", Type: resource.TypeString, Nullable: true},
+			{Name: "label", Type: resource.TypeString, Nullable: false},
+		},
+	}
+
+	ddl := sqlite.GenerateCreateTableSQL(tagRes)
+	expectedDDL := `CREATE TABLE IF NOT EXISTS "tags" ("id" TEXT PRIMARY KEY, "label" TEXT NOT NULL, "created_at" TEXT NOT NULL DEFAULT (DATETIME('now')), "updated_at" TEXT NOT NULL DEFAULT (DATETIME('now')));`
+	if ddl != expectedDDL {
+		t.Errorf("String PK Tag DDL mismatch!\nExpected:\n%s\nGot:\n%s", expectedDDL, ddl)
+	}
+
+	// Verify it executes cleanly on SQLite
+	dbPath := filepath.Join(t.TempDir(), "test_tag_pk.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(ddl); err != nil {
+		t.Fatalf("failed executing DDL: %v", err)
+	}
+}

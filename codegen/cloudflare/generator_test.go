@@ -2074,5 +2074,195 @@ run().catch(err => {
 	}
 }
 
+func TestCloudflareCodegen_MiniflareStringPrimaryKeyE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
+
+	userRes := &resource.Resource{
+		Name:          "User",
+		Table:         "users",
+		SchemaVersion: 1,
+		Timestamps:    true,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeEnum, Nullable: false, ClientWritable: true, Constraints: resource.Constraints{Values: []string{"admin", "user"}}},
+		},
+	}
+
+	tagRes := &resource.Resource{
+		Name:          "Tag",
+		Table:         "tags",
+		SchemaVersion: 1,
+		Timestamps:    true,
+		SoftDelete:    false,
+		Fields: []resource.Field{
+			{Name: "id", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "label", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			Permissions: resource.Permissions{
+				Create: "public",
+				Read:   "public",
+				Update: "public",
+				Delete: "public",
+			},
+		},
+	}
+
+	reg := resource.NewRegistry()
+	_ = reg.Register(userRes)
+	_ = reg.Register(tagRes)
+
+	gen := cloudflare.NewGenerator()
+	out, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("generation failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(out.IndexTS), 0644); err != nil {
+		t.Fatalf("failed writing index.ts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(out.SchemaSQL), 0644); err != nil {
+		t.Fatalf("failed writing schema.sql: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(out.PackageJSON), 0644); err != nil {
+		t.Fatalf("failed writing package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "wrangler.json"), []byte(out.WranglerConfig), 0644); err != nil {
+		t.Fatalf("failed writing wrangler.json: %v", err)
+	}
+
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	}
+	cmdNpm.Dir = tmpDir
+	if npmOut, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(npmOut))
+	}
+
+	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdBuild = exec.Command("npx", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	}
+	cmdBuild.Dir = tmpDir
+	if buildOut, err := cmdBuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild bundle failed: %v\nOutput: %s", err, string(buildOut))
+	}
+
+	workerJSPath := filepath.Join(tmpDir, "dist", "worker.js")
+	miniflareURL := filepath.ToSlash(workerJSPath)
+
+	runnerJS := fmt.Sprintf(`
+import { Miniflare } from "miniflare";
+import fs from "node:fs";
+
+async function run() {
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: "%s",
+    d1Databases: { DB: "test-db" },
+    compatibilityFlags: ["nodejs_compat"]
+  });
+
+  const db = await mf.getD1Database("DB");
+  const schemaSQL = fs.readFileSync("schema.sql", "utf8");
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
+  }
+
+  // 1. POST /api/tags without id -> should auto-generate UUID string
+  const res1 = await mf.dispatchFetch("http://localhost/api/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label: "Auto UUID Tag" })
+  });
+  console.log("POST /api/tags (omitted id) status:", res1.status);
+  const json1 = await res1.json();
+  console.log("POST /api/tags (omitted id) body:", JSON.stringify(json1));
+
+  if (res1.status !== 201 || !json1.data || typeof json1.data.id !== 'string' || json1.data.id.length !== 36) {
+    console.error("Expected 201 Created with 36-char UUID string id, got:", res1.status, json1);
+    process.exit(1);
+  }
+
+  // 2. POST /api/tags with custom ID -> should preserve custom string id
+  const customId = "tag_taste_fresh";
+  const res2 = await mf.dispatchFetch("http://localhost/api/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: customId, label: "Fresh Taste" })
+  });
+  console.log("POST /api/tags (custom id) status:", res2.status);
+  const json2 = await res2.json();
+  console.log("POST /api/tags (custom id) body:", JSON.stringify(json2));
+
+  if (res2.status !== 201 || !json2.data || json2.data.id !== customId) {
+    console.error("Expected 201 Created with custom id, got:", res2.status, json2);
+    process.exit(1);
+  }
+
+  // 3. PUT /api/tags/tag_taste_fresh -> update label without altering PK
+  const res3 = await mf.dispatchFetch("http://localhost/api/tags/" + customId, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label: "Updated Fresh Taste" })
+  });
+  console.log("PUT /api/tags/" + customId + " status:", res3.status);
+  const json3 = await res3.json();
+  console.log("PUT /api/tags/" + customId + " body:", JSON.stringify(json3));
+
+  if (res3.status !== 200 || !json3.data || json3.data.id !== customId || json3.data.label !== "Updated Fresh Taste") {
+    console.error("Expected 200 OK for PUT with unchanged custom id, got:", res3.status, json3);
+    process.exit(1);
+  }
+
+  // 4. GET /api/tags/tag_taste_fresh -> verify fetch
+  const res4 = await mf.dispatchFetch("http://localhost/api/tags/" + customId);
+  const json4 = await res4.json();
+  if (res4.status !== 200 || !json4.data || json4.data.id !== customId) {
+    console.error("Expected 200 OK for GET, got:", res4.status, json4);
+    process.exit(1);
+  }
+
+  // 5. DELETE /api/tags/tag_taste_fresh -> verify delete
+  const res5 = await mf.dispatchFetch("http://localhost/api/tags/" + customId, { method: "DELETE" });
+  const json5 = await res5.json();
+  if (res5.status !== 200 || !json5.data || json5.data.id !== customId || !json5.data.deleted) {
+    console.error("Expected 200 OK for DELETE with string id, got:", res5.status, json5);
+    process.exit(1);
+  }
+
+  console.log("Miniflare String Primary Key E2E 100%% VERIFIED!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error("Fatal Miniflare runner error:", err);
+  process.exit(1);
+});
+`, miniflareURL)
+
+	runnerPath4 := filepath.Join(tmpDir, "runner4.mjs")
+	if err := os.WriteFile(runnerPath4, []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing runner4.mjs: %v", err)
+	}
+
+	cmdRun4 := exec.Command("node", "runner4.mjs")
+	cmdRun4.Dir = tmpDir
+	outputBytes4, err := cmdRun4.CombinedOutput()
+	t.Logf("Miniflare String PK Raw Log Output:\n%s", string(outputBytes4))
+	if err != nil {
+		t.Fatalf("Miniflare string PK test runner failed: %v", err)
+	}
+}
+
 
 

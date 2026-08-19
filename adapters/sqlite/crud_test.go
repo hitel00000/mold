@@ -240,3 +240,83 @@ func TestList_FilterSliceINQuery(t *testing.T) {
 		t.Fatalf("expected 0 records for empty slice filter, got %d", len(emptyList))
 	}
 }
+
+func TestCRUD_StringPrimaryKey_UUIDAndCustomID(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:mem_crud_str_pk?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewStore(db)
+	tagRes := &resource.Resource{
+		Name:       "Tag",
+		Table:      "tags",
+		Timestamps: true,
+		SoftDelete: false,
+		Fields: []resource.Field{
+			{Name: "id", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "label", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	if err := store.EnsureSchema(ctx, tagRes); err != nil {
+		t.Fatalf("EnsureSchema failed: %v", err)
+	}
+
+	// 1. Create with omitted ID -> should auto-generate UUID string
+	createdUUID, err := store.Create(ctx, tagRes, storage.Record{
+		"label": "Auto UUID Tag",
+	})
+	if err != nil {
+		t.Fatalf("Create with omitted id failed: %v", err)
+	}
+
+	uuidID, ok := createdUUID["id"].(string)
+	if !ok || len(uuidID) != 36 {
+		t.Fatalf("expected 36-char UUID string id, got: %v", createdUUID["id"])
+	}
+
+	// Verify Get by generated UUID
+	gotUUID, err := store.Get(ctx, tagRes, uuidID)
+	if err != nil {
+		t.Fatalf("Get by UUID failed: %v", err)
+	}
+	if gotUUID["label"] != "Auto UUID Tag" {
+		t.Errorf("expected label 'Auto UUID Tag', got '%v'", gotUUID["label"])
+	}
+
+	// 2. Create with custom ID -> should preserve provided string
+	customID := "tag_taste_fresh"
+	createdCustom, err := store.Create(ctx, tagRes, storage.Record{
+		"id":    customID,
+		"label": "Fresh Taste Tag",
+	})
+	if err != nil {
+		t.Fatalf("Create with custom id failed: %v", err)
+	}
+	if createdCustom["id"] != customID {
+		t.Errorf("expected custom id '%s', got '%v'", customID, createdCustom["id"])
+	}
+
+	// Verify Get by custom ID
+	gotCustom, err := store.Get(ctx, tagRes, customID)
+	if err != nil {
+		t.Fatalf("Get by custom ID failed: %v", err)
+	}
+	if gotCustom["label"] != "Fresh Taste Tag" {
+		t.Errorf("expected label 'Fresh Taste Tag', got '%v'", gotCustom["label"])
+	}
+
+	// 3. Update should succeed without altering PK
+	updated, err := store.Update(ctx, tagRes, customID, storage.Record{
+		"label": "Updated Fresh Taste Tag",
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated["label"] != "Updated Fresh Taste Tag" || updated["id"] != customID {
+		t.Errorf("unexpected updated record: %v", updated)
+	}
+}

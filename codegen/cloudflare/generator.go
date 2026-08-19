@@ -69,11 +69,15 @@ func (g *Generator) generateSchemaSQL(resources []*resource.Resource) string {
 		p := plan.Build(res)
 
 		sb.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS \"%s\" (\n", p.Table))
-		sb.WriteString("    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT")
+		if p.HasStringID {
+			sb.WriteString("    \"id\" TEXT PRIMARY KEY")
+		} else {
+			sb.WriteString("    \"id\" INTEGER PRIMARY KEY AUTOINCREMENT")
+		}
 
 		// Target 1 Loop over plan.Fields
 		for _, f := range p.Fields {
-			if f.Deprecated {
+			if f.Deprecated || f.Name == "id" {
 				continue
 			}
 
@@ -817,6 +821,11 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 			cols = append(cols, fmt.Sprintf("\"%s\"", f.Name))
 			bindVars = append(bindVars, "?")
 
+			if f.Name == "id" && f.Type == resource.TypeString {
+				vals = append(vals, "body['id'] ? String(body['id']) : crypto.randomUUID()")
+				continue
+			}
+
 			defaultVal := "null"
 			if f.Default != nil {
 				if f.Type == resource.TypeBool || f.Type == resource.TypeInt || f.Type == resource.TypeFloat {
@@ -963,6 +972,11 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 					}
 					childCols = append(childCols, fmt.Sprintf("\"%s\"", tf.Name))
 					childBindVars = append(childBindVars, "?")
+
+					if tf.Name == "id" && tf.Type == resource.TypeString {
+						childVals = append(childVals, "childPayload['id'] ? String(childPayload['id']) : crypto.randomUUID()")
+						continue
+					}
 
 					defaultVal := "null"
 					if tf.Default != nil {
@@ -1116,7 +1130,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		setClauses := []string{}
 		updateVals := []string{}
 		for _, f := range p.Fields {
-			if f.Deprecated {
+			if f.Deprecated || f.Name == "id" {
 				continue
 			}
 			setClauses = append(setClauses, fmt.Sprintf("\"%s\" = ?", f.Name))
@@ -1300,7 +1314,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("  html += `<h1>%s List</h1>`;\n", p.ResourceName))
 		sb.WriteString(fmt.Sprintf("  html += `<a href=\"/view/%s/new\">+ New %s</a><br/><br/><table border=\"1\"><thead><tr><th>id</th>`;\n", table, p.ResourceName))
 		for _, f := range p.Fields {
-			if f.Deprecated || f.Type == resource.TypePassword {
+			if f.Deprecated || f.Type == resource.TypePassword || f.Name == "id" {
 				continue
 			}
 			sb.WriteString(fmt.Sprintf("  html += `<th>%s</th>`;\n", f.Name))
@@ -1309,7 +1323,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  for (const row of viewRecs) {\n")
 		sb.WriteString("    html += `<tr><td>${(row as any).id}</td>`;\n")
 		for _, f := range p.Fields {
-			if f.Deprecated || f.Type == resource.TypePassword {
+			if f.Deprecated || f.Type == resource.TypePassword || f.Name == "id" {
 				continue
 			}
 			sb.WriteString(fmt.Sprintf("    html += `<td>${escapeHTML((row as any)['%s'])}</td>`;\n", f.Name))
@@ -1325,7 +1339,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString(fmt.Sprintf("app.get('/view/%s/new', async (c) => {\n", table))
 		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>New %s</title></head><body><h1>New %s</h1><form method=\"POST\" action=\"/view/%s\">`;\n", p.ResourceName, p.ResourceName, table))
 		for _, f := range p.Fields {
-			if f.Deprecated || f.Type == resource.TypePassword {
+			if f.Deprecated || f.Type == resource.TypePassword || f.Name == "id" {
 				continue
 			}
 			inputType := "text"
@@ -1365,7 +1379,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  if (incErr) return incErr;\n")
 		sb.WriteString(fmt.Sprintf("  let html = `<!DOCTYPE html><html><head><title>%s Detail</title></head><body><h1>%s #${id}</h1><dl>`;\n", p.ResourceName, p.ResourceName))
 		for _, f := range p.Fields {
-			if f.Deprecated || f.Type == resource.TypePassword {
+			if f.Deprecated || f.Type == resource.TypePassword || f.Name == "id" {
 				continue
 			}
 			if f.Type == resource.TypeMarkdown {
@@ -1662,7 +1676,7 @@ func (g *Generator) generateFieldValidationTS(f plan.FieldPlan, objVar string, p
 		return sb.String()
 	}
 
-	if !isUpdate && !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob {
+	if !isUpdate && !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob && f.Name != "id" {
 		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] === undefined || %s['%s'] === null) {\n", indent, objVar, f.Name, objVar, f.Name))
 		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s is required`);\n", indent, prefixMsg, f.Name))
 		sb.WriteString(fmt.Sprintf("%s}\n", indent))

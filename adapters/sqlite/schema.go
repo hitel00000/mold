@@ -20,8 +20,12 @@ func GenerateCreateTableSQL(res *resource.Resource) string {
 	var columns []string
 	var constraints []string
 
-	// Primary key 'id' is automatically included
-	columns = append(columns, `"id" INTEGER PRIMARY KEY AUTOINCREMENT`)
+	// Primary key 'id'
+	if p.HasStringID {
+		columns = append(columns, `"id" TEXT PRIMARY KEY`)
+	} else {
+		columns = append(columns, `"id" INTEGER PRIMARY KEY AUTOINCREMENT`)
+	}
 
 	// Track explicit field names to avoid duplicates
 	fieldMap := make(map[string]bool)

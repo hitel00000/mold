@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -17,6 +18,20 @@ import (
 func (s *Store) Create(ctx context.Context, res *resource.Resource, record storage.Record) (storage.Record, error) {
 	if record == nil {
 		record = make(storage.Record)
+	}
+
+	// String PK UUID Auto-generation if resource defines string 'id' and id was omitted
+	hasStringID := false
+	for _, f := range res.Fields {
+		if f.Name == "id" && f.Type == resource.TypeString {
+			hasStringID = true
+			break
+		}
+	}
+	if hasStringID {
+		if idVal, exists := record["id"]; !exists || idVal == nil || idVal == "" {
+			record["id"] = newUUID()
+		}
 	}
 
 	if err := resource.ValidateRecord(res, record, false); err != nil {
@@ -357,5 +372,19 @@ func toAnySlice(v any) ([]any, bool) {
 	}
 
 	return nil, false
+}
+
+func newUUID() string {
+	var buf [16]byte
+	_, _ = rand.Read(buf[:])
+	buf[6] = (buf[6] & 0x0f) | 0x40 // Version 4
+	buf[8] = (buf[8] & 0x3f) | 0x80 // Variant RFC 4122
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		buf[0:4],
+		buf[4:6],
+		buf[6:8],
+		buf[8:10],
+		buf[10:16],
+	)
 }
 
