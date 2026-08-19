@@ -1524,4 +1524,254 @@ run().catch(err => {
 	}
 }
 
+func TestCloudflareCodegen_MultipartFormBlobAndNestedWritesMiniflareEmpirical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy Miniflare integration test in short mode")
+	}
+	nodePath, err := exec.LookPath("node")
+	if err != nil || nodePath == "" {
+		t.Skip("node not found in PATH")
+	}
+
+	reg := resource.NewRegistry()
+	userRes := &resource.Resource{
+		Name:       "User",
+		Table:      "users",
+		Timestamps: true,
+		Fields: []resource.Field{
+			{Name: "email", Type: resource.TypeEmail, Nullable: false, ClientWritable: true},
+			{Name: "role", Type: resource.TypeString, Nullable: false, Default: "user", ClientWritable: true},
+		},
+	}
+	postRes := &resource.Resource{
+		Name:       "Post",
+		Table:      "posts",
+		Timestamps: true,
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "cover_image", Type: resource.TypeBlob, Nullable: true, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "author_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id", OnDelete: resource.OnDeleteRestrict},
+		},
+	}
+	commentRes := &resource.Resource{
+		Name:       "Comment",
+		Table:      "comments",
+		Timestamps: true,
+		Fields: []resource.Field{
+			{Name: "body", Type: resource.TypeText, Nullable: false, ClientWritable: true},
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+		},
+		Auth: &resource.Auth{
+			OwnershipField: "author_id",
+			Permissions: resource.Permissions{
+				Create: "authenticated",
+				Read:   "public",
+				Update: "owner",
+				Delete: "owner",
+			},
+		},
+		Relations: []resource.Relation{
+			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id"},
+		},
+	}
+
+	reg.Register(userRes)
+	reg.Register(postRes)
+	reg.Register(commentRes)
+
+	gen := cloudflare.NewGenerator()
+	output, err := gen.Generate(reg)
+	if err != nil {
+		t.Fatalf("failed generate: %v", err)
+	}
+	t.Logf("Generated SchemaSQL:\n%s", output.SchemaSQL)
+
+	tmpDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte(output.PackageJSON), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "wrangler.jsonc"), []byte(output.WranglerConfig), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "schema.sql"), []byte(output.SchemaSQL), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "index.ts"), []byte(output.IndexTS), 0644)
+
+	cmdNpm := exec.Command("npm.cmd", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdNpm = exec.Command("npm", "install", "--no-audit", "--no-fund", "miniflare@^3.20241205.0", "hono@^4.7.0", "esbuild@^0.24.0")
+	}
+	cmdNpm.Dir = tmpDir
+	if out, err := cmdNpm.CombinedOutput(); err != nil {
+		t.Fatalf("npm install failed: %v\nOutput: %s", err, string(out))
+	}
+
+	cmdBuild := exec.Command("npx.cmd", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	if os.Getenv("OS") != "Windows_NT" {
+		cmdBuild = exec.Command("npx", "esbuild", "index.ts", "--bundle", "--format=esm", "--outfile=dist/worker.js", "--target=esnext", "--external:cloudflare:workers")
+	}
+	cmdBuild.Dir = tmpDir
+	if out, err := cmdBuild.CombinedOutput(); err != nil {
+		t.Fatalf("esbuild bundle failed: %v\nOutput: %s", err, string(out))
+	}
+
+	workerJSPath := filepath.Join(tmpDir, "dist", "worker.js")
+	miniflareURL := filepath.ToSlash(workerJSPath)
+
+	runnerJS := fmt.Sprintf(`
+import { Miniflare } from "miniflare";
+import fs from "node:fs";
+import { File } from "node:buffer";
+
+async function run() {
+  const mf = new Miniflare({
+    modules: true,
+    scriptPath: "%s",
+    d1Databases: { DB: "test-db" },
+    r2Buckets: { BUCKET: "test-bucket" },
+    compatibilityFlags: ["nodejs_compat"],
+  });
+
+  const db = await mf.getD1Database("DB");
+  const bucket = await mf.getR2Bucket("BUCKET");
+  const schemaSQL = fs.readFileSync("schema.sql", "utf8");
+  const cleanSQL = schemaSQL.replace(/--.*$/gm, "");
+  for (const rawStmt of cleanSQL.split(";")) {
+    const stmt = rawStmt.replace(/\s+/g, " ").trim();
+    if (stmt) {
+      await db.exec(stmt + ";");
+    }
+  }
+
+  // Seed user and session
+  await db.prepare("INSERT INTO users (id, email, role, created_at, updated_at) VALUES (101, 'author@example.com', 'user', datetime('now'), datetime('now'))").run();
+  await db.prepare("INSERT INTO _mold_sessions (id, user_id, created_at, expires_at) VALUES ('sess_author_101', 101, datetime('now'), datetime('now', '+1 day'))").run();
+
+  // 1. Test 1-Step Multipart with payload JSON + image file + nested comments
+  const dummyImageBytes = new TextEncoder().encode("SAMPLE_IMAGE_DATA_BLOB_TEST_123");
+  const imageFile = new File([dummyImageBytes], "cover.png", { type: "image/png" });
+
+  const form1 = new FormData();
+  form1.set("payload", JSON.stringify({
+    title: "Post with 1-Step Multipart Blob and Nested Comment",
+    comments: [
+      { body: "Awesome 1-step comment" }
+    ]
+  }));
+  form1.set("cover_image", imageFile);
+
+  const res1 = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Cookie": "mold_session=sess_author_101" },
+    body: form1
+  });
+  console.log("Miniflare 1-Step Multipart Status:", res1.status);
+  const json1 = await res1.json();
+  console.log("Miniflare 1-Step Multipart Response:", JSON.stringify(json1));
+
+  if (res1.status !== 201) {
+    console.error("Expected 201 Created for 1-step multipart, got", res1.status);
+    process.exit(1);
+  }
+
+  if (!json1.data || !json1.data.id || !json1.data.cover_image || !json1.data.cover_image.startsWith("blobs/posts/")) {
+    console.error("Invalid response data or blob key:", json1);
+    process.exit(1);
+  }
+  if (!json1.data.comments || json1.data.comments.length !== 1 || json1.data.comments[0].body !== "Awesome 1-step comment") {
+    console.error("Nested comment missing or incorrect:", json1);
+    process.exit(1);
+  }
+
+  const blobKey = json1.data.cover_image;
+  const r2Object = await bucket.get(blobKey);
+  if (!r2Object) {
+    console.error("Blob key not found in R2 bucket:", blobKey);
+    process.exit(1);
+  }
+  const r2Bytes = new Uint8Array(await r2Object.arrayBuffer());
+  if (r2Bytes.length !== dummyImageBytes.length || r2Bytes[0] !== dummyImageBytes[0]) {
+    console.error("R2 object byte mismatch:", r2Bytes);
+    process.exit(1);
+  }
+
+  // 2. Test Blob Download endpoint
+  const resDl = await mf.dispatchFetch("http://localhost/api/posts/" + json1.data.id + "/blob/cover_image", {
+    method: "GET"
+  });
+  console.log("Miniflare Blob Download Status:", resDl.status);
+  if (resDl.status !== 200) {
+    console.error("Expected 200 for blob download, got", resDl.status);
+    process.exit(1);
+  }
+  const dlBytes = new Uint8Array(await resDl.arrayBuffer());
+  if (dlBytes.length !== dummyImageBytes.length || dlBytes[0] !== dummyImageBytes[0]) {
+    console.error("Downloaded byte length mismatch:", dlBytes.length);
+    process.exit(1);
+  }
+
+  // 3. Test Invalid JSON in payload field -> 400 INVALID_JSON
+  const formBad = new FormData();
+  formBad.append("payload", "{ invalid_json: ");
+  const resBad = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Cookie": "mold_session=sess_author_101" },
+    body: formBad
+  });
+  console.log("Miniflare Invalid JSON in multipart status:", resBad.status);
+  if (resBad.status !== 400) {
+    console.error("Expected 400 for bad JSON in multipart, got", resBad.status);
+    process.exit(1);
+  }
+
+  // 4. Test file fallback ('file' parameter name instead of field name)
+  const formFallback = new FormData();
+  formFallback.set("payload", JSON.stringify({ title: "Post with fallback file name" }));
+  formFallback.set("file", new File([dummyImageBytes], "fallback.png", { type: "image/png" }));
+  const resFallback = await mf.dispatchFetch("http://localhost/api/posts", {
+    method: "POST",
+    headers: { "Cookie": "mold_session=sess_author_101" },
+    body: formFallback
+  });
+  console.log("Miniflare File Fallback Status:", resFallback.status);
+  const jsonFallback = await resFallback.json();
+  console.log("Miniflare File Fallback Response:", JSON.stringify(jsonFallback));
+  if (resFallback.status !== 201 || !jsonFallback.data.cover_image) {
+    console.error("Expected 201 with cover_image for file fallback, got", resFallback.status, jsonFallback);
+    process.exit(1);
+  }
+
+  console.log("Miniflare 1-Step Multipart & Blob Tests 100%% PASS!");
+  await mf.dispose();
+}
+
+run().catch(err => {
+  console.error("Fatal Miniflare runner error:", err);
+  process.exit(1);
+});
+`, miniflareURL)
+
+	runnerPath2 := filepath.Join(tmpDir, "runner2.mjs")
+	if err := os.WriteFile(runnerPath2, []byte(runnerJS), 0644); err != nil {
+		t.Fatalf("failed writing runner2.mjs: %v", err)
+	}
+
+	cmdRun2 := exec.Command("node", "runner2.mjs")
+	cmdRun2.Dir = tmpDir
+	outputBytes2, err := cmdRun2.CombinedOutput()
+	t.Logf("Miniflare Multipart Raw Log Output:\n%s", string(outputBytes2))
+	if err != nil {
+		t.Fatalf("Miniflare multipart test runner failed: %v", err)
+	}
+}
+
+
 
