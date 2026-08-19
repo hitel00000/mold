@@ -744,33 +744,12 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 				sb.WriteString("      }\n")
 
 				for _, tf := range targetPlan.Fields {
-					if tf.Deprecated {
-						continue
-					}
-					if !tf.ClientWritable {
-						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined) {\n", tf.Name))
-						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', `nested record #${idx+1} in '%s': field '%s' is not client-writable`);\n", rel.Name, tf.Name))
-						sb.WriteString("      }\n")
-						continue
-					}
-					if !tf.Nullable && tf.Default == nil && tf.Type != resource.TypeBlob && tf.Name != rel.ForeignKey && tf.Name != targetOwnership {
-						sb.WriteString(fmt.Sprintf("      if (item['%s'] === undefined || item['%s'] === null) {\n", tf.Name, tf.Name))
-						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s is required`);\n", rel.Name, tf.Name))
-						sb.WriteString("      }\n")
-					}
-					switch tf.Type {
-					case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword:
-						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'string') {\n", tf.Name, tf.Name, tf.Name))
-						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a string`);\n", rel.Name, tf.Name))
-						sb.WriteString("      }\n")
-					case resource.TypeInt, resource.TypeFloat:
-						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'number') {\n", tf.Name, tf.Name, tf.Name))
-						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a number`);\n", rel.Name, tf.Name))
-						sb.WriteString("      }\n")
-					case resource.TypeBool:
-						sb.WriteString(fmt.Sprintf("      if (item['%s'] !== undefined && item['%s'] !== null && typeof item['%s'] !== 'boolean') {\n", tf.Name, tf.Name, tf.Name))
-						sb.WriteString(fmt.Sprintf("        return writeError(c, 400, 'VALIDATION_FAILED', `nested record #${idx+1} in '%s': field %s must be a boolean`);\n", rel.Name, tf.Name))
-						sb.WriteString("      }\n")
+					if tf.Name == rel.ForeignKey || tf.Name == targetOwnership {
+						tfCopy := tf
+						tfCopy.Nullable = true
+						sb.WriteString(g.generateFieldValidationTS(tfCopy, "item", fmt.Sprintf("nested record #${idx+1} in '%s': ", rel.Name), false))
+					} else {
+						sb.WriteString(g.generateFieldValidationTS(tf, "item", fmt.Sprintf("nested record #${idx+1} in '%s': ", rel.Name), false))
 					}
 				}
 				sb.WriteString("    }\n")
@@ -782,39 +761,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 
 		// Field Loop #2 & Type Dispatch #2 (Validation derived via plan.Plan)
 		for _, f := range p.Fields {
-			if f.Deprecated {
-				continue
-			}
-
-			if !f.ClientWritable {
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined) {\n", f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'%s\\' is not client-writable');\n", f.Name))
-				sb.WriteString("  }\n")
-				continue
-			}
-
-			if !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob {
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] === undefined || body['%s'] === null) {\n", f.Name, f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s is required');\n", f.Name))
-				sb.WriteString("  }\n")
-			}
-
-			// Type Dispatch #2: IR PrimitiveType -> TS type validation
-			switch f.Type {
-			case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword:
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && typeof body['%s'] !== 'string') {\n", f.Name, f.Name, f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s must be a string');\n", f.Name))
-				sb.WriteString("  }\n")
-			case resource.TypeInt, resource.TypeFloat:
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && typeof body['%s'] !== 'number') {\n", f.Name, f.Name, f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s must be a number');\n", f.Name))
-				sb.WriteString("  }\n")
-			case resource.TypeBool:
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && typeof body['%s'] !== 'boolean') {\n", f.Name, f.Name, f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'VALIDATION_FAILED', 'field %s must be a boolean');\n", f.Name))
-				sb.WriteString("  }\n")
-			}
-
+			sb.WriteString(g.generateFieldValidationTS(f, "body", "", false))
 			// Password hashing on create
 			if f.Type == resource.TypePassword {
 				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined && body['%s'] !== null && body['%s'] !== '') {\n", f.Name, f.Name, f.Name))
@@ -1102,14 +1049,7 @@ app.get('/', (c) => c.text('Mold Cloudflare Workers Target API'));
 		sb.WriteString("  }\n")
 
 		for _, f := range p.Fields {
-			if f.Deprecated {
-				continue
-			}
-			if !f.ClientWritable {
-				sb.WriteString(fmt.Sprintf("  if (body['%s'] !== undefined) {\n", f.Name))
-				sb.WriteString(fmt.Sprintf("    return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'%s\\' is not client-writable');\n", f.Name))
-				sb.WriteString("  }\n")
-			}
+			sb.WriteString(g.generateFieldValidationTS(f, "body", "", true))
 		}
 
 		// Password hashing on update
@@ -1561,4 +1501,103 @@ func (g *Generator) generateTSConfig() string {
 }
 `
 }
+
+func (g *Generator) generateFieldValidationTS(f plan.FieldPlan, objVar string, prefixMsg string, isUpdate bool) string {
+	var sb strings.Builder
+	if f.Deprecated {
+		return ""
+	}
+
+	indent := "  "
+	if prefixMsg != "" {
+		indent = "      "
+	}
+
+	if !f.ClientWritable {
+		if prefixMsg == "" {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined) {\n", indent, objVar, f.Name))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', 'field \\'%s\\' is not client-writable');\n", indent, f.Name))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		} else {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined) {\n", indent, objVar, f.Name))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'CLIENT_WRITE_FORBIDDEN', `%sfield '%s' is not client-writable`);\n", indent, prefixMsg, f.Name))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+		return sb.String()
+	}
+
+	if !isUpdate && !f.Nullable && f.Default == nil && f.Type != resource.TypeBlob {
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] === undefined || %s['%s'] === null) {\n", indent, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s is required`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+	}
+
+	switch f.Type {
+	case resource.TypeString, resource.TypeText, resource.TypeMarkdown, resource.TypeEmail, resource.TypeURL, resource.TypePassword:
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && typeof %s['%s'] !== 'string') {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s must be a string`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		if f.Constraints.MinLength != nil {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && %s['%s'].length < %d) {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name, *f.Constraints.MinLength))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield '%s' length is less than min_length %d`);\n", indent, prefixMsg, f.Name, *f.Constraints.MinLength))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+		if f.Constraints.MaxLength != nil {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && %s['%s'].length > %d) {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name, *f.Constraints.MaxLength))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield '%s' length is greater than max_length %d`);\n", indent, prefixMsg, f.Name, *f.Constraints.MaxLength))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+		if f.Constraints.Pattern != "" {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && !new RegExp(%q).test(%s['%s'])) {\n", indent, objVar, f.Name, objVar, f.Name, f.Constraints.Pattern, objVar, f.Name))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield '%s' does not match pattern`);\n", indent, prefixMsg, f.Name))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+
+	case resource.TypeInt, resource.TypeFloat:
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && typeof %s['%s'] !== 'number') {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s must be a number`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		if f.Constraints.Min != nil {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && %s['%s'] < %v) {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name, *f.Constraints.Min))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield '%s' is less than min %v`);\n", indent, prefixMsg, f.Name, *f.Constraints.Min))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+		if f.Constraints.Max != nil {
+			sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && %s['%s'] > %v) {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name, *f.Constraints.Max))
+			sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield '%s' is greater than max %v`);\n", indent, prefixMsg, f.Name, *f.Constraints.Max))
+			sb.WriteString(fmt.Sprintf("%s}\n", indent))
+		}
+
+	case resource.TypeBool:
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && typeof %s['%s'] !== 'boolean') {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s must be a boolean`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+
+	case resource.TypeDateTime:
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null && (typeof %s['%s'] !== 'string' || isNaN(Date.parse(%s['%s'])))) {\n", indent, objVar, f.Name, objVar, f.Name, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s must be a valid datetime`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+
+	case resource.TypeEnum:
+		sb.WriteString(fmt.Sprintf("%sif (%s['%s'] !== undefined && %s['%s'] !== null) {\n", indent, objVar, f.Name, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  if (typeof %s['%s'] !== 'string') {\n", indent, objVar, f.Name))
+		sb.WriteString(fmt.Sprintf("%s    return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s must be a string`);\n", indent, prefixMsg, f.Name))
+		sb.WriteString(fmt.Sprintf("%s  }\n", indent))
+		if len(f.Constraints.Values) > 0 {
+			var quotedVals []string
+			for _, v := range f.Constraints.Values {
+				quotedVals = append(quotedVals, fmt.Sprintf("'%s'", v))
+			}
+			valsJS := fmt.Sprintf("[%s]", strings.Join(quotedVals, ", "))
+			sb.WriteString(fmt.Sprintf("%s  const allowed_%s = %s;\n", indent, f.Name, valsJS))
+			sb.WriteString(fmt.Sprintf("%s  if (!allowed_%s.includes(%s['%s'])) {\n", indent, f.Name, objVar, f.Name))
+			sb.WriteString(fmt.Sprintf("%s    return writeError(c, 400, 'VALIDATION_FAILED', `%sfield %s value '${%s['%s']}' is not in allowed enum values ${JSON.stringify(%s)}`);\n", indent, prefixMsg, f.Name, objVar, f.Name, valsJS))
+			sb.WriteString(fmt.Sprintf("%s  }\n", indent))
+		}
+		sb.WriteString(fmt.Sprintf("%s}\n", indent))
+	}
+
+	return sb.String()
+}
+
 

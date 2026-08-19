@@ -357,7 +357,15 @@ func (rt *Router) handleCreate(w http.ResponseWriter, req *http.Request, res *re
 
 			// Provide placeholder FK so ValidateRecord passes non-null check if client omitted it
 			if _, hasFK := childCopy[nw.rel.ForeignKey]; !hasFK {
-				childCopy[nw.rel.ForeignKey] = 0
+				placeholderFK := 1
+				for _, f := range childRes.Fields {
+					if f.Name == nw.rel.ForeignKey && f.Constraints.Min != nil {
+						if int(*f.Constraints.Min) > placeholderFK {
+							placeholderFK = int(*f.Constraints.Min)
+						}
+					}
+				}
+				childCopy[nw.rel.ForeignKey] = placeholderFK
 			}
 
 			// If child has ownership_field and session exists, populate from session if omitted by client
