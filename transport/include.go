@@ -205,7 +205,7 @@ func ProcessIncludes(ctx context.Context, reg *Registry, res *resource.Resource,
 				},
 			})
 			if err != nil {
-				continue
+				return fmt.Errorf("failed fetching included relation '%s': %w", rel.Name, err)
 			}
 
 			// 4. Group child records by parent FK ID, enforcing 50 records limit per parent and auth

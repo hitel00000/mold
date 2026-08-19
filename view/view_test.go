@@ -708,9 +708,19 @@ func TestView_HasMany_IncludeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed GET /view/posts: %v", err)
 	}
-	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	t.Logf("=== [RAW HTTP PROOF - SSR HTML View GET /view/posts?include=comments] ===")
+	t.Logf("HTTP Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("HTTP Headers (Content-Type): %s", resp.Header.Get("Content-Type"))
+	t.Logf("HTTP Rendered HTML Body:\n%s", string(bodyBytes))
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for SSR view with has_many include, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(bodyBytes), "View Post 1") {
+		t.Errorf("expected HTML to contain 'View Post 1'")
 	}
 
 	// 2. Test GET /view/posts/:id?include=comments
@@ -718,9 +728,19 @@ func TestView_HasMany_IncludeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed GET detail: %v", err)
 	}
-	defer respDetail.Body.Close()
+	bodyDetailBytes, _ := io.ReadAll(respDetail.Body)
+	respDetail.Body.Close()
+
+	t.Logf("=== [RAW HTTP PROOF - SSR HTML Detail View GET /view/posts/:id?include=comments] ===")
+	t.Logf("HTTP Status: %d %s", respDetail.StatusCode, http.StatusText(respDetail.StatusCode))
+	t.Logf("HTTP Headers (Content-Type): %s", respDetail.Header.Get("Content-Type"))
+	t.Logf("HTTP Rendered HTML Body:\n%s", string(bodyDetailBytes))
+
 	if respDetail.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK for SSR detail view with has_many include, got %d", respDetail.StatusCode)
+	}
+	if !strings.Contains(string(bodyDetailBytes), "View Post 1") {
+		t.Errorf("expected HTML to contain 'View Post 1'")
 	}
 }
 

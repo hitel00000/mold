@@ -746,3 +746,368 @@ func BenchmarkProcessIncludes_HasMany_1000Records(b *testing.B) {
 	}
 }
 
+func TestInclude_DotChaining_RawHTTPProof(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_dot_chain.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	tagRes := &resource.Resource{
+		Name:  "Tag",
+		Table: "tags",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "record_tags", Kind: resource.KindHasMany, Target: "RecordTag", ForeignKey: "tag_id"},
+		},
+	}
+	recordTagRes := &resource.Resource{
+		Name:  "RecordTag",
+		Table: "record_tags",
+		Fields: []resource.Field{
+			{Name: "tag_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, tagRes)
+	_ = store.EnsureSchema(ctx, recordTagRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(tagRes, store)
+	reg.Register(recordTagRes, store)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// HTTP GET /api/tags?include=record_tags.tag
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/tags?include=record_tags.tag", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	rawBodyStr := string(bodyBytes)
+
+	t.Logf("=== [RAW HTTP PROOF - Dot Chaining Rejection 400 INVALID_INCLUDE] ===")
+	t.Logf("HTTP Request: GET /api/tags?include=record_tags.tag")
+	t.Logf("HTTP Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("HTTP Response Body:\n%s", rawBodyStr)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for dot-chaining, got %d", resp.StatusCode)
+	}
+
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		t.Fatalf("failed to parse JSON error: %v", err)
+	}
+
+	if errResp.Error.Code != "INVALID_INCLUDE" {
+		t.Errorf("expected code INVALID_INCLUDE, got %s", errResp.Error.Code)
+	}
+	if !strings.Contains(errResp.Error.Message, "record_tags.tag") {
+		t.Errorf("expected message to mention 'record_tags.tag', got: %s", errResp.Error.Message)
+	}
+}
+
+func TestInclude_MixedBelongsToAndHasMany_RawHTTPProof(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_mixed.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	authorRes := &resource.Resource{
+		Name:  "Author",
+		Table: "authors",
+		Fields: []resource.Field{
+			{Name: "name", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "bio", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+		},
+	}
+
+	articleRes := &resource.Resource{
+		Name:  "Article",
+		Table: "articles",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "author_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "author", Kind: resource.KindBelongsTo, Target: "Author", ForeignKey: "author_id"},
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "article_id"},
+		},
+	}
+
+	commentRes := &resource.Resource{
+		Name:  "Comment",
+		Table: "comments",
+		Fields: []resource.Field{
+			{Name: "article_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "content", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "article", Kind: resource.KindBelongsTo, Target: "Article", ForeignKey: "article_id"},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, authorRes)
+	_ = store.EnsureSchema(ctx, articleRes)
+	_ = store.EnsureSchema(ctx, commentRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(authorRes, store)
+	reg.Register(articleRes, store)
+	reg.Register(commentRes, store)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// Seed Author
+	author, err := store.Create(ctx, authorRes, storage.Record{"name": "Alice Writer", "bio": "Science fiction author"})
+	if err != nil {
+		t.Fatalf("failed creating author: %v", err)
+	}
+	authorID := author["id"]
+
+	// Seed Article 1
+	article, err := store.Create(ctx, articleRes, storage.Record{"title": "The Future of AI", "author_id": authorID})
+	if err != nil {
+		t.Fatalf("failed creating article: %v", err)
+	}
+	articleID := article["id"]
+
+	// Seed Comments for Article 1
+	_, _ = store.Create(ctx, commentRes, storage.Record{"article_id": articleID, "content": "Fascinating read!"})
+	_, _ = store.Create(ctx, commentRes, storage.Record{"article_id": articleID, "content": "Looking forward to part 2."})
+
+	// GET /api/articles?include=author,comments
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/articles?include=author,comments", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	rawBodyStr := string(bodyBytes)
+
+	t.Logf("=== [RAW HTTP PROOF - Mixed BelongsTo & HasMany Include Response] ===")
+	t.Logf("HTTP Request: GET /api/articles?include=author,comments")
+	t.Logf("HTTP Status: %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+	t.Logf("HTTP Response Body:\n%s", rawBodyStr)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for mixed include, got %d", resp.StatusCode)
+	}
+
+	var listResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &listResp); err != nil {
+		t.Fatalf("failed to parse JSON response: %v", err)
+	}
+
+	if len(listResp.Data) != 1 {
+		t.Fatalf("expected 1 article, got %d", len(listResp.Data))
+	}
+
+	art := listResp.Data[0]
+
+	// 1. Verify belongs_to author is a single embedded object
+	authorObj, ok := art["author"].(map[string]any)
+	if !ok || authorObj == nil {
+		t.Fatalf("expected embedded author object, got: %v", art["author"])
+	}
+	if authorObj["name"] != "Alice Writer" {
+		t.Errorf("expected author name 'Alice Writer', got %v", authorObj["name"])
+	}
+
+	// 2. Verify has_many comments is an embedded array of 2 comments
+	commentsList, ok := art["comments"].([]any)
+	if !ok || commentsList == nil {
+		t.Fatalf("expected embedded comments array, got: %v", art["comments"])
+	}
+	if len(commentsList) != 2 {
+		t.Fatalf("expected 2 embedded comments, got %d", len(commentsList))
+	}
+}
+
+func TestInclude_HasMany_LargeDataset_NoSilentTruncation(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_large_dataset.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	parentRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+		},
+	}
+
+	childRes := &resource.Resource{
+		Name:  "Comment",
+		Table: "comments",
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, parentRes)
+	_ = store.EnsureSchema(ctx, childRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(parentRes, store)
+	reg.Register(childRes, store)
+
+	router := transport.NewRouter(reg)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	// 1. Seed 200 background parents, each having 50 comments (= 10,000 background child records)
+	tx, err := store.DB().Begin()
+	if err != nil {
+		t.Fatalf("failed to begin tx: %v", err)
+	}
+	stmtPost, _ := tx.Prepare(`INSERT INTO posts (title) VALUES (?)`)
+	stmtComment, _ := tx.Prepare(`INSERT INTO comments (post_id, body) VALUES (?, ?)`)
+
+	for p := 1; p <= 200; p++ {
+		res, _ := stmtPost.Exec(fmt.Sprintf("Background Post %d", p))
+		pID, _ := res.LastInsertId()
+		for c := 1; c <= 50; c++ {
+			_, _ = stmtComment.Exec(pID, fmt.Sprintf("Comment %d-%d", p, c))
+		}
+	}
+
+	// 2. Seed Target Post with 51 comments (total DB comments now = 10,051)
+	resOversized, _ := stmtPost.Exec("Oversized Post with 51 Comments")
+	oversizedPID, _ := resOversized.LastInsertId()
+	for c := 1; c <= 51; c++ {
+		_, _ = stmtComment.Exec(oversizedPID, fmt.Sprintf("Oversized Comment %d", c))
+	}
+
+	_ = stmtPost.Close()
+	_ = stmtComment.Close()
+	_ = tx.Commit()
+
+	// Verify total count in DB exceeds 10,000
+	var totalCommentsInDB int
+	_ = store.DB().QueryRow("SELECT COUNT(*) FROM comments").Scan(&totalCommentsInDB)
+	if totalCommentsInDB != 10051 {
+		t.Fatalf("expected 10051 comments in DB, got %d", totalCommentsInDB)
+	}
+
+	t.Logf("=== [RAW PROOF - Large Dataset Total Comments in DB: %d] ===", totalCommentsInDB)
+
+	// Step A: Requesting oversized post in a 10,000+ total rows database MUST return 400 INCLUDE_TOO_LARGE (no silent cutoff)
+	reqOversized, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/posts/%d?include=comments", ts.URL, oversizedPID), nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	respOversized, err := ts.Client().Do(reqOversized)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer respOversized.Body.Close()
+
+	bodyOversized, _ := io.ReadAll(respOversized.Body)
+	t.Logf("=== [RAW HTTP PROOF - 51 Records Parent Rejection in 10,000+ Row DB] ===")
+	t.Logf("HTTP Status: %d %s", respOversized.StatusCode, http.StatusText(respOversized.StatusCode))
+	t.Logf("HTTP Response Body:\n%s", string(bodyOversized))
+
+	if respOversized.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when single parent exceeds 50 children in large DB, got %d", respOversized.StatusCode)
+	}
+
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(bodyOversized, &errResp)
+	if errResp.Error.Code != "INCLUDE_TOO_LARGE" {
+		t.Errorf("expected error code INCLUDE_TOO_LARGE, got %s", errResp.Error.Code)
+	}
+
+	// Step B: Querying first 100 valid parents (100 * 50 = 5,000 records) returns all 5,000 with 0 truncation
+	reqList, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/posts?limit=100&include=comments", ts.URL), nil)
+	if err != nil {
+		t.Fatalf("failed to build list request: %v", err)
+	}
+
+	respList, err := ts.Client().Do(reqList)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer respList.Body.Close()
+
+	if respList.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for list query, got %d", respList.StatusCode)
+	}
+
+	var listData struct {
+		Data []map[string]any `json:"data"`
+	}
+	_ = json.NewDecoder(respList.Body).Decode(&listData)
+
+	if len(listData.Data) != 100 {
+		t.Fatalf("expected 100 parents, got %d", len(listData.Data))
+	}
+
+	totalEmbedded := 0
+	for _, p := range listData.Data {
+		comments := p["comments"].([]any)
+		if len(comments) != 50 {
+			t.Fatalf("truncation detected! expected 50 comments on parent %v, got %d", p["id"], len(comments))
+		}
+		totalEmbedded += len(comments)
+	}
+
+	t.Logf("=== [RAW PROOF - 100 Parents Batch Include Successfully Embedded: %d records with ZERO truncation] ===", totalEmbedded)
+	if totalEmbedded != 5000 {
+		t.Errorf("expected 5000 embedded records, got %d", totalEmbedded)
+	}
+}
+
+
