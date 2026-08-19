@@ -24,8 +24,8 @@
 
 ## 현재 상태 (2026-08-19 기준)
 
-**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**, **Task 12.1 Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 100% 완결**, **Task 12.2 `POST /_mold/batch` 폐기 (불필요한 미니 ORM화 방지 합의 완결)**.  
-👉 **현재 상태: Phase 12-1/12-2 완결 및 drink-log 파이프라인 최종 핸드오프 완료**
+**완료된 마일스톤**: Milestone 0~6 (MVP 100% 완결), Phase 1 종합 회고 완결 (`docs/retrospectives/phase1-retrospective.md`), Phase 2 `mold dev` DX 실험 완결, Phase 4 Cloudflare Workers TS+Hono+D1 Codegen & Plan 계층 실구현 완결, Phase 5 Task 5.1~5.5 완결, Phase 6 Task 6.1/6.2 완결, Task 8.1/8.2/8.4 완결, Phase 9 Mold 네이티브 이관 완결 및 **`drink-log` 실제 프로덕션 D1/R2 컷오버 및 실배포 100% 완결 (`https://drink-log.pages.dev`)**, **Task 11.1 `has_many` Eager Loading (`?include=`) 100% 완결**, **Task 11.2 Nested Writes (`관계형 중첩 쓰기` Option B) 100% 완결**, **Task 12.1 Cloudflare Workers TS 타깃 1-Step `multipart/form-data` (R2 Blob) 생성기 100% 완결**, **Task 12.2 `POST /_mold/batch` 폐기 (불필요한 미니 ORM화 방지 합의 완결)**, **Task 12.3 Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 100% 완결**.  
+👉 **현재 상태: Task 12.3 완결 및 README.md CLI 가이드 업데이트 완료**
 
 ---
 
@@ -41,9 +41,7 @@
 
 ## 다음 할 일 (Phase 12 진행 목록)
 
-1. **Task 12.3: Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 구현**
-   - 외부 Go 테스트 하네스 의존을 탈피하고, `mold codegen --dir ... --out ...` 단일 명령으로 TS 및 Schema SQL을 생성하는 공식 CLI 도구 수립.
-2. **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
+1. **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
    - 마세라티 원칙 및 Adapter 우선 원칙에 입각한 다중 스토리지 지원 실증.
 
 

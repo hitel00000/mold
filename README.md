@@ -44,7 +44,48 @@ fields:
 
 ---
 
-## 3. 핵심 문서 안내 (Repository Navigation)
+## 3. 설치 및 CLI 사용법 (Installation & Usage)
+
+### 1) Mold CLI 설치
+Go가 설치된 환경에서 아래 명령어로 전역 설치합니다:
+
+```bash
+go install github.com/hitel00000/mold/cmd/mold@latest
+```
+
+---
+
+### 2) 사용 시나리오 A: Cloudflare Workers / TypeScript 프로젝트 (Codegen)
+`resources/` 폴더의 YAML을 읽어 Hono + D1 + R2 TypeScript 코드를 생성합니다:
+
+```bash
+# TypeScript 및 Schema SQL 생성
+mold codegen --dir ./resources --out ./src/mold_app.ts --schema-out ./schema.sql
+```
+
+**💡 `package.json` 스크립트 연동 (Zero-Install / npx 스타일)**:  
+바이너리를 전역 설치하지 않고도 프로젝트 내부에서 원클릭으로 실행할 수 있습니다:
+```json
+{
+  "scripts": {
+    "codegen": "go run github.com/hitel00000/mold/cmd/mold codegen -d ./resources -o ./functions/_shared/generated/mold_app.ts",
+    "build": "npm run codegen && tsc -b && vite build"
+  }
+}
+```
+
+---
+
+### 3) 사용 시나리오 B: 독립 Go 백엔드 런타임 실행 (Standalone Server)
+별도의 백엔드 코드 작성 없이 YAML과 SQLite DB 파일만으로 즉시 REST API 및 SSR HTML 관리 화면을 실행합니다:
+
+```bash
+mold serve --dir ./resources --db ./app.db --port 8080
+```
+
+---
+
+## 4. 핵심 문서 안내 (Repository Navigation)
 
 Mold는 문서를 최소한으로 유지하며, 각 문서의 역할이 엄격하게 분리되어 있습니다.
 

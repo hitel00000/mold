@@ -435,7 +435,7 @@
     - drink-log 팀의 2차 분석(프론트엔드가 중간 조인 테이블 Row ID를 추적하고 Diffing을 계산하는 '미니 ORM'으로 비대화됨)과 Mold 팀의 자가비판(선언적 Resource 철학 위배, 런타임에 명령형 RPC/트랜잭션 스크립트 엔진 도입으로 인한 복잡도 폭발)이 완벽히 일치함.
     - 조회의 100%는 이미 `?include=`로, 생성은 `nestedWrites` 및 1-Step Multipart로 1 RTT 해결이 완결되었으므로, 불필요한 프레임워크 비대화를 막기 위해 `POST /_mold/batch`는 코어에 도입하지 않고 영구 폐기(Won't Fix)하기로 최종 확정.
 
-- [ ] **Task 12.3: Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 구현**
+- [x] **Task 12.3: Mold 통합 CLI (`cmd/mold`) 및 `mold codegen` 서브커맨드 구현**
   - **배경**: `drink-log` 등 소비자 프로젝트가 스키마 코드를 생성하기 위해 외부 Go 테스트(`go test -run TestGenerate...`)를 돌려야 했던 비정상적인 DX 마찰(`pipe/mold-drinklog/2026-08-19-drinklog-to-mold-cli-codegen-friction.md`)을 완전히 해소한다.
   - **작업 내용**:
     1. `cmd/mold/main.go` 통합 CLI 진입점 수립.
@@ -444,9 +444,10 @@
        - `--dir`, `-d`: 리소스 YAML 경로 (기본값: `./resources`)
        - `--out`, `-o`: 생성될 TypeScript 파일 경로 (기본값: `./generated/mold_app.ts`)
        - `--schema-out`: (선택) D1 Schema SQL 파일 경로
+       - `--package-out`, `--wrangler-out`: (선택) 메타 설정 파일 경로
     3. `mold dev` 및 `mold serve` 서브커맨드 라우팅 통합.
     4. `cmd/mold` E2E 통합 테스트 수립 (`cmd/mold/codegen_test.go`).
-  - **완료 조건**: `mold codegen` 명령어가 임의의 디렉터리에서 정상적으로 TypeScript 및 Schema SQL을 생성하고 E2E 테스트 100% 통과할 것.
+  - **완료 조건**: `mold codegen` 명령어가 임의의 디렉터리에서 정상적으로 TypeScript 및 Schema SQL을 생성하고 E2E 테스트 100% 통과할 것. (완료)
 
 - [ ] **Task 12.4: 다중 Storage Adapter (PostgreSQL / MySQL) 실증**
   - **배경**: `docs/philosophy.md` Adapter 우선 원칙에 입각하여, 동일한 Resource YAML이 PostgreSQL DDL 및 쿼리로 무결하게 컴파일되는지 실증한다.
