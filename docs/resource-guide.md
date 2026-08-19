@@ -130,17 +130,42 @@ constraints:
     - [sake_record_id, tag_id]   # 동일한 record-tag 연결 중복 방지
 ```
 
-### N:M Join Resource 조회 및 관계 조인 (`?include=`) 사용 가이드
+### 연관 리소스 조인 조회 (`?include=`) 사용 가이드 (Eager Loading)
 
-N:M Join Resource(예: `RecordTag`) 목록 조회 시 각 연결 레코드에 연결된 `Tag` 또는 `SakeRecord` 등의 연관 리소스 상세 정보를 단일 요청으로 함께 조회하려는 경우, 클라이언트는 `?include=` query 파라미터를 사용한다.
+부모 리소스 또는 Join Resource 조회 시 연관된 리소스의 상세 정보를 단일 요청으로 함께 조회하려는 경우, 클라이언트는 `?include=` query 파라미터를 사용한다.
 
 - **조인 조회 URL 예시**:
-  - `GET /api/record_tags?include=tag` (단일 연관 리소스 내포)
-  - `GET /api/record_tags?include=tag,sake_record` (다중 연관 리소스 내포)
-  - `GET /api/record_tags/12?include=tag` (단일 상세 조회 내포)
-  - `GET /view/record_tags?include=tag` (SSR HTML View 목록 내포)
-- **제약 조건**: `belongs_to` 연관 관계만 지정 가능하며, `has_many` 관계나 존재하지 않는 연관 이름을 지정하면 `400 Bad Request` (`code: INVALID_INCLUDE`) 에러가 반환된다.
-- **보안 및 권한**: 연관 대상 레코드의 `ActionRead` 권한이 없거나, soft-delete 되었거나, FK가 `NULL`인 경우 모두 응답상에 구별 없이 `"tag": null`로 반환되어 권한 미달 레코드 유무 탐색(열거 공격)을 차단한다.
+  - `GET /api/record_tags?include=tag` (`belongs_to` 단일 연관 객체 또는 `null` 내포)
+  - `GET /api/posts?include=comments` (`has_many` 자식 레코드 목록 배열 내포, 기본값 `[]`)
+  - `GET /api/posts?include=author,comments` (`belongs_to`와 `has_many` 복합 내포)
+  - `GET /view/posts/1?include=comments` (SSR HTML View 상세 내포)
+- **제약 조건**: 
+  - `belongs_to` 및 `has_many` 직계 1-depth 관계만 지정 가능하다.
+  - `?include=record_tags.tag`와 같은 2-depth 이상의 점 체이닝(dot-chaining)이나 존재하지 않는 관계명을 지정하면 즉시 `400 Bad Request` (`code: INVALID_INCLUDE`)로 거부된다.
+  - 단일 부모당 자식 레코드가 50건을 초과하면 `400 Bad Request` (`code: INCLUDE_TOO_LARGE`)로 거부된다.
+- **보안 및 권한**: 연관 대상 레코드의 `ActionRead` 권한이 없거나, soft-delete 되었거나, FK가 `NULL`인 경우 `belongs_to`는 `"tag": null`, `has_many`는 권한 통과 레코드만 포함되어 열거 공격을 차단한다.
+
+### 관계형 중첩 쓰기 (Nested Writes) 사용 가이드
+
+부모 리소스 생성 시 `has_many` 관계 자식 레코드들을 단일 HTTP 요청(`POST /api/{parent}`)으로 함께 생성할 수 있다.
+
+```json
+POST /api/posts
+Content-Type: application/json
+
+{
+  "title": "Post with Nested Comments",
+  "comments": [
+    { "body": "First comment" },
+    { "body": "Second comment" }
+  ]
+}
+```
+
+- **사전 검증(Pre-validation)**: 자식 리소스의 `auth.permissions.create` 권한, `client_writable: false` 위반 여부, 타입/제약조건(`min_length`, `enum values` 등)을 부모 레코드 삽입 **전에** 모두 사전 검증하여 권한 미달(403) 또는 검증 실패(400) 시 부모 레코드가 DB에 남지 않는다.
+- **물리적 보상 롤백(Compensating Rollback)**: 자식 레코드 생성 도중 UNIQUE 충돌이나 DB 실패가 발생하면 이미 생성된 자식들과 부모 레코드를 역순으로 물리적 하드 딜리트하여 0건으로 되돌린다.
+- **Multipart Form 지원**: 파일 업로드가 포함된 `multipart/form-data` 요청에서도 폼 필드로 전달된 JSON 배열 문자열을 파싱하여 부모 Blob 업로드와 중첩 자식 레코드 생성을 1-Step으로 동시 지원한다.
+- **제약 조건**: 직계 1-depth `has_many` 관계만 지원하며, 관계당 최대 50건으로 제한된다 (`400 NESTED_WRITE_TOO_LARGE`).
 
 ---
 

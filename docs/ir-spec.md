@@ -323,30 +323,58 @@ constraints:
 
 ---
 
-## 5.7 관계 조인 조회 (`?include=`) 스펙 (Task 5.2 마찰 B)
+## 5.7 관계 조인 조회 (`?include=`) 스펙 (Task 5.5 & 11.1)
 
-N:M Join Resource(예: `RecordTag`) 조회 시 클라이언트가 각 연결 레코드의 대상 리소스(`Tag` 등) 상세 정보를 확인하기 위해 N+1번의 API 요청을 보내는 마찰(Friction B)을 해소하기 위한 스펙이다. REST API(`GET /api/{table}`, `GET /api/{table}/{id}`)와 SSR HTML View(`GET /view/{table}`, `GET /view/{table}/{id}`)에서 단일 요청으로 연관 대상 리소스를 동시 조인 조회하여 내포(embed) 응답할 수 있다.
+연관 리소스 조회 시 N+1번의 개별 API 요청을 보내는 마찰을 해소하기 위한 스펙이다. REST API(`GET /api/{table}`, `GET /api/{table}/{id}`)와 SSR HTML View(`GET /view/{table}`, `GET /view/{table}/{id}`)에서 단일 요청으로 `belongs_to` (단일 객체) 및 `has_many` (배열) 연관 리소스를 동시 조인 조회하여 내포(embed) 응답할 수 있다.
 
 ### 1. 스코프 제약 및 파라미터 검증
-* **`belongs_to` 관계 전용**: `?include=` query 파라미터에는 대상 리소스의 `belongs_to` 연관 관계명만 쉼표(`,`) 구분 리스트로 지정할 수 있다 (예: `?include=tag` 또는 `?include=tag,sake_record`).
-* **strict 파라미터 거부 (`INVALID_INCLUDE`)**: 존재하지 않는 관계명이거나 `has_many` 관계명이 `?include=`에 지정될 경우, 조용히 무시하지 않고 즉시 **HTTP 400 Bad Request** (`code: INVALID_INCLUDE`, message: `"invalid relation '...' for include"`) 에러를 반환한다.
+* **지원 관계 종류**: `?include=` query 파라미터에는 대상 리소스의 `belongs_to` 및 `has_many` 연관 관계명을 쉼표(`,`) 구분 리스트로 지정할 수 있다 (예: `?include=tag,comments`).
+* **strict 파라미터 거부 (`INVALID_INCLUDE`)**: 존재하지 않는 관계명이 `?include=`에 지정되거나, 2-depth 이상의 점 체이닝(dot-chaining, 예: `?include=record_tags.tag`)이 전달되면 조용히 무시하지 않고 즉시 **HTTP 400 Bad Request** (`code: INVALID_INCLUDE`, message: `"invalid relation '...' for include"`) 에러를 반환한다.
 
-### 2. N+1 배치 쿼리 최적화 (`WHERE id IN (...)`)
-* 메인 레코드 목록 조회 후, 지정된 연관 리소스별로 외래 키(FK) 값들을 고유 집합으로 수집(deduplicate)한다.
-* 연관 리소스 Storage 어댑터의 `List(ctx, res, storage.Query{IDs: fkVals})` 배치 쿼리를 실행하여 단 1회의 `WHERE "id" IN (?, ?, ...)` 쿼리로 대상 레코드들을 일괄 가져온다. N개의 메인 레코드에 대해 1회의 배치 쿼리만 발생하므로 N+1 쿼리를 완전히 방지한다.
+### 2. N+1 배치 쿼리 최적화 (`WHERE id IN (...)` / `WHERE fk IN (...)`)
+* **`belongs_to`**: 메인 레코드 목록의 FK 값들을 고유 집합으로 수집(deduplicate)하여 `WHERE "id" IN (?, ?, ...)` 단일 배치 쿼리로 대상 레코드들을 일괄 가져온다.
+* **`has_many`**: 메인 레코드들의 `id` 목록을 고유 집합으로 수집하여 `WHERE "fk_field" IN (?, ?, ...)` 단일 배치 쿼리로 자식 레코드들을 일괄 가져온다. N개의 부모 레코드에 대해 단 1회의 자식 배치 쿼리만 실행되므로 N+1 문제를 완전히 해결한다.
 
-### 3. 권한 평가 및 식별 불가 `null` 안전 보장 (보안 메트릭스)
-연관 대상 레코드가 개별적으로 조회되어 메인 응답에 포함(embed)될 때, 각 연관 레코드 객체는 아래 4가지 시나리오에 따라 안전하게 처리된다:
+### 3. 상한 제한 (50건) 및 권한 평가
+* **부모당 자식 상한 50건**: 단일 부모 레코드에 매칭되는 자식 레코드가 50건을 초과하면 조용히 자르지 않고 즉시 **HTTP 400 Bad Request** (`code: INCLUDE_TOO_LARGE`, message: `"nested records for relation '...' exceed limit of 50"`) 에러를 반환한다.
+* **기본값**: 매칭되는 자식이 0건인 경우 `null`이 아닌 `[]` (빈 배열)을 기본 할당한다.
+* **보안 및 권한 평가**: 각 자식 레코드별로 `auth.Evaluate(ActionRead)` 및 `SanitizeRecord` (비밀번호 필드 제거)가 적용된다. 읽기 권한이 없는 자식 레코드는 결과 목록에서 안전하게 제외된다.
 
-| 시나리오 | 연관 대상 상태 | 반환 형태 | 비고 |
-|---------|----------------|-----------|------|
-| (a) 읽기 허용 | `ActionRead` 권한 통과 (`auth.Evaluate` OK) | `tag: { id: 1, name: "..." }` | Sanitize 적용된 객체 내포 |
-| (b) 읽기 거부 | `ActionRead` 권한 거부 (Unauthorized/Forbidden) | `tag: null` | 정보 유출 차단 |
-| (c) FK 미설정 | 메인 레코드의 FK 값이 `NULL` | `tag: null` | 정상적인 null 관계 |
-| (d) Soft-Deleted | 연관 대상 레코드가 삭제됨 (`deleted_at != null`) | `tag: null` | Soft-deleted 숨김 |
+---
 
-* **식별 불가능성(Indistinguishability) 원칙**: 권한 거부(b), FK NULL(c), Soft-deleted(d) 3가지 경우 모두 메인 응답의 JSON/Map 상에서 동일하게 `"relation_name": null`로 직렬화되며 구조적/에러상 어떠한 차이점도 노출하지 않는다. 이를 통해 열거 공격(enumeration attack)이나 권한 미달 레코드의 존재 유무 피싱을 원천 차단한다.
-* **응답 정제 (Sanitization)**: 내포되는 연관 객체는 메인 레코드와 동일하게 `SanitizeRecord` (비밀번호 필드 제거 등)가 강제 적용된 후 포함된다.
+## 5.8 관계형 중첩 쓰기 (Nested Writes, Option B) 스펙 (Phase 11 Task 11.2)
+
+부모 리소스 생성 시 1-depth `has_many` 관계 자식 레코드들을 단일 HTTP 요청(`POST /api/{parent}`)으로 동시 생성할 수 있는 스펙이다.
+
+```json
+POST /api/posts
+Content-Type: application/json
+
+{
+  "title": "Post with Comments",
+  "comments": [
+    { "body": "First nested comment" },
+    { "body": "Second nested comment" }
+  ]
+}
+```
+
+### 1. 스펙 및 제약 조건
+* **지원 스코프**: 1-depth 직계 `has_many` 관계만 지원한다.
+* **관계당 최대 50건 상한**: `body[rel.Name]` 배열 길이가 50건을 초과하면 부모 생성 전에 즉시 **HTTP 400 Bad Request** (`code: NESTED_WRITE_TOO_LARGE`, message: `"nested records for relation '...' exceed limit of 50"`)로 거부한다.
+* **Multipart Form 지원**: `multipart/form-data` 요청에서도 폼 필드로 전달된 JSON 배열 문자열을 파싱하여 부모 Blob 파일 업로드와 중첩 자식 레코드 생성을 단일 요청으로 원자적 처리할 수 있다.
+
+### 2. 엄격한 사전 검증 (Pre-validation Before Parent Create)
+부모 레코드가 DB에 삽입되기 전에, 모든 중첩 자식 레코드들에 대해 다음 검증을 먼저 완결하여 **DB 오염(dangling parent)을 원천 차단**한다:
+1. **자식 권한 검증**: 요청자의 세션에 대해 각 자식 리소스의 `auth.Evaluate(ActionCreate)`를 평가한다. 권한 미달 시 즉시 `403 Forbidden`을 반환하며 부모 레코드는 0건 생성된다.
+2. **클라이언트 쓰기 제한 검증**: 자식 필드 중 `client_writable: false`인 필드가 포함되어 있으면 즉시 `400 CLIENT_WRITE_FORBIDDEN`으로 거절한다.
+3. **타입 및 제약조건 검증**: `min_length`, `max_length`, `pattern`, `min`, `max`, `enum values`, `datetime` 등 Resource IR에 선언된 모든 제약조건을 검증한다. FK 및 소유자 필드는 서버에서 자동 주입되므로 필수값 체크는 우회하되 제약조건 검증은 유지한다.
+
+### 3. 순차 생성 및 물리적 보상 롤백 (Compensating Rollback)
+* `storage.Store` 인터페이스를 단일 레코드 CRUD로 순수하게 유지하면서(No Multi-table Transaction), HTTP Transport 레이어에서 순차 생성과 보상 롤백을 오케스트레이션한다.
+* 부모 생성 ➔ 생성된 부모 ID를 자식 레코드의 FK 컬럼에 주입 ➔ 자식 레코드 순차 생성.
+* 자식 레코드 생성 도중 실패(예: UNIQUE 충돌, DB 에러 등)가 발생하면, 요청 스코프에서 이미 생성된 자식 레코드들과 부모 레코드를 **생성의 역순으로 물리적 하드 딜리트(`HardDeletePhysically` / `DELETE FROM table WHERE id = ?`)**하여 DB를 0건 상태로 롤백한다.
+* **응답**: 성공 시 생성된 부모 레코드와 자식 레코드 배열 전체를 내포(embed)하여 `201 Created`로 반환한다.
 
 ---
 
