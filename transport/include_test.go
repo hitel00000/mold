@@ -87,18 +87,18 @@ func TestInclude_ValidationAndErrors(t *testing.T) {
 		t.Errorf("expected error message to contain 'non_existent', got %s", errEnv.Error.Message)
 	}
 
-	// 2. has_many relation specified in ?include=
-	resp, err = client.Get(ts.URL + "/api/tags?include=record_tags")
+	// 2. 2-depth dot-chaining specified in ?include= (e.g. record_tags.tag)
+	resp, err = client.Get(ts.URL + "/api/tags?include=record_tags.tag")
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request for has_many include, got %d", resp.StatusCode)
+		t.Fatalf("expected 400 Bad Request for dot-chaining include, got %d", resp.StatusCode)
 	}
 	json.NewDecoder(resp.Body).Decode(&errEnv)
 	resp.Body.Close()
 	if errEnv.Error.Code != "INVALID_INCLUDE" {
-		t.Errorf("expected code INVALID_INCLUDE for has_many, got %s", errEnv.Error.Code)
+		t.Errorf("expected code INVALID_INCLUDE for dot-chaining, got %s", errEnv.Error.Code)
 	}
 }
 
@@ -468,3 +468,281 @@ func TestInclude_LargeFKBatch25Plus(t *testing.T) {
 		t.Errorf("truncation risk detected! expected 30 filled embedded tags, got %d", filledCount)
 	}
 }
+
+func TestInclude_HasMany_OperationsAndLimits(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_include_has_many.db")
+	store, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// 1. Post (Parent) Resource with has_many comments relation
+	postRes := &resource.Resource{
+		Name:  "Post",
+		Table: "posts",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "comments", Kind: resource.KindHasMany, Target: "Comment", ForeignKey: "post_id"},
+		},
+	}
+
+	// 2. Comment (Child) Resource with ownership_field and belongs_to post relation
+	commentRes := &resource.Resource{
+		Name:       "Comment",
+		Table:      "comments",
+		SoftDelete: true,
+		Auth: &resource.Auth{
+			OwnershipField: "user_id",
+			Permissions: resource.Permissions{
+				Read: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "post_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "body", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "user_id", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+			{Name: "secret_token", Type: resource.TypePassword, Nullable: true, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "post", Kind: resource.KindBelongsTo, Target: "Post", ForeignKey: "post_id"},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, postRes)
+	_ = store.EnsureSchema(ctx, commentRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(postRes, store)
+	reg.Register(commentRes, store)
+
+	sm, err := auth.NewSessionManager(store.DB())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	router := transport.NewRouter(reg)
+	router.SetSessionManager(sm)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+	client := ts.Client()
+
+	// Seed Parent Posts:
+	// Post 1: has 2 comments (1 public user_id=nil, 1 private user_id="user999")
+	p1, _ := store.Create(ctx, postRes, storage.Record{"title": "Post 1 with Comments"})
+	p1ID := p1["id"]
+
+	// Post 2: has 0 comments
+	p2, _ := store.Create(ctx, postRes, storage.Record{"title": "Post 2 with No Comments"})
+	p2ID := p2["id"]
+
+	// Post 3: for limit testing
+	p3, _ := store.Create(ctx, postRes, storage.Record{"title": "Post 3 with Many Comments"})
+	p3ID := p3["id"]
+
+	// Seed Comments for Post 1
+	c1Public, _ := store.Create(ctx, commentRes, storage.Record{"post_id": p1ID, "body": "Public Comment 1", "user_id": nil, "secret_token": "pass123"})
+	_, _ = store.Create(ctx, commentRes, storage.Record{"post_id": p1ID, "body": "Private Comment 2", "user_id": "user999", "secret_token": "pass456"})
+	c1Deleted, _ := store.Create(ctx, commentRes, storage.Record{"post_id": p1ID, "body": "Deleted Comment 3", "user_id": nil})
+	_ = store.SoftDelete(ctx, commentRes, c1Deleted["id"])
+
+	t.Run("1. GET /api/posts?include=comments (Unauthenticated) -> public comments included, private/deleted filtered, 0 comments returns []", func(t *testing.T) {
+		resp, err := client.Get(ts.URL + fmt.Sprintf("/api/posts?include=comments"))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		var listResp struct {
+			Data []map[string]any `json:"data"`
+		}
+		json.NewDecoder(resp.Body).Decode(&listResp)
+
+		postMap := make(map[int64]map[string]any)
+		for _, item := range listResp.Data {
+			postMap[int64(item["id"].(float64))] = item
+		}
+
+		// Check Post 1: should have exactly 1 public comment, password sanitized
+		post1 := postMap[p1ID.(int64)]
+		if post1["comments"] == nil {
+			t.Fatalf("expected Post 1 comments array, got null")
+		}
+		comments1 := post1["comments"].([]any)
+		if len(comments1) != 1 {
+			t.Fatalf("expected 1 visible comment for Post 1 (private & deleted filtered out), got %d", len(comments1))
+		}
+		com1 := comments1[0].(map[string]any)
+		if com1["body"] != "Public Comment 1" {
+			t.Errorf("expected body 'Public Comment 1', got %v", com1["body"])
+		}
+		if _, exists := com1["secret_token"]; exists {
+			t.Errorf("expected password field secret_token to be sanitized from embedded comment")
+		}
+
+		// Check Post 2: 0 comments -> MUST be [] (not null)
+		post2 := postMap[p2ID.(int64)]
+		if post2["comments"] == nil {
+			t.Fatalf("expected Post 2 comments to be [] empty array, got null")
+		}
+		comments2 := post2["comments"].([]any)
+		if len(comments2) != 0 {
+			t.Fatalf("expected Post 2 comments to have length 0, got %d", len(comments2))
+		}
+	})
+
+	t.Run("2. GET /api/posts/:id?include=comments for detail", func(t *testing.T) {
+		resp, err := client.Get(ts.URL + fmt.Sprintf("/api/posts/%v?include=comments", p1ID))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		var detailResp struct {
+			Data map[string]any `json:"data"`
+		}
+		json.NewDecoder(resp.Body).Decode(&detailResp)
+
+		if detailResp.Data["comments"] == nil {
+			t.Fatalf("expected detail comments array, got null")
+		}
+		comments := detailResp.Data["comments"].([]any)
+		if len(comments) != 1 {
+			t.Fatalf("expected 1 comment, got %d", len(comments))
+		}
+	})
+
+	t.Run("3. Exceeding 50 child records limit -> 400 Bad Request with INCLUDE_TOO_LARGE", func(t *testing.T) {
+		// Seed 51 public comments for Post 3
+		for i := 1; i <= 51; i++ {
+			_, err := store.Create(ctx, commentRes, storage.Record{
+				"post_id": p3ID,
+				"body":    fmt.Sprintf("Comment %d", i),
+				"user_id": nil,
+			})
+			if err != nil {
+				t.Fatalf("failed to seed comment %d: %v", i, err)
+			}
+		}
+
+		resp, err := client.Get(ts.URL + fmt.Sprintf("/api/posts/%v?include=comments", p3ID))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request when child records exceed 50, got %d", resp.StatusCode)
+		}
+
+		var errResp struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errResp)
+
+		if errResp.Error.Code != "INCLUDE_TOO_LARGE" {
+			t.Errorf("expected error code INCLUDE_TOO_LARGE, got %s", errResp.Error.Code)
+		}
+		if !strings.Contains(errResp.Error.Message, "exceed limit of 50") {
+			t.Errorf("expected error message to mention 'exceed limit of 50', got %s", errResp.Error.Message)
+		}
+	})
+	_ = c1Public
+}
+
+func BenchmarkProcessIncludes_HasMany_1000Records(b *testing.B) {
+	tmpDir := b.TempDir()
+	dbPath := filepath.Join(tmpDir, "bench_include_has_many.db")
+	store, err := sqlite.Open(dbPath + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		b.Fatalf("failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	parentRes := &resource.Resource{
+		Name:  "ParentDoc",
+		Table: "parent_docs",
+		Fields: []resource.Field{
+			{Name: "title", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+		},
+		Relations: []resource.Relation{
+			{Name: "children", Kind: resource.KindHasMany, Target: "ChildDoc", ForeignKey: "parent_id"},
+		},
+	}
+
+	childRes := &resource.Resource{
+		Name:  "ChildDoc",
+		Table: "child_docs",
+		Auth: &resource.Auth{
+			OwnershipField: "user_id",
+			Permissions: resource.Permissions{
+				Read: "owner",
+			},
+		},
+		Fields: []resource.Field{
+			{Name: "parent_id", Type: resource.TypeInt, Nullable: false, ClientWritable: true},
+			{Name: "content", Type: resource.TypeString, Nullable: false, ClientWritable: true},
+			{Name: "user_id", Type: resource.TypeString, Nullable: true, ClientWritable: true},
+		},
+	}
+
+	_ = store.EnsureSchema(ctx, parentRes)
+	_ = store.EnsureSchema(ctx, childRes)
+
+	reg := transport.NewRegistry()
+	reg.Register(parentRes, store)
+	reg.Register(childRes, store)
+
+	// Seed 20 parents × 50 children = 1,000 child records in DB
+	var parentRecords []storage.Record
+	for p := 1; p <= 20; p++ {
+		pRec, _ := store.Create(ctx, parentRes, storage.Record{"title": fmt.Sprintf("Parent %d", p)})
+		pID := pRec["id"]
+		parentRecords = append(parentRecords, pRec)
+
+		for c := 1; c <= 50; c++ {
+			_, _ = store.Create(ctx, childRes, storage.Record{
+				"parent_id": pID,
+				"content":   fmt.Sprintf("Child %d-%d", p, c),
+				"user_id":   nil,
+			})
+		}
+	}
+
+	sess := &auth.Session{ID: "sess_user", UserID: "user1", Role: "user"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Clone parent records
+		recs := make([]storage.Record, len(parentRecords))
+		for idx, pr := range parentRecords {
+			cloned := make(storage.Record)
+			for k, v := range pr {
+				cloned[k] = v
+			}
+			recs[idx] = cloned
+		}
+
+		err := transport.ProcessIncludes(ctx, reg, parentRes, recs, "children", sess)
+		if err != nil {
+			b.Fatalf("ProcessIncludes benchmark failed: %v", err)
+		}
+	}
+}
+

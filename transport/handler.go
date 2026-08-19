@@ -155,6 +155,10 @@ func (rt *Router) handleList(w http.ResponseWriter, req *http.Request, res *reso
 				WriteError(w, http.StatusBadRequest, "INVALID_INCLUDE", invErr.Error(), nil)
 				return
 			}
+			if largeErr, ok := err.(ErrIncludeTooLarge); ok {
+				WriteError(w, http.StatusBadRequest, "INCLUDE_TOO_LARGE", largeErr.Error(), nil)
+				return
+			}
 			WriteError(w, http.StatusBadRequest, "INVALID_INCLUDE", err.Error(), nil)
 			return
 		}
@@ -188,6 +192,10 @@ func (rt *Router) handleDetail(w http.ResponseWriter, req *http.Request, res *re
 		if err := ProcessIncludes(req.Context(), rt.CurrentRegistry(), res, recs, includeParam, sess); err != nil {
 			if invErr, ok := err.(ErrInvalidInclude); ok {
 				WriteError(w, http.StatusBadRequest, "INVALID_INCLUDE", invErr.Error(), nil)
+				return
+			}
+			if largeErr, ok := err.(ErrIncludeTooLarge); ok {
+				WriteError(w, http.StatusBadRequest, "INCLUDE_TOO_LARGE", largeErr.Error(), nil)
 				return
 			}
 			WriteError(w, http.StatusBadRequest, "INVALID_INCLUDE", err.Error(), nil)
